@@ -205,6 +205,9 @@ def ensure_database():
             order_status TEXT DEFAULT '',
             order_date TEXT DEFAULT '',
             invoice_date TEXT DEFAULT '',
+            receipt_classification TEXT DEFAULT '',
+            all_abc_pharmacies TEXT DEFAULT '',
+            other_branch_details TEXT DEFAULT '',
             total_amount REAL DEFAULT 0,
             first_seen_at TEXT,
             last_seen_at TEXT,
@@ -212,6 +215,17 @@ def ensure_database():
         )
         """
     )
+
+    existing_columns = {
+        row[1] for row in cur.execute("PRAGMA table_info(reconciliation_items)").fetchall()
+    }
+    for column_name, column_sql in [
+        ("receipt_classification", "TEXT DEFAULT ''"),
+        ("all_abc_pharmacies", "TEXT DEFAULT ''"),
+        ("other_branch_details", "TEXT DEFAULT ''"),
+    ]:
+        if column_name not in existing_columns:
+            cur.execute(f"ALTER TABLE reconciliation_items ADD COLUMN {column_name} {column_sql}")
 
     cur.execute(
         """
@@ -445,7 +459,12 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     df["invoice_number"] = df["رقم الفاتورة"].apply(normalize_text)
     df["invoice_date"] = df["التاريخ"].apply(normalize_text)
     df["abc_pharmacy_name"] = df["رقم الصيدلية"].apply(normalize_text)
+    df["all_abc_pharmacies"] = df["abc_pharmacy_name"]
     df["abc_branch_number"] = df["abc_pharmacy_name"].apply(get_branch_number)
+    if "Receipt Classification" in df.columns:
+        df["receipt_classification"] = df["Receipt Classification"].apply(normalize_text)
+    else:
+        df["receipt_classification"] = ""
 
     df = df[(df["sku"] != "") & (df["order_number"] != "")].copy()
 
@@ -459,8 +478,22 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
                 "abc_product_name": "first",
                 "abc_pharmacy_name": "first",
                 "abc_branch_number": "first",
+                "receipt_classification": lambda values: " | ".join(
+                    sorted({normalize_text(value) for value in values if normalize_text(value)})
+                ),
+                "all_abc_pharmacies": lambda values: " | ".join(
+                    sorted({normalize_text(value) for value in values if normalize_text(value)})
+                ),
             }
         )
+    )
+    grouped["other_branch_details"] = grouped.apply(
+        lambda row: (
+            f"تم بيع نفس الطلب/الصنف في فروع أخرى: {row['all_abc_pharmacies']}"
+            if " | " in row["all_abc_pharmacies"]
+            else ""
+        ),
+        axis=1,
     )
     return grouped
 
@@ -499,6 +532,9 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         "abc_pharmacy_name",
         "salla_branch_number",
         "abc_branch_number",
+        "receipt_classification",
+        "all_abc_pharmacies",
+        "other_branch_details",
     ]
     for column in text_columns:
         if column not in merged.columns:
@@ -516,6 +552,21 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     merged["branch_number"] = merged["salla_branch_number"]
     missing_branch = merged["branch_number"].fillna("").eq("")
     merged.loc[missing_branch, "branch_number"] = merged.loc[missing_branch, "abc_branch_number"]
+
+    def build_branch_note(row: pd.Series) -> str:
+        branches = [branch.strip() for branch in normalize_text(row["all_abc_pharmacies"]).split("|") if branch.strip()]
+        if len(branches) <= 1:
+            return ""
+        current_branch = normalize_text(row["pharmacy_name"])
+        other_branches = [branch for branch in branches if branch != current_branch]
+        if other_branches:
+            return (
+                f"نفس الطلب والصنف ظهر أيضًا في: {' ، '.join(other_branches)}. "
+                f"راجِع حالة الطلب '{row['order_status'] or 'غير متوفرة'}' للتأكد من أن الاستلام تم من الفرع الصحيح وأن الإرجاع ينفذ من الفرع الآخر عند الحاجة."
+            )
+        return f"نفس الطلب والصنف مسجل على أكثر من فرع في ABC: {' ، '.join(branches)}."
+
+    merged["other_branch_details"] = merged.apply(build_branch_note, axis=1)
 
     merged["difference"] = merged["salla_qty"] - merged["abc_qty"]
     merged["case_type"] = ""
@@ -564,6 +615,14 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     result["status"] = STATUS_PENDING
     result["performed_by"] = ""
     result["performed_at"] = ""
+    result["case_reason"] = result.apply(
+        lambda row: (
+            f"{row['case_reason']} | {row['other_branch_details']}"
+            if normalize_text(row["other_branch_details"])
+            else row["case_reason"]
+        ),
+        axis=1,
+    )
 
     ordered_columns = [
         "item_key",
@@ -589,6 +648,9 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         "order_status",
         "order_date",
         "invoice_date",
+        "receipt_classification",
+        "all_abc_pharmacies",
+        "other_branch_details",
         "total_amount",
     ]
     return result[ordered_columns]
@@ -648,9 +710,10 @@ def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: st
                 abc_pharmacy_name, branch_number, salla_qty, abc_qty, difference,
                 case_type, case_label, case_reason, status, performed_by, performed_at,
                 customer_name, customer_phone, city, order_status, order_date,
-                invoice_date, total_amount, first_seen_at, last_seen_at, active
+                invoice_date, receipt_classification, all_abc_pharmacies, other_branch_details,
+                total_amount, first_seen_at, last_seen_at, active
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             ON CONFLICT(item_key) DO UPDATE SET
                 upload_batch_id = excluded.upload_batch_id,
                 order_number = excluded.order_number,
@@ -675,6 +738,9 @@ def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: st
                 order_status = excluded.order_status,
                 order_date = excluded.order_date,
                 invoice_date = excluded.invoice_date,
+                receipt_classification = excluded.receipt_classification,
+                all_abc_pharmacies = excluded.all_abc_pharmacies,
+                other_branch_details = excluded.other_branch_details,
                 total_amount = excluded.total_amount,
                 first_seen_at = reconciliation_items.first_seen_at,
                 last_seen_at = excluded.last_seen_at,
@@ -708,6 +774,9 @@ def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: st
                 row["order_status"],
                 row["order_date"],
                 row["invoice_date"],
+                row["receipt_classification"],
+                row["all_abc_pharmacies"],
+                row["other_branch_details"],
                 numeric_value(row["total_amount"]),
                 previous.get("first_seen_at", timestamp),
                 timestamp,
@@ -741,7 +810,9 @@ def fetch_active_items(pharmacy_name: str | None = None) -> pd.DataFrame:
         SELECT order_number, invoice_number, sku, product_name, pharmacy_name, branch_number,
                salla_qty, abc_qty, difference, case_type, case_label, case_reason, status,
                performed_by, performed_at, customer_name, customer_phone, city, order_status,
-               order_date, invoice_date, total_amount, salla_pharmacy_name, abc_pharmacy_name
+               order_date, invoice_date, receipt_classification, all_abc_pharmacies,
+               other_branch_details, total_amount, salla_pharmacy_name, abc_pharmacy_name,
+               first_seen_at, last_seen_at
         FROM reconciliation_items
         WHERE active = 1
     """
@@ -837,7 +908,13 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
                     <div><strong>كمية سلة</strong><br>{int(row['salla_qty']) if pd.notna(row['salla_qty']) else 0}</div>
                     <div><strong>كمية ABC</strong><br>{int(row['abc_qty']) if pd.notna(row['abc_qty']) else 0}</div>
                     <div><strong>الفرق</strong><br>{row['difference']}</div>
-                    <div><strong>الحالة</strong><br>{row['case_reason']}</div>
+                    <div><strong>حالة الطلب</strong><br>{row['order_status'] or 'غير متوفرة'}</div>
+                    <div><strong>تاريخ الطلب</strong><br>{row['order_date'] or 'غير متوفر'}</div>
+                    <div><strong>تاريخ الفاتورة</strong><br>{row['invoice_date'] or 'غير متوفر'}</div>
+                    <div><strong>تاريخ التنفيذ</strong><br>{row['performed_at'] or 'لم يُنفذ بعد'}</div>
+                    <div><strong>تصنيف البيع</strong><br>{row['receipt_classification'] or 'غير متوفر'}</div>
+                    <div><strong>فروع ABC</strong><br>{row['all_abc_pharmacies'] or row['abc_pharmacy_name'] or 'غير متوفر'}</div>
+                    <div><strong>التفصيل</strong><br>{row['case_reason']}</div>
                 </div>
             </div>
             """,
@@ -855,6 +932,39 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
                     performed_by=pharmacist_name,
                 )
                 st.rerun()
+
+
+def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
+    display_df = df.copy()
+    display_df = display_df.rename(
+        columns={
+            "order_number": "رقم الطلب",
+            "invoice_number": "رقم الفاتورة",
+            "sku": "SKU",
+            "product_name": "الصنف",
+            "pharmacy_name": "الفرع",
+            "salla_qty": "كمية سلة",
+            "abc_qty": "كمية ABC",
+            "difference": "الفرق",
+            "case_label": "نوع الحالة",
+            "status": "الحالة",
+            "performed_by": "تم بواسطة",
+            "performed_at": "تاريخ التنفيذ",
+            "customer_name": "العميل",
+            "customer_phone": "جوال العميل",
+            "city": "المدينة",
+            "order_status": "حالة الطلب",
+            "order_date": "تاريخ الطلب",
+            "invoice_date": "تاريخ الفاتورة",
+            "receipt_classification": "تصنيف البيع",
+            "all_abc_pharmacies": "الفروع الظاهرة في ABC",
+            "other_branch_details": "ملاحظة الفروع",
+            "case_reason": "تفصيل الحالة",
+            "first_seen_at": "أول ظهور",
+            "last_seen_at": "آخر تحديث",
+        }
+    )
+    return display_df
 
 
 def render_admin_dashboard():
@@ -882,6 +992,13 @@ def render_admin_dashboard():
             unsafe_allow_html=True,
         )
 
+    refresh_col, info_col = st.columns([1, 4])
+    with refresh_col:
+        if st.button("تحديث الصفحة", use_container_width=True):
+            st.rerun()
+    with info_col:
+        st.caption("يعرض آخر الإجراءات المنفذة وآخر دخول للصيادلة والحالات المحدثة بعد الرفع.")
+
     with st.expander("رفع ملف الطلبات والفواتير", expanded=True):
         uploaded_file = st.file_uploader("اختر ملف Excel", type=["xlsx"])
         if uploaded_file and st.button("معالجة الملف و ترحيل الحالات", use_container_width=True):
@@ -896,6 +1013,7 @@ def render_admin_dashboard():
         return
 
     render_metrics(df)
+    admin_df = prepare_display_df(df)
 
     st.markdown('<div class="section-title">آخر دخول للصيدليات</div>', unsafe_allow_html=True)
     last_logins = get_all_last_logins()
@@ -920,32 +1038,46 @@ def render_admin_dashboard():
 
     with tab1:
         st.dataframe(
-            df[df["case_type"] == "addition"][
-                ["order_number", "sku", "product_name", "pharmacy_name", "salla_qty", "abc_qty", "difference", "status", "performed_by"]
+            admin_df[df["case_type"] == "addition"][
+                [
+                    "رقم الطلب", "SKU", "الصنف", "الفرع", "كمية سلة", "كمية ABC", "الفرق",
+                    "حالة الطلب", "تاريخ الطلب", "تاريخ الفاتورة", "تصنيف البيع",
+                    "الفروع الظاهرة في ABC", "تفصيل الحالة", "الحالة", "تم بواسطة", "تاريخ التنفيذ", "آخر تحديث"
+                ]
             ],
             use_container_width=True,
         )
 
     with tab2:
         st.dataframe(
-            df[df["case_type"] == "return"][
-                ["order_number", "invoice_number", "sku", "product_name", "pharmacy_name", "salla_qty", "abc_qty", "difference", "status", "performed_by"]
+            admin_df[df["case_type"] == "return"][
+                [
+                    "رقم الطلب", "رقم الفاتورة", "SKU", "الصنف", "الفرع", "كمية سلة", "كمية ABC", "الفرق",
+                    "حالة الطلب", "تاريخ الطلب", "تاريخ الفاتورة", "تصنيف البيع",
+                    "الفروع الظاهرة في ABC", "تفصيل الحالة", "الحالة", "تم بواسطة", "تاريخ التنفيذ", "آخر تحديث"
+                ]
             ],
             use_container_width=True,
         )
 
     with tab3:
         st.dataframe(
-            df[df["case_type"] == "orphan_salla"][
-                ["order_number", "sku", "product_name", "pharmacy_name", "salla_qty", "order_status", "customer_name", "city"]
+            admin_df[df["case_type"] == "orphan_salla"][
+                [
+                    "رقم الطلب", "SKU", "الصنف", "الفرع", "كمية سلة", "حالة الطلب",
+                    "تاريخ الطلب", "تاريخ الفاتورة", "العميل", "المدينة", "تفصيل الحالة", "آخر تحديث"
+                ]
             ],
             use_container_width=True,
         )
 
     with tab4:
         st.dataframe(
-            df[df["case_type"] == "orphan_abc"][
-                ["order_number", "invoice_number", "sku", "product_name", "pharmacy_name", "abc_qty", "invoice_date"]
+            admin_df[df["case_type"] == "orphan_abc"][
+                [
+                    "رقم الطلب", "رقم الفاتورة", "SKU", "الصنف", "الفرع", "كمية ABC",
+                    "تاريخ الفاتورة", "تصنيف البيع", "الفروع الظاهرة في ABC", "تفصيل الحالة", "آخر تحديث"
+                ]
             ],
             use_container_width=True,
         )
@@ -953,17 +1085,11 @@ def render_admin_dashboard():
     with tab5:
         review_df = df[df["case_type"].isin(["branch_mismatch", "special_review"])]
         st.dataframe(
-            review_df[
+            prepare_display_df(review_df)[
                 [
-                    "order_number",
-                    "invoice_number",
-                    "sku",
-                    "product_name",
-                    "pharmacy_name",
-                    "salla_pharmacy_name",
-                    "abc_pharmacy_name",
-                    "case_label",
-                    "case_reason",
+                    "رقم الطلب", "رقم الفاتورة", "SKU", "الصنف", "الفرع",
+                    "حالة الطلب", "تاريخ الطلب", "تاريخ الفاتورة",
+                    "الفروع الظاهرة في ABC", "ملاحظة الفروع", "تفصيل الحالة", "آخر تحديث"
                 ]
             ],
             use_container_width=True,
@@ -994,16 +1120,28 @@ def render_pharmacy_dashboard():
 
     additions_df = df[df["case_type"] == "addition"].copy()
     returns_df = df[df["case_type"] == "return"].copy()
-    review_df = df[df["case_type"].isin(["orphan_salla", "orphan_abc", "branch_mismatch", "special_review"])].copy()
+    orphan_salla_df = df[df["case_type"] == "orphan_salla"].copy()
+    orphan_abc_df = df[df["case_type"] == "orphan_abc"].copy()
+    review_df = df[df["case_type"].isin(["branch_mismatch", "special_review"])].copy()
 
-    st.markdown('<div class="section-title">الإضافات المطلوبة</div>', unsafe_allow_html=True)
-    render_case_cards(additions_df, True, pharmacist_name, pharmacy_name)
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", "المراجعة"]
+    )
 
-    st.markdown('<div class="section-title">الإرجاعات المطلوبة</div>', unsafe_allow_html=True)
-    render_case_cards(returns_df, True, pharmacist_name, pharmacy_name)
+    with tab1:
+        render_case_cards(additions_df, True, pharmacist_name, pharmacy_name)
 
-    st.markdown('<div class="section-title">حالات تحتاج مراجعة</div>', unsafe_allow_html=True)
-    render_case_cards(review_df, False, pharmacist_name, pharmacy_name)
+    with tab2:
+        render_case_cards(returns_df, True, pharmacist_name, pharmacy_name)
+
+    with tab3:
+        render_case_cards(orphan_salla_df, False, pharmacist_name, pharmacy_name)
+
+    with tab4:
+        render_case_cards(orphan_abc_df, False, pharmacist_name, pharmacy_name)
+
+    with tab5:
+        render_case_cards(review_df, False, pharmacist_name, pharmacy_name)
 
 
 ensure_database()
