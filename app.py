@@ -25,6 +25,7 @@ CASE_LABELS = {
     "return": "إرجاع",
     "orphan_salla": "طلب بدون فاتورة",
     "orphan_abc": "فاتورة بدون طلب",
+    "post_cutoff_abc": "فاتورة بعد آخر طلب",
     "branch_mismatch": "اختلاف فرع",
     "special_review": "مراجعة رقم طلب خاص",
 }
@@ -216,6 +217,7 @@ def ensure_database():
             receipt_classification TEXT DEFAULT '',
             all_abc_pharmacies TEXT DEFAULT '',
             other_branch_details TEXT DEFAULT '',
+            pharmacist_note TEXT DEFAULT '',
             total_amount REAL DEFAULT 0,
             first_seen_at TEXT,
             last_seen_at TEXT,
@@ -232,6 +234,7 @@ def ensure_database():
         ("receipt_classification", "TEXT DEFAULT ''"),
         ("all_abc_pharmacies", "TEXT DEFAULT ''"),
         ("other_branch_details", "TEXT DEFAULT ''"),
+        ("pharmacist_note", "TEXT DEFAULT ''"),
     ]:
         if column_name not in existing_columns:
             cur.execute(f"ALTER TABLE reconciliation_items ADD COLUMN {column_name} {column_sql}")
@@ -528,6 +531,7 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
 def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame:
     salla_grouped = prepare_salla_frame(df_salla)
     abc_grouped = prepare_abc_frame(df_abc)
+    max_salla_order_dt = pd.to_datetime(salla_grouped["order_date"], errors="coerce").max() if not salla_grouped.empty else pd.NaT
 
     merged = pd.merge(
         salla_grouped,
@@ -599,6 +603,7 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     merged["difference"] = merged["salla_qty"] - merged["abc_qty"]
     merged["case_type"] = ""
     merged["case_reason"] = ""
+    merged["invoice_datetime"] = pd.to_datetime(merged["invoice_date"], errors="coerce")
 
     special_mask = merged["order_number"].isin(SPECIAL_ORDER_NUMBERS)
     merged.loc[special_mask, "case_type"] = "special_review"
@@ -636,6 +641,17 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     )
     merged.loc[orphan_abc_mask, "case_type"] = "orphan_abc"
     merged.loc[orphan_abc_mask, "case_reason"] = "سطر فاتورة موجود في ABC ولم يُعثر على سطر مطابق له في سلة."
+
+    if pd.notna(max_salla_order_dt):
+        post_cutoff_mask = (
+            (merged["case_type"] == "orphan_abc")
+            & merged["invoice_datetime"].notna()
+            & (merged["invoice_datetime"] > max_salla_order_dt)
+        )
+        merged.loc[post_cutoff_mask, "case_type"] = "post_cutoff_abc"
+        merged.loc[post_cutoff_mask, "case_reason"] = (
+            f"تاريخ الفاتورة أحدث من آخر تاريخ طلب موجود في سلة داخل الملف ({max_salla_order_dt.strftime('%Y-%m-%d %H:%M')})."
+        )
 
     result = merged[merged["case_type"] != ""].copy()
     result["case_label"] = result["case_type"].map(CASE_LABELS)
@@ -695,7 +711,7 @@ def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: st
 
     cur.execute(
         """
-        INSERT INTO uploads (
+            INSERT INTO uploads (
             upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
             total_additions, total_returns, total_orphan_salla, total_orphan_abc,
             total_branch_mismatch, total_special_review
@@ -711,7 +727,7 @@ def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: st
             int((results["case_type"] == "addition").sum()),
             int((results["case_type"] == "return").sum()),
             int((results["case_type"] == "orphan_salla").sum()),
-            int((results["case_type"] == "orphan_abc").sum()),
+            int((results["case_type"].isin(["orphan_abc", "post_cutoff_abc"])).sum()),
             int((results["case_type"] == "branch_mismatch").sum()),
             int((results["case_type"] == "special_review").sum()),
         ),
@@ -719,14 +735,15 @@ def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: st
 
     existing_map = {}
     existing_rows = cur.execute(
-        "SELECT item_key, status, performed_by, performed_at, first_seen_at FROM reconciliation_items"
+        "SELECT item_key, status, performed_by, performed_at, first_seen_at, pharmacist_note FROM reconciliation_items"
     ).fetchall()
-    for item_key, status, performed_by, performed_at, first_seen_at in existing_rows:
+    for item_key, status, performed_by, performed_at, first_seen_at, pharmacist_note in existing_rows:
         existing_map[item_key] = {
             "status": status,
             "performed_by": performed_by,
             "performed_at": performed_at,
             "first_seen_at": first_seen_at or timestamp,
+            "pharmacist_note": pharmacist_note or "",
         }
 
     for _, row in results.iterrows():
@@ -740,9 +757,9 @@ def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: st
                 case_type, case_label, case_reason, status, performed_by, performed_at,
                 customer_name, customer_phone, city, order_status, order_date,
                 invoice_date, profile_type, receipt_classification, all_abc_pharmacies, other_branch_details,
-                total_amount, first_seen_at, last_seen_at, active
+                pharmacist_note, total_amount, first_seen_at, last_seen_at, active
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             ON CONFLICT(item_key) DO UPDATE SET
                 upload_batch_id = excluded.upload_batch_id,
                 order_number = excluded.order_number,
@@ -771,6 +788,7 @@ def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: st
                 receipt_classification = excluded.receipt_classification,
                 all_abc_pharmacies = excluded.all_abc_pharmacies,
                 other_branch_details = excluded.other_branch_details,
+                pharmacist_note = reconciliation_items.pharmacist_note,
                 total_amount = excluded.total_amount,
                 first_seen_at = reconciliation_items.first_seen_at,
                 last_seen_at = excluded.last_seen_at,
@@ -808,6 +826,7 @@ def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: st
                 row["receipt_classification"],
                 row["all_abc_pharmacies"],
                 row["other_branch_details"],
+                previous.get("pharmacist_note", ""),
                 numeric_value(row["total_amount"]),
                 previous.get("first_seen_at", timestamp),
                 timestamp,
@@ -842,7 +861,7 @@ def fetch_active_items(pharmacy_name: str | None = None) -> pd.DataFrame:
                salla_qty, abc_qty, difference, case_type, case_label, case_reason, status,
                performed_by, performed_at, customer_name, customer_phone, city, order_status,
                order_date, invoice_date, profile_type, receipt_classification, all_abc_pharmacies,
-               other_branch_details, total_amount, salla_pharmacy_name, abc_pharmacy_name,
+               other_branch_details, pharmacist_note, total_amount, salla_pharmacy_name, abc_pharmacy_name,
                first_seen_at, last_seen_at
         FROM reconciliation_items
         WHERE active = 1
@@ -868,6 +887,21 @@ def mark_case_done(order_number: str, sku: str, pharmacy_name: str, case_type: s
         WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
         """,
         (STATUS_DONE, performed_by, now_str(), order_number, sku, pharmacy_name, case_type),
+    )
+    conn.commit()
+    conn.close()
+
+
+def save_case_note(order_number: str, sku: str, pharmacy_name: str, case_type: str, note: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE reconciliation_items
+        SET pharmacist_note = ?
+        WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
+        """,
+        (note, order_number, sku, pharmacy_name, case_type),
     )
     conn.commit()
     conn.close()
@@ -926,52 +960,87 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
         return
 
     for idx, row in df.iterrows():
-        alert_class = " action-card-alert" if is_cancelled_or_returned_status(row["order_status"]) else ""
-        alert_pill = status_alert_pill(row["order_status"])
+        card_classes = "action-card"
+        if is_cancelled_or_returned_status(row["order_status"]):
+            card_classes += " action-card-alert"
+
+        st.markdown(f'<div class="{card_classes}">', unsafe_allow_html=True)
+        badges = f"{case_pill(row['case_type'])}&nbsp; {status_pill(row['status'])}"
+        if status_alert_pill(row["order_status"]):
+            badges += f"&nbsp; {status_alert_pill(row['order_status'])}"
         st.markdown(
             f"""
-            <div class="action-card{alert_class}">
-                <div style="display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap;">
-                    <div>
-                        {case_pill(row['case_type'])}
-                        &nbsp; {status_pill(row['status'])}
-                        {'&nbsp; ' + alert_pill if alert_pill else ''}
-                    </div>
-                    <div style="font-weight:700;color:#48606a;">الفرع: {row['pharmacy_name'] or 'غير محدد'}</div>
-                </div>
-                <div style="margin-top:0.8rem;display:grid;grid-template-columns:repeat(4, minmax(120px, 1fr));gap:0.9rem;">
-                    <div><strong>رقم الطلب</strong><br>{row['order_number']}</div>
-                    <div><strong>رقم الفاتورة</strong><br>{row['invoice_number'] or 'غير متوفر'}</div>
-                    <div><strong>SKU</strong><br>{row['sku']}</div>
-                    <div><strong>المنتج</strong><br>{row['product_name'][:70]}</div>
-                    <div><strong>كمية سلة</strong><br>{int(row['salla_qty']) if pd.notna(row['salla_qty']) else 0}</div>
-                    <div><strong>كمية ABC</strong><br>{int(row['abc_qty']) if pd.notna(row['abc_qty']) else 0}</div>
-                    <div><strong>الفرق</strong><br>{row['difference']}</div>
-                    <div><strong>حالة الطلب</strong><br>{row['order_status'] or 'غير متوفرة'}</div>
-                    <div><strong>تاريخ الطلب</strong><br>{row['order_date'] or 'غير متوفر'}</div>
-                    <div><strong>تاريخ الفاتورة</strong><br>{row['invoice_date'] or 'غير متوفر'}</div>
-                    <div><strong>تاريخ التنفيذ</strong><br>{row['performed_at'] or 'لم يُنفذ بعد'}</div>
-                    <div><strong>نوع البروفايل</strong><br>{row['profile_type'] or 'غير متوفر'}</div>
-                    <div><strong>تصنيف البيع</strong><br>{row['receipt_classification'] or 'غير متوفر'}</div>
-                    <div><strong>فروع ABC</strong><br>{row['all_abc_pharmacies'] or row['abc_pharmacy_name'] or 'غير متوفر'}</div>
-                    <div><strong>التفصيل</strong><br>{row['case_reason']}</div>
-                </div>
+            <div style="display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap;">
+                <div>{badges}</div>
+                <div style="font-weight:700;color:#48606a;">الفرع: {row['pharmacy_name'] or 'غير محدد'}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        if allow_actions and row["status"] != STATUS_DONE and row["case_type"] in {"addition", "return", "orphan_salla", "orphan_abc"}:
-            button_label = "تأكيد الإضافة" if row["case_type"] in {"addition", "orphan_salla"} else "تأكيد الإرجاع"
-            if st.button(button_label, key=f"{row['case_type']}_{row['order_number']}_{row['sku']}_{idx}"):
-                mark_case_done(
+        info_cols = st.columns(4)
+        info_items = [
+            ("رقم الطلب", row["order_number"]),
+            ("رقم الفاتورة", row["invoice_number"] or "غير متوفر"),
+            ("SKU", row["sku"]),
+            ("المنتج", row["product_name"][:70]),
+            ("كمية سلة", int(row["salla_qty"]) if pd.notna(row["salla_qty"]) else 0),
+            ("كمية ABC", int(row["abc_qty"]) if pd.notna(row["abc_qty"]) else 0),
+            ("الفرق", row["difference"]),
+            ("حالة الطلب", row["order_status"] or "غير متوفرة"),
+            ("تاريخ الطلب", row["order_date"] or "غير متوفر"),
+            ("تاريخ الفاتورة", row["invoice_date"] or "غير متوفر"),
+            ("تاريخ التنفيذ", row["performed_at"] or "لم يُنفذ بعد"),
+            ("نوع البروفايل", row["profile_type"] or "غير متوفر"),
+            ("تصنيف البيع", row["receipt_classification"] or "غير متوفر"),
+            ("فروع ABC", row["all_abc_pharmacies"] or row["abc_pharmacy_name"] or "غير متوفر"),
+            ("التفصيل", row["case_reason"]),
+        ]
+        for item_index, (label, value) in enumerate(info_items):
+            with info_cols[item_index % 4]:
+                st.markdown(f"**{label}**  \n{value}")
+
+        note_key = f"note_{row['case_type']}_{row['order_number']}_{row['sku']}_{idx}"
+        note_value = st.text_area(
+            "ملحوظة الصيدلي",
+            value=row.get("pharmacist_note", "") or "",
+            key=note_key,
+            height=80,
+        )
+
+        action_cols = st.columns([1, 1, 6])
+        with action_cols[0]:
+            if st.button("حفظ الملحوظة", key=f"save_{note_key}", use_container_width=True):
+                save_case_note(
                     order_number=row["order_number"],
                     sku=row["sku"],
                     pharmacy_name=pharmacy_name,
                     case_type=row["case_type"],
-                    performed_by=pharmacist_name,
+                    note=note_value,
                 )
                 st.rerun()
+
+        if allow_actions and row["status"] != STATUS_DONE and row["case_type"] in {"addition", "return", "orphan_salla", "orphan_abc"}:
+            button_label = "تأكيد الإضافة" if row["case_type"] in {"addition", "orphan_salla"} else "تأكيد الإرجاع"
+            with action_cols[1]:
+                if st.button(button_label, key=f"done_{note_key}", use_container_width=True):
+                    save_case_note(
+                        order_number=row["order_number"],
+                        sku=row["sku"],
+                        pharmacy_name=pharmacy_name,
+                        case_type=row["case_type"],
+                        note=note_value,
+                    )
+                    mark_case_done(
+                        order_number=row["order_number"],
+                        sku=row["sku"],
+                        pharmacy_name=pharmacy_name,
+                        case_type=row["case_type"],
+                        performed_by=pharmacist_name,
+                    )
+                    st.rerun()
+
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
 def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -1000,6 +1069,7 @@ def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
             "receipt_classification": "تصنيف البيع",
             "all_abc_pharmacies": "الفروع الظاهرة في ABC",
             "other_branch_details": "ملاحظة الفروع",
+            "pharmacist_note": "ملحوظة الصيدلي",
             "case_reason": "تفصيل الحالة",
             "first_seen_at": "أول ظهور",
             "last_seen_at": "آخر تحديث",
@@ -1008,11 +1078,25 @@ def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
     return display_df
 
 
+def export_tabs_to_excel(dataframes_by_sheet: dict[str, pd.DataFrame]) -> bytes:
+    from io import BytesIO
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        for sheet_name, sheet_df in dataframes_by_sheet.items():
+            export_df = sheet_df.copy()
+            if isinstance(export_df, pd.io.formats.style.Styler):
+                export_df = export_df.data
+            export_df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+    output.seek(0)
+    return output.getvalue()
+
+
 def render_admin_dashboard():
     st.markdown(
         """
         <div class="hero">
-            <h1>لوحة التحكم الإدارية</h1>
+            <h1>لوحة المدير العام</h1>
             <p>مطابقة أكثر دقة بين سلة و ABC مع فصل الحالات الفعلية عن السطور غير المربوطة وحفظ الإنجاز بين كل رفعة وأخرى.</p>
         </div>
         """,
@@ -1035,7 +1119,7 @@ def render_admin_dashboard():
 
     refresh_col, info_col = st.columns([1, 4])
     with refresh_col:
-        if st.button("تحديث", use_container_width=True):
+        if st.button("تحديث الصفحة", use_container_width=True):
             st.rerun()
     with info_col:
         st.caption("يعرض آخر الإجراءات المنفذة وآخر دخول للصيادلة والحالات المحدثة بعد الرفع.")
@@ -1104,8 +1188,75 @@ def render_admin_dashboard():
                     unsafe_allow_html=True,
                 )
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", "الملغي/المسترجع"]
+    additions_admin = admin_df[
+        (filtered_df["case_type"] == "addition") & (~filtered_df["order_status"].apply(is_cancelled_or_returned_status))
+    ][
+        [
+            "رقم الطلب", "SKU", "الصنف", "الفرع", "كمية سلة", "كمية ABC", "الفرق",
+            "حالة الطلب", "تاريخ الطلب", "تاريخ الفاتورة", "نوع البروفايل", "تصنيف البيع",
+            "الفروع الظاهرة في ABC", "تفصيل الحالة", "ملحوظة الصيدلي", "الحالة", "تم بواسطة", "تاريخ التنفيذ", "آخر تحديث"
+        ]
+    ]
+    returns_admin = admin_df[
+        (filtered_df["case_type"] == "return") & (~filtered_df["order_status"].apply(is_cancelled_or_returned_status))
+    ][
+        [
+            "رقم الطلب", "رقم الفاتورة", "SKU", "الصنف", "الفرع", "كمية سلة", "كمية ABC", "الفرق",
+            "حالة الطلب", "تاريخ الطلب", "تاريخ الفاتورة", "نوع البروفايل", "تصنيف البيع",
+            "الفروع الظاهرة في ABC", "تفصيل الحالة", "ملحوظة الصيدلي", "الحالة", "تم بواسطة", "تاريخ التنفيذ", "آخر تحديث"
+        ]
+    ]
+    orphan_salla_admin = admin_df[
+        (filtered_df["case_type"] == "orphan_salla") & (~filtered_df["order_status"].apply(is_cancelled_or_returned_status))
+    ][
+        [
+            "رقم الطلب", "SKU", "الصنف", "الفرع", "كمية سلة", "حالة الطلب",
+            "تاريخ الطلب", "تاريخ الفاتورة", "العميل", "المدينة", "نوع البروفايل",
+            "تفصيل الحالة", "ملحوظة الصيدلي", "الحالة", "تم بواسطة", "تاريخ التنفيذ", "آخر تحديث"
+        ]
+    ]
+    orphan_abc_admin = admin_df[
+        (filtered_df["case_type"] == "orphan_abc") & (~filtered_df["order_status"].apply(is_cancelled_or_returned_status))
+    ][
+        [
+            "رقم الطلب", "رقم الفاتورة", "SKU", "الصنف", "الفرع", "كمية ABC",
+            "تاريخ الفاتورة", "نوع البروفايل", "تصنيف البيع", "الفروع الظاهرة في ABC",
+            "تفصيل الحالة", "ملحوظة الصيدلي", "الحالة", "تم بواسطة", "تاريخ التنفيذ", "آخر تحديث"
+        ]
+    ]
+    post_cutoff_admin = admin_df[filtered_df["case_type"] == "post_cutoff_abc"][
+        [
+            "رقم الطلب", "رقم الفاتورة", "SKU", "الصنف", "الفرع", "كمية ABC",
+            "تاريخ الفاتورة", "نوع البروفايل", "تصنيف البيع", "الفروع الظاهرة في ABC",
+            "تفصيل الحالة", "ملحوظة الصيدلي", "الحالة", "تم بواسطة", "تاريخ التنفيذ", "آخر تحديث"
+        ]
+    ]
+    cancelled_admin = prepare_display_df(filtered_df[filtered_df["order_status"].apply(is_cancelled_or_returned_status)])[[
+        "رقم الطلب", "رقم الفاتورة", "SKU", "الصنف", "الفرع", "نوع الحالة",
+        "حالة الطلب", "تاريخ الطلب", "تاريخ الفاتورة", "نوع البروفايل", "تصنيف البيع",
+        "الفروع الظاهرة في ABC", "ملاحظة الفروع", "تفصيل الحالة", "ملحوظة الصيدلي", "الحالة", "تم بواسطة", "تاريخ التنفيذ", "آخر تحديث"
+    ]]
+
+    export_bytes = export_tabs_to_excel(
+        {
+            "الإضافات": additions_admin,
+            "الإرجاعات": returns_admin,
+            "طلبات بدون فاتورة": orphan_salla_admin,
+            "فواتير بدون طلب": orphan_abc_admin,
+            "فواتير بعد آخر طلب": post_cutoff_admin,
+            "الملغي_والمسترجع": cancelled_admin,
+        }
+    )
+    st.download_button(
+        "تصدير كل التبويبات إلى Excel",
+        data=export_bytes,
+        file_name=f"balsam_reconciliation_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
+
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", "فواتير بعد آخر طلب", "الملغي/المسترجع"]
     )
 
     def styled_frame(input_df):
@@ -1125,63 +1276,22 @@ def render_admin_dashboard():
         return input_df.style.apply(row_style, axis=1)
 
     with tab1:
-        additions_admin = admin_df[
-            (filtered_df["case_type"] == "addition") & (~filtered_df["order_status"].apply(is_cancelled_or_returned_status))
-        ][
-                [
-                    "رقم الطلب", "SKU", "الصنف", "الفرع", "كمية سلة", "كمية ABC", "الفرق",
-                    "حالة الطلب", "تاريخ الطلب", "تاريخ الفاتورة", "نوع البروفايل", "تصنيف البيع",
-                    "الفروع الظاهرة في ABC", "تفصيل الحالة", "الحالة", "تم بواسطة", "تاريخ التنفيذ", "آخر تحديث"
-                ]
-            ]
         st.dataframe(styled_frame(additions_admin), use_container_width=True)
 
     with tab2:
-        returns_admin = admin_df[
-            (filtered_df["case_type"] == "return") & (~filtered_df["order_status"].apply(is_cancelled_or_returned_status))
-        ][
-                [
-                    "رقم الطلب", "رقم الفاتورة", "SKU", "الصنف", "الفرع", "كمية سلة", "كمية ABC", "الفرق",
-                    "حالة الطلب", "تاريخ الطلب", "تاريخ الفاتورة", "نوع البروفايل", "تصنيف البيع",
-                    "الفروع الظاهرة في ABC", "تفصيل الحالة", "الحالة", "تم بواسطة", "تاريخ التنفيذ", "آخر تحديث"
-                ]
-            ]
         st.dataframe(styled_frame(returns_admin), use_container_width=True)
 
     with tab3:
-        orphan_salla_admin = admin_df[
-            (filtered_df["case_type"] == "orphan_salla") & (~filtered_df["order_status"].apply(is_cancelled_or_returned_status))
-        ][
-                [
-                    "رقم الطلب", "SKU", "الصنف", "الفرع", "كمية سلة", "حالة الطلب",
-                    "تاريخ الطلب", "تاريخ الفاتورة", "العميل", "المدينة", "نوع البروفايل", "تفصيل الحالة", "الحالة", "تم بواسطة", "تاريخ التنفيذ", "آخر تحديث"
-                ]
-            ]
         st.dataframe(styled_frame(orphan_salla_admin), use_container_width=True)
 
     with tab4:
-        orphan_abc_admin = admin_df[
-            (filtered_df["case_type"] == "orphan_abc") & (~filtered_df["order_status"].apply(is_cancelled_or_returned_status))
-        ][
-                [
-                    "رقم الطلب", "رقم الفاتورة", "SKU", "الصنف", "الفرع", "كمية ABC",
-                    "تاريخ الفاتورة", "نوع البروفايل", "تصنيف البيع", "الفروع الظاهرة في ABC", "تفصيل الحالة", "الحالة", "تم بواسطة", "تاريخ التنفيذ", "آخر تحديث"
-                ]
-            ]
         st.dataframe(styled_frame(orphan_abc_admin), use_container_width=True)
 
     with tab5:
-        cancelled_df = filtered_df[filtered_df["order_status"].apply(is_cancelled_or_returned_status)]
-        st.dataframe(
-            styled_frame(prepare_display_df(cancelled_df)[
-                [
-                    "رقم الطلب", "رقم الفاتورة", "SKU", "الصنف", "الفرع", "نوع الحالة",
-                    "حالة الطلب", "تاريخ الطلب", "تاريخ الفاتورة",
-                    "نوع البروفايل", "تصنيف البيع", "الفروع الظاهرة في ABC", "ملاحظة الفروع", "تفصيل الحالة", "الحالة", "تم بواسطة", "تاريخ التنفيذ", "آخر تحديث"
-                ]
-            ]),
-            use_container_width=True,
-        )
+        st.dataframe(styled_frame(post_cutoff_admin), use_container_width=True)
+
+    with tab6:
+        st.dataframe(styled_frame(cancelled_admin), use_container_width=True)
 
 
 def render_pharmacy_dashboard():
@@ -1211,11 +1321,12 @@ def render_pharmacy_dashboard():
     returns_df = df[(df["case_type"] == "return") & active_non_cancelled].copy()
     orphan_salla_df = df[(df["case_type"] == "orphan_salla") & active_non_cancelled].copy()
     orphan_abc_df = df[(df["case_type"] == "orphan_abc") & active_non_cancelled].copy()
+    post_cutoff_df = df[df["case_type"] == "post_cutoff_abc"].copy()
     cancelled_df = df[df["order_status"].apply(is_cancelled_or_returned_status)].copy()
     review_df = df[(df["case_type"].isin(["branch_mismatch", "special_review"])) & active_non_cancelled].copy()
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", "الملغي/المسترجع"]
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", "فواتير بعد آخر طلب", "الملغي/المسترجع"]
     )
 
     with tab1:
@@ -1231,6 +1342,9 @@ def render_pharmacy_dashboard():
         render_case_cards(orphan_abc_df, True, pharmacist_name, pharmacy_name)
 
     with tab5:
+        render_case_cards(post_cutoff_df, False, pharmacist_name, pharmacy_name)
+
+    with tab6:
         render_case_cards(cancelled_df if not cancelled_df.empty else review_df, False, pharmacist_name, pharmacy_name)
 
 
@@ -1249,8 +1363,8 @@ for key, default_value in {
 
 
 with st.sidebar:
-    st.title(" نظام بلسم العلا")
-    st.caption("مطابقة طلبات سلة وفواتير ABC")
+    st.title("نظام بلسم العلا")
+    st.caption("مطابقة طلبات سلة والفواتير")
     st.markdown("---")
 
     if not st.session_state.logged_in:
