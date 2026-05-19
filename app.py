@@ -1,576 +1,364 @@
 import streamlit as st
 import pandas as pd
-import json
+import sqlite3
 import os
 from datetime import datetime
-import hashlib
-import base64
-from pathlib import Path
 
-# إعداد الصفحة
-st.set_page_config(
-    page_title="نظام مراقبة طلبات سلة و ABC",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="نظام بلسم", layout="wide")
 
-# CSS مخصص للغة العربية والتصميم الاحترافي
+# Arabic CSS
 st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700&display=swap');
-    
-    * {
-        font-family: 'Tajawal', sans-serif;
-    }
-    
-    .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem;
-        border-radius: 15px;
-        color: white;
-        text-align: center;
-        margin-bottom: 2rem;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    }
-    
-    .pharmacy-card {
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-        padding: 1.5rem;
-        border-radius: 10px;
-        text-align: center;
-        cursor: pointer;
-        transition: transform 0.3s;
-        margin: 10px;
-        border: 2px solid transparent;
-    }
-    
-    .pharmacy-card:hover {
-        transform: translateY(-5px);
-        border-color: #667eea;
-    }
-    
-    .success-alert {
-        background-color: #d4edda;
-        border-right: 4px solid #28a745;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 10px 0;
-    }
-    
-    .warning-alert {
-        background-color: #fff3cd;
-        border-right: 4px solid #ffc107;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 10px 0;
-    }
-    
-    .danger-alert {
-        background-color: #f8d7da;
-        border-right: 4px solid #dc3545;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 10px 0;
-    }
-    
-    .info-alert {
-        background-color: #d1ecf1;
-        border-right: 4px solid #17a2b8;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 10px 0;
-    }
-    
-    .button-completed {
-        background-color: #28a745;
-        color: white;
-        border: none;
-        padding: 10px 20px;
-        border-radius: 8px;
-        cursor: pointer;
-        font-weight: bold;
-    }
-    
-    .button-pending {
-        background-color: #ffc107;
-        color: #333;
-        border: none;
-        padding: 10px 20px;
-        border-radius: 8px;
-        cursor: pointer;
-        font-weight: bold;
-    }
-    
-    .stats-card {
-        background: white;
-        padding: 1rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        text-align: center;
-        margin: 10px;
-    }
-    
-    .stats-number {
-        font-size: 2rem;
-        font-weight: bold;
-        color: #667eea;
-    }
-    
-    /* تنسيق الجداول */
-    .dataframe {
-        font-size: 14px;
-        text-align: right;
-    }
-    
-    .dataframe th {
-        background-color: #667eea;
-        color: white;
-        padding: 10px;
-        text-align: center;
-    }
-    
-    .dataframe td {
-        padding: 8px;
-        text-align: center;
-    }
-    
-    /* زر الصوت */
-    .audio-btn {
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        background-color: #667eea;
-        color: white;
-        padding: 10px;
-        border-radius: 50%;
-        cursor: pointer;
-        z-index: 1000;
-    }
-    </style>
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Tajawal&display=swap');
+    * {font-family: 'Tajawal', sans-serif;}
+    .stButton button {width: 100%; border-radius: 8px;}
+    .success-box {background-color: #d4edda; padding: 15px; border-radius: 10px; border-right: 4px solid #28a745;}
+    .warning-box {background-color: #fff3cd; padding: 15px; border-radius: 10px; border-right: 4px solid #ffc107;}
+</style>
 """, unsafe_allow_html=True)
 
-# دالة لتشغيل الصوت
-def play_sound(sound_type):
-    sounds = {
-        "success": "🔔",
-        "warning": "⚠️",
-        "info": "ℹ️",
-        "error": "❌"
-    }
-    sound_emoji = sounds.get(sound_type, "🔔")
-    st.markdown(f"""
-        <script>
-            // تشغيل صوت باستخدام Web Speech API
-            var msg = new SpeechSynthesisUtterance();
-            msg.text = '{sound_emoji}';
-            msg.lang = 'ar-SA';
-            window.speechSynthesis.speak(msg);
-        </script>
-    """, unsafe_allow_html=True)
-
-# تهيئة المجلدات
+# ========== DATABASE ==========
 os.makedirs("data", exist_ok=True)
-os.makedirs("uploads", exist_ok=True)
 
-# ملف المستخدمين وكلمات المرور
-def init_users():
-    users_file = "data/users.json"
-    if not os.path.exists(users_file):
-        users = {}
+def init_db():
+    conn = sqlite3.connect('data/pharmacy.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS adjustments
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  order_number TEXT, sku TEXT, pharmacy TEXT,
+                  action TEXT, status TEXT, performed_by TEXT, timestamp TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS users
+                 (username TEXT PRIMARY KEY, password TEXT, role TEXT)''')
+    
+    # Insert default users
+    c.execute("SELECT * FROM users WHERE username='admin'")
+    if not c.fetchone():
+        c.execute("INSERT INTO users VALUES ('admin', 'admin123', 'admin')")
         for i in range(1, 18):
-            pharmacy_num = f"{i:02d}"
-            users[f"Balsam Alula Pharmacy {pharmacy_num}"] = {
-                "password": f"balsam{i}",
-                "name": f"صيدلية بلسم العلا {pharmacy_num}"
-            }
-        # إضافة مستخدم مدير
-        users["admin"] = {
-            "password": "admin123",
-            "name": "المدير العام"
-        }
-        with open(users_file, "w", encoding="utf-8") as f:
-            json.dump(users, f, ensure_ascii=False, indent=2)
-    return users_file
+            c.execute("INSERT INTO users VALUES (?, ?, 'pharmacy')", 
+                     (f"Balsam Alula Pharmacy {i:02d}", f"balsam{i}"))
+    conn.commit()
+    conn.close()
 
-# ملف التعديلات
-def init_adjustments():
-    adj_file = "data/adjustments.json"
-    if not os.path.exists(adj_file):
-        with open(adj_file, "w", encoding="utf-8") as f:
-            json.dump([], f, ensure_ascii=False, indent=2)
-    return adj_file
+init_db()
 
-# معالجة ملف Excel
-def process_excel(uploaded_file):
-    if uploaded_file is not None:
-        # قراءة الشيتات
-        df_salla = pd.read_excel(uploaded_file, sheet_name="سلة")
-        df_abc = pd.read_excel(uploaded_file, sheet_name="abc")
+# ========== SMART COLUMN DETECTION ==========
+def find_column(df, possible_names):
+    """Find column by possible names"""
+    for name in possible_names:
+        if name in df.columns:
+            return name
+    return None
+
+def process_excel(file):
+    try:
+        # Read sheets
+        df_salla = pd.read_excel(file, sheet_name="سلة")
+        df_abc = pd.read_excel(file, sheet_name="abc")
         
-        # تنظيف بيانات سلة
-        df_salla = df_salla[df_salla['حالة الطلب'].notna()]
-        excluded_statuses = ['ملغي', 'مسترجع', 'محذوف']
-        df_salla = df_salla[~df_salla['حالة الطلب'].isin(excluded_statuses)]
+        # Display column names for debugging (only in admin mode)
+        st.info(f"📋 أعمدة سلة: {list(df_salla.columns)}")
+        st.info(f"📋 أعمدة ABC: {list(df_abc.columns)}")
         
-        # التحقق من SKU صحيح
-        df_salla = df_salla[df_salla['SKU'].astype(str).str.isdigit()]
+        # ===== DETECT COLUMNS IN SALLA SHEET =====
+        order_col = find_column(df_salla, ['رقم الطلب', 'Order Number', 'order_number', 'OrderID'])
+        sku_col = find_column(df_salla, ['SKU', 'Sku', 'sku', 'رقم المنتج', 'Product ID'])
+        product_col = find_column(df_salla, ['اسم المنتج', 'Product Name', 'product_name', 'Product'])
+        qty_col = find_column(df_salla, ['الكمية', 'Quantity', 'qty', 'Qty'])
+        city_col = find_column(df_salla, ['المدينة', 'City', 'city'])
+        status_col = find_column(df_salla, ['حالة الطلب', 'Order Status', 'status'])
         
-        # توجيه الفروع
-        df_salla['الفرع'] = df_salla['المدينة'].apply(
-            lambda x: 'Balsam Alula Pharmacy 09' if x == 'AL ULA' else 'Balsam Alula Pharmacy 13'
-        )
+        # ===== DETECT COLUMNS IN ABC SHEET =====
+        order_col_abc = find_column(df_abc, ['رقم الطلب', 'Order Number', 'order_number', 'OrderID'])
+        sku_col_abc = find_column(df_abc, ['رقم الصنف', 'Item Number', 'رقم المنتج', 'SKU', 'Product ID'])
+        qty_col_abc = find_column(df_abc, ['Net Sold Qty', 'Sold Qty', 'Quantity', 'الكمية المباعة'])
         
-        # تجميع كميات سلة حسب رقم الطلب و SKU
-        salla_grouped = df_salla.groupby(['رقم الطلب', 'SKU', 'اسم المنتج', 'الفرع']).agg({
-            'الكمية': 'sum',
-            'اجمالي بعد الخصم': 'first'
+        # Check if all required columns found
+        if not order_col:
+            st.error("لم يتم العثور على عمود رقم الطلب في شيت سلة")
+            return None
+        if not sku_col:
+            st.error("لم يتم العثور على عمود SKU في شيت سلة")
+            return None
+        if not qty_col:
+            st.error("لم يتم العichtauf على عمود الكمية في شيت سلة")
+            return None
+            
+        st.success(f"✅ تم التعرف على الأعمدة: الطلب={order_col}, SKU={sku_col}, الكمية={qty_col}")
+        
+        # ===== FILTER DATA =====
+        # Filter out cancelled/returned orders
+        if status_col:
+            excluded = ['ملغي', 'مسترجع', 'محذوف', 'Cancelled', 'Returned', 'Deleted']
+            df_salla = df_salla[~df_salla[status_col].astype(str).isin(excluded)]
+        
+        # Filter valid SKUs
+        df_salla = df_salla[df_salla[sku_col].astype(str).str.isdigit()]
+        
+        # Assign branch based on city
+        if city_col:
+            df_salla['الفرع'] = df_salla[city_col].apply(
+                lambda x: 'Balsam Alula Pharmacy 09' if str(x) == 'AL ULA' else 'Balsam Alula Pharmacy 13'
+            )
+        else:
+            df_salla['الفرع'] = 'Balsam Alula Pharmacy 13'
+        
+        # Rename columns to standard names
+        df_salla = df_salla.rename(columns={
+            order_col: 'رقم_الطلب',
+            sku_col: 'SKU',
+            qty_col: 'الكمية'
+        })
+        
+        if product_col:
+            df_salla = df_salla.rename(columns={product_col: 'اسم_المنتج'})
+        else:
+            df_salla['اسم_المنتج'] = 'غير محدد'
+        
+        # Group salla data
+        group_cols = ['رقم_الطلب', 'SKU', 'اسم_المنتج', 'الفرع']
+        salla_grouped = df_salla.groupby(group_cols).agg({
+            'الكمية': 'sum'
         }).reset_index()
         
-        # تجميع كميات ABC
-        abc_grouped = df_abc.groupby(['رقم الطلب', 'رقم الصنف']).agg({
-            'Net Sold Qty': 'sum',
-            'Total Sales After VAT.': 'first'
-        }).reset_index()
-        abc_grouped.rename(columns={'رقم الصنف': 'SKU', 'Net Sold Qty': 'كمية ABC'}, inplace=True)
+        # Process ABC data
+        if order_col_abc and sku_col_abc and qty_col_abc:
+            df_abc = df_abc.rename(columns={
+                order_col_abc: 'رقم_الطلب',
+                sku_col_abc: 'SKU',
+                qty_col_abc: 'كمية_ABC'
+            })
+            
+            abc_grouped = df_abc.groupby(['رقم_الطلب', 'SKU']).agg({
+                'كمية_ABC': 'sum'
+            }).reset_index()
+        else:
+            st.warning("بعض الأعمدة غير موجودة في شيت ABC")
+            abc_grouped = pd.DataFrame(columns=['رقم_الطلب', 'SKU', 'كمية_ABC'])
         
-        # دمج البيانات
-        merged = pd.merge(salla_grouped, abc_grouped, on=['رقم الطلب', 'SKU'], how='outer', suffixes=('_سلة', '_abc'))
+        # Merge
+        merged = pd.merge(salla_grouped, abc_grouped, on=['رقم_الطلب', 'SKU'], how='outer')
         merged = merged.fillna(0)
         
-        # حساب الفرق
-        merged['الفرق'] = merged['الكمية_سلة'] - merged['كمية ABC']
-        merged['حالة'] = merged['الفرق'].apply(
+        # Calculate difference
+        merged['الفرق'] = merged['الكمية'] - merged['كمية_ABC']
+        merged['نوع_الاجراء'] = merged['الفرق'].apply(
             lambda x: 'إضافة' if x > 0 else ('إرجاع' if x < 0 else 'مطابق')
         )
         
-        # تصفية فقط الإضافات والإرجاعات
-        result = merged[merged['حالة'].isin(['إضافة', 'إرجاع'])].copy()
+        # Keep only additions and returns
+        result = merged[merged['نوع_الاجراء'].isin(['إضافة', 'إرجاع'])].copy()
         
-        # تحميل التعديلات السابقة
-        with open(init_adjustments(), "r", encoding="utf-8") as f:
-            adjustments = json.load(f)
-        
-        # إضافة حالة التعديل لكل صف
-        def get_adjustment_status(row):
-            for adj in adjustments:
-                if (adj['order_number'] == int(row['رقم الطلب']) and 
-                    adj['sku'] == int(row['SKU']) and
-                    adj['pharmacy'] == row['الفرع']):
-                    return adj['status']
-            return "لم يبدأ"
-        
-        result['حالة التعديل'] = result.apply(get_adjustment_status, axis=1)
-        
-        # إضافة عمود الصيدلية
-        result['الصيدلية'] = result['الفرع']
-        
-        return result, df_salla, df_abc
-    
-    return None, None, None
-
-# دالة لتسجيل التعديل
-def record_adjustment(order_number, sku, pharmacy, action, status, performed_by):
-    adj_file = init_adjustments()
-    with open(adj_file, "r", encoding="utf-8") as f:
-        adjustments = json.load(f)
-    
-    # البحث عن التعديل الموجود
-    existing = None
-    for adj in adjustments:
-        if adj['order_number'] == order_number and adj['sku'] == sku and adj['pharmacy'] == pharmacy:
-            existing = adj
-            break
-    
-    if existing:
-        existing['status'] = status
-        existing['action'] = action
-        existing['performed_by'] = performed_by
-        existing['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        adjustments.append({
-            "id": len(adjustments) + 1,
-            "order_number": order_number,
-            "sku": sku,
-            "pharmacy": pharmacy,
-            "action": action,
-            "status": status,
-            "performed_by": performed_by,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Rename back for display
+        result = result.rename(columns={
+            'رقم_الطلب': 'رقم الطلب',
+            'اسم_المنتج': 'اسم المنتج',
+            'الكمية': 'كمية سلة'
         })
-    
-    with open(adj_file, "w", encoding="utf-8") as f:
-        json.dump(adjustments, f, ensure_ascii=False, indent=2)
+        
+        return result
+        
+    except Exception as e:
+        st.error(f"❌ خطأ: {str(e)}")
+        return None
 
-# دالة التحقق من تسجيل الدخول
-def check_login(username, password, users):
-    if username in users:
-        return users[username]['password'] == password
-    return False
+def record_adjustment(order_number, sku, pharmacy, action):
+    conn = sqlite3.connect('data/pharmacy.db')
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO adjustments (order_number, sku, pharmacy, action, status, performed_by, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (order_number, sku, pharmacy, action, 'تم', st.session_state.username, 
+          datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit()
+    conn.close()
 
-# تهيئة Session State
+# ========== SESSION STATE ==========
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
-if 'current_user' not in st.session_state:
-    st.session_state.current_user = None
-if 'user_type' not in st.session_state:
-    st.session_state.user_type = None
+if 'username' not in st.session_state:
+    st.session_state.username = None
+if 'user_role' not in st.session_state:
+    st.session_state.user_role = None
 if 'processed_data' not in st.session_state:
     st.session_state.processed_data = None
-if 'df_salla' not in st.session_state:
-    st.session_state.df_salla = None
-if 'df_abc' not in st.session_state:
-    st.session_state.df_abc = None
-if 'uploaded_file_name' not in st.session_state:
-    st.session_state.uploaded_file_name = None
 
-# الشريط الجانبي
+# ========== LOGIN SIDEBAR ==========
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/000000/pharmacy.png", width=80)
-    st.title("🌟 نظام بلسم")
-    st.markdown("---")
+    st.title("نظام بلسم")
     
     if not st.session_state.logged_in:
-        st.subheader("🔐 تسجيل الدخول")
-        username = st.text_input("اسم المستخدم")
-        password = st.text_input("كلمة المرور", type="password")
+        username = st.text_input("👤 اسم المستخدم")
+        password = st.text_input("🔒 كلمة المرور", type="password")
         
-        users = json.load(open(init_users(), "r", encoding="utf-8"))
-        
-        if st.button("دخول 🚪", use_container_width=True):
-            if check_login(username, password, users):
+        if st.button("🚪 دخول", use_container_width=True):
+            conn = sqlite3.connect('data/pharmacy.db')
+            c = conn.cursor()
+            c.execute("SELECT role FROM users WHERE username=? AND password=?", (username, password))
+            user = c.fetchone()
+            conn.close()
+            
+            if user:
                 st.session_state.logged_in = True
-                st.session_state.current_user = username
-                if username == "admin":
-                    st.session_state.user_type = "admin"
-                else:
-                    st.session_state.user_type = "pharmacy"
-                play_sound("success")
+                st.session_state.username = username
+                st.session_state.user_role = user[0]
                 st.rerun()
             else:
-                st.error("❌ اسم المستخدم أو كلمة المرور غير صحيحة")
-                play_sound("error")
+                st.error("❌ خطأ في اسم المستخدم أو كلمة المرور")
     else:
-        st.success(f"مرحباً {st.session_state.current_user} 👋")
-        if st.button("تسجيل خروج 🚪", use_container_width=True):
+        st.success(f"مرحباً {st.session_state.username}")
+        if st.button("🚪 تسجيل خروج", use_container_width=True):
             st.session_state.logged_in = False
-            st.session_state.current_user = None
-            st.session_state.user_type = None
-            play_sound("info")
+            st.session_state.username = None
+            st.session_state.user_role = None
+            st.session_state.processed_data = None
             st.rerun()
 
-# المحتوى الرئيسي
+# ========== MAIN CONTENT ==========
 if not st.session_state.logged_in:
     st.markdown("""
-    <div class="main-header">
-        <h1>📊 نظام مراقبة طلبات سلة و ABC</h1>
-        <p>نظام متكامل لإدارة ومتابعة الطلبات والإضافات والإرجاعات</p>
+    <div style="background: linear-gradient(135deg, #667eea, #764ba2); 
+                padding: 3rem; border-radius: 20px; color: white; text-align: center;">
+        <h1 style="font-size: 2.5rem;">📊 نظام مراقبة طلبات سلة و ABC</h1>
+        <p style="font-size: 1.2rem;">نظام متكامل لإدارة ومتابعة الطلبات والإضافات والإرجاعات</p>
     </div>
     """, unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.markdown("""
-        <div class="stats-card">
-            <div class="stats-number">🏥 17</div>
-            <p>صيدلية</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("🏥 صيدلية", "17", "فرع")
     with col2:
-        st.markdown("""
-        <div class="stats-card">
-            <div class="stats-number">📦 1000+</div>
-            <p>طلب شهرياً</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("📦 طلبات شهرياً", "1000+", "متوسط")
     with col3:
-        st.markdown("""
-        <div class="stats-card">
-            <div class="stats-number">⚡ 99%</div>
-            <p>دقة المطابقة</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("⚡ دقة المطابقة", "99%", "عالية")
     
-    st.markdown("---")
-    st.info("👈 الرجاء تسجيل الدخول من القائمة الجانبية للاستمرار")
+    st.info("👈 الرجاء تسجيل الدخول من القائمة الجانبية")
 
 else:
-    # تحميل البيانات إذا كان هناك ملف مرفوع
-    uploaded_file = st.file_uploader("📂 رفع ملف الطلبات والفواتير", type=['xlsx'], key="file_uploader")
+    st.title("📊 لوحة التحكم")
     
-    if uploaded_file is not None:
-        if st.session_state.uploaded_file_name != uploaded_file.name:
-            st.session_state.processed_data, st.session_state.df_salla, st.session_state.df_abc = process_excel(uploaded_file)
-            st.session_state.uploaded_file_name = uploaded_file.name
-            play_sound("success")
-            st.success("✅ تم معالجة الملف بنجاح!")
+    # File upload
+    uploaded = st.file_uploader("📂 رفع ملف الطلبات والفواتير (Excel)", type=['xlsx'])
     
-    # عرض المحتوى حسب نوع المستخدم
-    if st.session_state.user_type == "admin":
-        st.markdown("""
-        <div class="main-header">
-            <h1>👑 لوحة تحكم المدير</h1>
-            <p>مراقبة جميع الإضافات والإرجاعات عبر الصيدليات</p>
-        </div>
-        """, unsafe_allow_html=True)
+    if uploaded:
+        if st.button("🔄 معالجة الملف", use_container_width=True):
+            with st.spinner("جاري المعالجة..."):
+                result = process_excel(uploaded)
+                if result is not None:
+                    st.session_state.processed_data = result
+                    st.success("✅ تمت المعالجة بنجاح!")
+                    st.balloons()
+    
+    if st.session_state.processed_data is not None:
+        df = st.session_state.processed_data
         
-        if st.session_state.processed_data is not None:
-            df = st.session_state.processed_data
+        if st.session_state.user_role == "admin":
+            # Admin dashboard
+            st.markdown("---")
             
-            # إحصائيات سريعة
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("📊 إجمالي الطلبات", len(df['رقم الطلب'].unique()))
+                st.metric("📊 عدد الطلبات", len(df['رقم الطلب'].unique()))
             with col2:
-                additions = len(df[df['حالة'] == 'إضافة'])
-                st.metric("➕ إضافات مطلوبة", additions)
+                additions = len(df[df['نوع_الاجراء'] == 'إضافة'])
+                st.metric("➕ إضافات", additions)
             with col3:
-                returns = len(df[df['حالة'] == 'إرجاع'])
-                st.metric("➖ إرجاعات مطلوبة", returns)
-            with col4:
-                completed = len(df[df['حالة التعديل'] != 'لم يبدأ'])
-                st.metric("✅ تم إنجازها", completed)
+                returns = len(df[df['نوع_الاجراء'] == 'إرجاع'])
+                st.metric("➖ إرجاعات", returns)
             
-            st.markdown("---")
-            
-            # تبويبات للإضافات والإرجاعات
-            tab1, tab2 = st.tabs(["📈 الإضافات المطلوبة", "📉 الإرجاعات المطلوبة"])
+            tab1, tab2 = st.tabs(["📈 الإضافات", "📉 الإرجاعات"])
             
             with tab1:
-                additions_df = df[df['حالة'] == 'إضافة'].copy()
+                additions_df = df[df['نوع_الاجراء'] == 'إضافة']
                 if len(additions_df) > 0:
-                    display_cols = ['رقم الطلب', 'SKU', 'اسم المنتج', 'الكمية_سلة', 'كمية ABC', 'الفرق', 'الصيدلية', 'حالة التعديل']
-                    st.dataframe(additions_df[display_cols], use_container_width=True, height=400)
+                    st.dataframe(additions_df, use_container_width=True)
                 else:
-                    st.info("🎉 لا توجد إضافات مطلوبة حالياً")
+                    st.success("🎉 لا توجد إضافات مطلوبة!")
             
             with tab2:
-                returns_df = df[df['حالة'] == 'إرجاع'].copy()
+                returns_df = df[df['نوع_الاجراء'] == 'إرجاع']
                 if len(returns_df) > 0:
-                    display_cols = ['رقم الطلب', 'SKU', 'اسم المنتج', 'الكمية_سلة', 'كمية ABC', 'الفرق', 'الصيدلية', 'حالة التعديل']
-                    st.dataframe(returns_df[display_cols], use_container_width=True, height=400)
+                    st.dataframe(returns_df, use_container_width=True)
                 else:
-                    st.info("🎉 لا توجد إرجاعات مطلوبة حالياً")
+                    st.success("🎉 لا توجد إرجاعات مطلوبة!")
             
-            # سجل التعديلات
+            # Show history
             st.markdown("---")
             st.subheader("📋 سجل التعديلات")
-            with open(init_adjustments(), "r", encoding="utf-8") as f:
-                adjustments = json.load(f)
-            if adjustments:
-                adjustments_df = pd.DataFrame(adjustments)
-                st.dataframe(adjustments_df, use_container_width=True)
-            else:
-                st.info("لا توجد تعديلات مسجلة بعد")
+            conn = sqlite3.connect('data/pharmacy.db')
+            history = pd.read_sql_query("SELECT * FROM adjustments ORDER BY timestamp DESC LIMIT 50", conn)
+            conn.close()
+            if len(history) > 0:
+                st.dataframe(history, use_container_width=True)
         
         else:
-            st.warning("⚠️ الرجاء رفع ملف الطلبات والفواتير أولاً")
-    
-    else:  # مستخدم صيدلية
-        pharmacy_name = st.session_state.current_user
-        
-        st.markdown(f"""
-        <div class="main-header">
-            <h1>🏥 {pharmacy_name}</h1>
-            <p>مراجعة وإدارة الإضافات والإرجاعات</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if st.session_state.processed_data is not None:
-            df = st.session_state.processed_data
-            pharmacy_df = df[df['الصيدلية'] == pharmacy_name].copy()
+            # Pharmacy user
+            pharmacy = st.session_state.username
+            pharmacy_df = df[df['الفرع'] == pharmacy]
             
             if len(pharmacy_df) > 0:
-                # إحصائيات الصيدلية
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    additions = len(pharmacy_df[pharmacy_df['حالة'] == 'إضافة'])
-                    st.metric("➕ إضافات مطلوبة", additions)
-                with col2:
-                    returns = len(pharmacy_df[pharmacy_df['حالة'] == 'إرجاع'])
-                    st.metric("➖ إرجاعات مطلوبة", returns)
-                with col3:
-                    completed = len(pharmacy_df[pharmacy_df['حالة التعديل'] != 'لم يبدأ'])
-                    st.metric("✅ تم إنجازها", completed)
+                st.success(f"🏥 مرحباً {pharmacy}")
                 
-                st.markdown("---")
-                
-                # تبويب الإضافات
-                st.subheader("📈 الأصناف التي تحتاج إلى إضافة")
-                additions_df = pharmacy_df[pharmacy_df['حالة'] == 'إضافة'].copy()
-                if len(additions_df) > 0:
-                    for idx, row in additions_df.iterrows():
-                        col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 3, 1, 1, 2])
-                        with col1:
-                            st.write(f"**رقم الطلب:** {int(row['رقم الطلب'])}")
-                        with col2:
-                            st.write(f"**SKU:** {int(row['SKU'])}")
-                        with col3:
-                            st.write(f"**المنتج:** {row['اسم المنتج']}")
-                        with col4:
-                            st.write(f"**المطلوب:** {int(row['الكمية_سلة'])}")
-                        with col5:
-                            st.write(f"**الموجود:** {int(row['كمية ABC'])}")
-                        with col6:
-                            if row['حالة التعديل'] == 'تمت الإضافة':
-                                st.success("✅ تمت الإضافة")
+                # Additions
+                additions = pharmacy_df[pharmacy_df['نوع_الاجراء'] == 'إضافة']
+                if len(additions) > 0:
+                    st.subheader("✅ الأصناف التي تحتاج إضافة")
+                    for idx, row in additions.iterrows():
+                        with st.container():
+                            cols = st.columns([2,2,3,2,2])
+                            cols[0].write(f"📋 طلب: {row['رقم الطلب']}")
+                            cols[1].write(f"🏷️ SKU: {row['SKU']}")
+                            cols[2].write(f"📦 {row['اسم المنتج'][:35]}")
+                            cols[3].write(f"📊 الكمية: {int(row['كمية سلة'])}")
+                            
+                            # Check if already done
+                            conn = sqlite3.connect('data/pharmacy.db')
+                            c = conn.cursor()
+                            c.execute("SELECT * FROM adjustments WHERE order_number=? AND sku=? AND pharmacy=? AND action='إضافة'",
+                                     (str(row['رقم الطلب']), str(row['SKU']), pharmacy))
+                            done = c.fetchone()
+                            conn.close()
+                            
+                            if done:
+                                cols[4].success("✅ تمت")
                             else:
-                                if st.button(f"➕ تمت الإضافة", key=f"add_{idx}"):
-                                    record_adjustment(
-                                        int(row['رقم الطلب']),
-                                        int(row['SKU']),
-                                        pharmacy_name,
-                                        "إضافة",
-                                        "تمت الإضافة",
-                                        pharmacy_name
-                                    )
-                                    play_sound("success")
+                                if cols[4].button("➕ تمت الإضافة", key=f"add_{idx}_{row['SKU']}"):
+                                    record_adjustment(str(row['رقم الطلب']), str(row['SKU']), pharmacy, 'إضافة')
+                                    st.success("تم التسجيل!")
                                     st.rerun()
-                        st.markdown("---")
-                else:
-                    st.info("🎉 لا توجد إضافات مطلوبة حالياً")
+                            st.divider()
                 
-                # تبويب الإرجاعات
-                st.subheader("📉 الأصناف التي تحتاج إلى إرجاع")
-                returns_df = pharmacy_df[pharmacy_df['حالة'] == 'إرجاع'].copy()
-                if len(returns_df) > 0:
-                    for idx, row in returns_df.iterrows():
-                        col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 3, 1, 1, 2])
-                        with col1:
-                            st.write(f"**رقم الطلب:** {int(row['رقم الطلب'])}")
-                        with col2:
-                            st.write(f"**SKU:** {int(row['SKU'])}")
-                        with col3:
-                            st.write(f"**المنتج:** {row['اسم المنتج']}")
-                        with col4:
-                            st.write(f"**المطلوب:** {int(row['الكمية_سلة'])}")
-                        with col5:
-                            st.write(f"**الموجود:** {int(row['كمية ABC'])}")
-                        with col6:
-                            if row['حالة التعديل'] == 'تم الإرجاع':
-                                st.success("✅ تم الإرجاع")
+                # Returns
+                returns = pharmacy_df[pharmacy_df['نوع_الاجراء'] == 'إرجاع']
+                if len(returns) > 0:
+                    st.subheader("🔄 الأصناف التي تحتاج إرجاع")
+                    for idx, row in returns.iterrows():
+                        with st.container():
+                            cols = st.columns([2,2,3,2,2])
+                            cols[0].write(f"📋 طلب: {row['رقم الطلب']}")
+                            cols[1].write(f"🏷️ SKU: {row['SKU']}")
+                            cols[2].write(f"📦 {row['اسم المنتج'][:35]}")
+                            cols[3].write(f"📊 الفرق: {abs(int(row['الفرق']))}")
+                            
+                            # Check if already done
+                            conn = sqlite3.connect('data/pharmacy.db')
+                            c = conn.cursor()
+                            c.execute("SELECT * FROM adjustments WHERE order_number=? AND sku=? AND pharmacy=? AND action='إرجاع'",
+                                     (str(row['رقم الطلب']), str(row['SKU']), pharmacy))
+                            done = c.fetchone()
+                            conn.close()
+                            
+                            if done:
+                                cols[4].success("✅ تم")
                             else:
-                                if st.button(f"🔄 تم الإرجاع", key=f"return_{idx}"):
-                                    record_adjustment(
-                                        int(row['رقم الطلب']),
-                                        int(row['SKU']),
-                                        pharmacy_name,
-                                        "إرجاع",
-                                        "تم الإرجاع",
-                                        pharmacy_name
-                                    )
-                                    play_sound("success")
+                                if cols[4].button("🔄 تم الإرجاع", key=f"return_{idx}_{row['SKU']}"):
+                                    record_adjustment(str(row['رقم الطلب']), str(row['SKU']), pharmacy, 'إرجاع')
+                                    st.success("تم التسجيل!")
                                     st.rerun()
-                        st.markdown("---")
-                else:
-                    st.info("🎉 لا توجد إرجاعات مطلوبة حالياً")
+                            st.divider()
+                
+                if len(additions) == 0 and len(returns) == 0:
+                    st.info("🎉 لا توجد إضافات أو إرجاعات مطلوبة لهذا الفرع")
             else:
-                st.info(f"📭 لا توجد طلبات مخصصة لـ {pharmacy_name} حالياً")
-        else:
-            st.warning("⚠️ الرجاء رفع ملف الطلبات والفواتير أولاً")
-            st.info("📌 سيتم توجيه الطلبات حسب المدينة: AL ULA → فرع 9، باقي المدن → فرع 13")
-
-# تشغيل الصوت عند التحميل
-if st.session_state.get('play_startup_sound', True):
-    play_sound("info")
-    st.session_state.play_startup_sound = False
+                st.info(f"📭 لا توجد طلبات لـ {pharmacy}")
