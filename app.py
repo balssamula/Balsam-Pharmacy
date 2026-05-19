@@ -76,10 +76,6 @@ st.markdown("""
         transform: scale(1.02);
     }
     
-    div[data-testid="stDataFrame"] {
-        direction: rtl;
-    }
-    
     .dataframe th {
         background-color: #2a5298;
         color: white;
@@ -87,11 +83,11 @@ st.markdown("""
         text-align: center;
     }
     
-    /* تنسيق الجدول */
     .styled-table {
         border-collapse: collapse;
         width: 100%;
         direction: rtl;
+        margin-bottom: 15px;
     }
     
     .styled-table th {
@@ -118,65 +114,80 @@ st.markdown("""
 os.makedirs("data", exist_ok=True)
 
 def init_database():
-    """تهيئة قاعدة البيانات"""
-    conn = sqlite3.connect('data/pharmacy.db')
+    """تهيئة قاعدة البيانات من الصفر"""
+    db_path = 'data/pharmacy.db'
+    
+    # حذف قاعدة البيانات القديمة إذا كانت موجودة (لإعادة البناء)
+    if os.path.exists(db_path):
+        try:
+            os.remove(db_path)
+        except:
+            pass
+    
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     
-    # Users table with pharmacist name
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-                 username TEXT PRIMARY KEY, 
-                 password TEXT, 
-                 role TEXT,
-                 pharmacist_name TEXT,
-                 last_login TEXT
-             )''')
+    # Create users table
+    c.execute('''CREATE TABLE users (
+        username TEXT PRIMARY KEY,
+        password TEXT,
+        role TEXT,
+        pharmacist_name TEXT,
+        last_login TEXT
+    )''')
     
-    # Adjustments table (orders needing action)
-    c.execute('''CREATE TABLE IF NOT EXISTS adjustments (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 order_number TEXT, 
-                 sku TEXT, 
-                 product_name TEXT,
-                 branch_number TEXT, 
-                 pharmacist TEXT, 
-                 pharmacy_name TEXT,
-                 salla_qty REAL, 
-                 abc_qty REAL, 
-                 difference REAL,
-                 action TEXT, 
-                 status TEXT, 
-                 performed_by TEXT,
-                 performed_at TEXT,
-                 timestamp TEXT, 
-                 order_status TEXT, 
-                 city TEXT,
-                 customer_name TEXT,
-                 customer_phone TEXT,
-                 order_date TEXT,
-                 total_amount REAL
-             )''')
+    # Create adjustments table
+    c.execute('''CREATE TABLE adjustments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_number TEXT,
+        sku TEXT,
+        product_name TEXT,
+        branch_number TEXT,
+        pharmacist TEXT,
+        pharmacy_name TEXT,
+        salla_qty REAL,
+        abc_qty REAL,
+        difference REAL,
+        action TEXT,
+        status TEXT,
+        performed_by TEXT,
+        performed_at TEXT,
+        timestamp TEXT,
+        order_status TEXT,
+        city TEXT,
+        customer_name TEXT,
+        customer_phone TEXT,
+        order_date TEXT,
+        total_amount REAL
+    )''')
     
-    # Last login tracking
-    c.execute('''CREATE TABLE IF NOT EXISTS last_access (
-                 pharmacy_name TEXT PRIMARY KEY,
-                 last_login TEXT,
-                 pharmacist_name TEXT
-             )''')
+    # Create last_access table
+    c.execute('''CREATE TABLE last_access (
+        pharmacy_name TEXT PRIMARY KEY,
+        last_login TEXT,
+        pharmacist_name TEXT
+    )''')
     
-    # Insert default users (pharmacies 01-17)
+    # Insert pharmacies (01 to 17)
     for i in range(1, 18):
         pharmacy_name = f"Balsam Alula Pharmacy {i:02d}"
-        c.execute("INSERT OR IGNORE INTO users (username, password, role, pharmacist_name) VALUES (?, ?, 'pharmacy', ?)", 
+        c.execute("INSERT INTO users (username, password, role, pharmacist_name) VALUES (?, ?, 'pharmacy', ?)",
                  (pharmacy_name, f"balsam{i}", ""))
     
-    # Admin user
-    c.execute("INSERT OR IGNORE INTO users (username, password, role, pharmacist_name) VALUES ('admin', 'admin123', 'admin', 'Manager')")
+    # Insert admin user
+    c.execute("INSERT INTO users (username, password, role, pharmacist_name) VALUES ('admin', 'admin123', 'admin', 'Manager')")
     
     conn.commit()
     conn.close()
+    
     return [f"Balsam Alula Pharmacy {i:02d}" for i in range(1, 18)]
 
-pharmacies_list = init_database()
+# Initialize database
+try:
+    pharmacies_list = init_database()
+except Exception as e:
+    st.error(f"خطأ في تهيئة قاعدة البيانات: {str(e)}")
+    pharmacies_list = [f"Balsam Alula Pharmacy {i:02d}" for i in range(1, 18)]
 
 # ========== HELPER FUNCTIONS ==========
 def extract_branch_from_status(status_text):
@@ -211,50 +222,64 @@ def is_valid_sku(sku):
     invalid_values = ['', '0', '1', '200', 'nan', 'NaN', 'None', 'null']
     if sku_str in invalid_values:
         return False
-    return sku_str.isdigit()
+    # التحقق من أن SKU يحتوي على أرقام فقط
+    return sku_str.replace('.', '').isdigit()
 
 def update_pharmacist_name(pharmacy_name, pharmacist_name):
     """تحديث اسم الصيدلي"""
-    conn = sqlite3.connect('data/pharmacy.db')
-    c = conn.cursor()
-    c.execute("UPDATE users SET pharmacist_name = ? WHERE username = ?", (pharmacist_name, pharmacy_name))
-    c.execute("INSERT OR REPLACE INTO last_access (pharmacy_name, last_login, pharmacist_name) VALUES (?, ?, ?)",
-             (pharmacy_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), pharmacist_name))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect('data/pharmacy.db')
+        c = conn.cursor()
+        c.execute("UPDATE users SET pharmacist_name = ?, last_login = ? WHERE username = ?", 
+                 (pharmacist_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), pharmacy_name))
+        c.execute("INSERT OR REPLACE INTO last_access (pharmacy_name, last_login, pharmacist_name) VALUES (?, ?, ?)",
+                 (pharmacy_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), pharmacist_name))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        st.error(f"خطأ في تحديث اسم الصيدلي: {str(e)}")
+        return False
 
 def get_pharmacist_name(pharmacy_name):
     """الحصول على اسم الصيدلي"""
-    conn = sqlite3.connect('data/pharmacy.db')
-    c = conn.cursor()
-    c.execute("SELECT pharmacist_name FROM users WHERE username = ?", (pharmacy_name,))
-    result = c.fetchone()
-    conn.close()
-    return result[0] if result and result[0] else ""
+    try:
+        conn = sqlite3.connect('data/pharmacy.db')
+        c = conn.cursor()
+        c.execute("SELECT pharmacist_name FROM users WHERE username = ?", (pharmacy_name,))
+        result = c.fetchone()
+        conn.close()
+        return result[0] if result and result[0] else ""
+    except:
+        return ""
 
 def get_last_login(pharmacy_name):
     """الحصول على آخر دخول للفرع"""
-    conn = sqlite3.connect('data/pharmacy.db')
-    c = conn.cursor()
-    c.execute("SELECT last_login FROM last_access WHERE pharmacy_name = ?", (pharmacy_name,))
-    result = c.fetchone()
-    conn.close()
-    return result[0] if result else "لم يدخل بعد"
+    try:
+        conn = sqlite3.connect('data/pharmacy.db')
+        c = conn.cursor()
+        c.execute("SELECT last_login FROM last_access WHERE pharmacy_name = ?", (pharmacy_name,))
+        result = c.fetchone()
+        conn.close()
+        return result[0] if result else "لم يدخل بعد"
+    except:
+        return "لم يدخل بعد"
 
 def process_excel(uploaded_file):
     """معالجة ملف Excel وحفظ البيانات في قاعدة البيانات"""
     try:
+        # Read sheets
         df_salla = pd.read_excel(uploaded_file, sheet_name="سلة")
         df_abc = pd.read_excel(uploaded_file, sheet_name="abc")
         
-        # تنظيف بيانات سلة - إزالة الصفوف الفارغة
+        # Clean salla data
         df_salla = df_salla[df_salla['رقم الطلب'].notna()]
         
-        # تصفية SKU الصالحة
-        valid_skus = df_salla['SKU'].apply(is_valid_skus)
-        df_salla = df_salla[valid_skus]
+        # Filter valid SKUs
+        valid_mask = df_salla['SKU'].apply(is_valid_sku)
+        df_salla = df_salla[valid_mask]
         
-        # تحديد الفرع لكل طلب
+        # Determine branch for each order
         branch_info = df_salla.apply(
             lambda row: determine_branch(row['حالة الطلب'], row['المدينة']), 
             axis=1
@@ -262,7 +287,7 @@ def process_excel(uploaded_file):
         df_salla['الفرع'] = branch_info.apply(lambda x: x[0])
         df_salla['رقم_الفرع'] = branch_info.apply(lambda x: x[1])
         
-        # تجميع كميات سلة
+        # Group salla quantities
         salla_grouped = df_salla.groupby(['رقم الطلب', 'SKU', 'اسم المنتج', 'الفرع', 'رقم_الفرع']).agg({
             'الكمية': 'sum',
             'حالة الطلب': 'first',
@@ -273,35 +298,34 @@ def process_excel(uploaded_file):
             'إجمالي الطلب': 'first'
         }).reset_index()
         
-        # تجميع كميات ABC
-        abc_grouped = df_abc.groupby(['رقم الطلب', 'رقم الصنف']).agg({
-            'Net Sold Qty': 'sum',
-            'الصيدلي': 'first'
-        }).reset_index()
-        abc_grouped.rename(columns={'رقم الصنف': 'SKU', 'Net Sold Qty': 'كمية_ABC'}, inplace=True)
+        # Group ABC quantities
+        if 'رقم الصنف' in df_abc.columns and 'Net Sold Qty' in df_abc.columns:
+            abc_grouped = df_abc.groupby(['رقم الطلب', 'رقم الصنف']).agg({
+                'Net Sold Qty': 'sum'
+            }).reset_index()
+            abc_grouped.rename(columns={'رقم الصنف': 'SKU', 'Net Sold Qty': 'كمية_ABC'}, inplace=True)
+        else:
+            abc_grouped = pd.DataFrame(columns=['رقم الطلب', 'SKU', 'كمية_ABC'])
         
-        # دمج البيانات
+        # Merge
         merged = pd.merge(salla_grouped, abc_grouped, on=['رقم الطلب', 'SKU'], how='outer')
         merged = merged.fillna(0)
         
-        # حساب الفرق
+        # Calculate difference
         merged['الفرق'] = merged['الكمية'] - merged['كمية_ABC']
         merged['نوع_الاجراء'] = merged['الفرق'].apply(
             lambda x: 'إضافة' if x > 0 else ('إرجاع' if x < 0 else 'مطابق')
         )
         
-        # تصفية الإضافات والإرجاعات فقط
+        # Filter only additions and returns
         result = merged[merged['نوع_الاجراء'].isin(['إضافة', 'إرجاع'])].copy()
         
-        # حفظ في قاعدة البيانات
+        # Save to database
         conn = sqlite3.connect('data/pharmacy.db')
         cursor = conn.cursor()
         
-        # مسح البيانات القديمة (اختياري - يمكن الاحتفاظ بالتاريخ)
-        # cursor.execute("DELETE FROM adjustments WHERE 1=1")
-        
         for _, row in result.iterrows():
-            # التحقق من وجود التعديل مسبقاً
+            # Check if adjustment already exists
             cursor.execute("""
                 SELECT status, performed_by FROM adjustments 
                 WHERE order_number=? AND sku=? AND pharmacy_name=?
@@ -319,11 +343,11 @@ def process_excel(uploaded_file):
                  order_status, city, customer_name, customer_phone, order_date, total_amount, timestamp)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                str(row['رقم الطلب']), str(row['SKU']), row['اسم المنتج'],
-                row['رقم_الفرع'], row.get('الصيدلي', ''), row['الفرع'],
+                str(row['رقم الطلب']), str(row['SKU']), str(row['اسم المنتج'])[:100],
+                str(row['رقم_الفرع']), '', str(row['الفرع']),
                 float(row['الكمية']), float(row['كمية_ABC']), float(row['الفرق']),
-                row['نوع_الاجراء'], status, performed_by, performed_by,
-                str(row['حالة الطلب']), str(row['المدينة']), str(row.get('اسم العميل', '')),
+                str(row['نوع_الاجراء']), status, performed_by, performed_by,
+                str(row['حالة الطلب'])[:50], str(row['المدينة']), str(row.get('اسم العميل', ''))[:50],
                 str(row.get('رقم الجوال', '')), str(row.get('تاريخ الطلب', '')), 
                 float(row.get('إجمالي الطلب', 0)), datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             ))
@@ -339,47 +363,58 @@ def process_excel(uploaded_file):
 
 def record_adjustment(order_number, sku, pharmacy_name, action):
     """تسجيل التعديل (إضافة أو إرجاع)"""
-    conn = sqlite3.connect('data/pharmacy.db')
-    c = conn.cursor()
-    
-    # تحديث حالة التعديل
-    c.execute("""
-        UPDATE adjustments 
-        SET status = 'تم', performed_by = ?, performed_at = ?, timestamp = ?
-        WHERE order_number = ? AND sku = ? AND pharmacy_name = ? AND action = ?
-    """, (st.session_state.pharmacist_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-          datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-          str(order_number), str(sku), pharmacy_name, action))
-    
-    conn.commit()
-    conn.close()
-    return True
+    try:
+        conn = sqlite3.connect('data/pharmacy.db')
+        c = conn.cursor()
+        
+        # Update adjustment status
+        c.execute("""
+            UPDATE adjustments 
+            SET status = 'تم', performed_by = ?, performed_at = ?, timestamp = ?
+            WHERE order_number = ? AND sku = ? AND pharmacy_name = ? AND action = ?
+        """, (st.session_state.pharmacist_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+              datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+              str(order_number), str(sku), pharmacy_name, action))
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        st.error(f"خطأ في تسجيل التعديل: {str(e)}")
+        return False
 
 def get_pharmacy_data(pharmacy_name):
     """الحصول على بيانات الصيدلية"""
-    conn = sqlite3.connect('data/pharmacy.db')
-    df = pd.read_sql_query("""
-        SELECT order_number, sku, product_name, salla_qty, abc_qty, difference, 
-               action, status, order_status, city, customer_name, customer_phone, order_date
-        FROM adjustments 
-        WHERE pharmacy_name = ?
-        ORDER BY order_number DESC
-    """, conn, params=(pharmacy_name,))
-    conn.close()
-    return df
+    try:
+        conn = sqlite3.connect('data/pharmacy.db')
+        df = pd.read_sql_query("""
+            SELECT order_number, sku, product_name, salla_qty, abc_qty, difference, 
+                   action, status, order_status, city, customer_name, customer_phone, order_date,
+                   performed_by, performed_at
+            FROM adjustments 
+            WHERE pharmacy_name = ?
+            ORDER BY order_number DESC
+        """, conn, params=(pharmacy_name,))
+        conn.close()
+        return df
+    except:
+        return pd.DataFrame()
 
 def get_all_adjustments():
     """الحصول على جميع التعديلات للمدير"""
-    conn = sqlite3.connect('data/pharmacy.db')
-    df = pd.read_sql_query("""
-        SELECT order_number, sku, product_name, branch_number, pharmacy_name, 
-               salla_qty, abc_qty, difference, action, status, performed_by, performed_at,
-               order_status, city, customer_name, customer_phone, order_date
-        FROM adjustments 
-        ORDER BY order_number DESC
-    """, conn)
-    conn.close()
-    return df
+    try:
+        conn = sqlite3.connect('data/pharmacy.db')
+        df = pd.read_sql_query("""
+            SELECT order_number, sku, product_name, branch_number, pharmacy_name, 
+                   salla_qty, abc_qty, difference, action, status, performed_by, performed_at,
+                   order_status, city, customer_name, customer_phone, order_date
+            FROM adjustments 
+            ORDER BY order_number DESC
+        """, conn)
+        conn.close()
+        return df
+    except:
+        return pd.DataFrame()
 
 # ========== SESSION STATE ==========
 if 'logged_in' not in st.session_state:
@@ -392,8 +427,6 @@ if 'pharmacist_name' not in st.session_state:
     st.session_state.pharmacist_name = None
 if 'processed_data' not in st.session_state:
     st.session_state.processed_data = None
-if 'last_file' not in st.session_state:
-    st.session_state.last_file = None
 
 # ========== LOGIN ==========
 with st.sidebar:
@@ -407,25 +440,26 @@ with st.sidebar:
         password = st.text_input("🔒 كلمة المرور", type="password", key="login_pass")
         
         if st.button("🚪 دخول", use_container_width=True):
-            conn = sqlite3.connect('data/pharmacy.db')
-            c = conn.cursor()
-            c.execute("SELECT role, pharmacist_name FROM users WHERE username=? AND password=?", (username, password))
-            user = c.fetchone()
-            conn.close()
-            
-            if user:
-                st.session_state.logged_in = True
-                st.session_state.username = username
-                st.session_state.user_role = user[0]
+            try:
+                conn = sqlite3.connect('data/pharmacy.db')
+                c = conn.cursor()
+                c.execute("SELECT role, pharmacist_name FROM users WHERE username=? AND password=?", (username, password))
+                user = c.fetchone()
+                conn.close()
                 
-                if user[0] == "pharmacy":
-                    # طلب اسم الصيدلي إذا لم يكن مسجلاً
-                    pharmacist_name = user[1] if user[1] else ""
-                    st.session_state.pharmacist_name = pharmacist_name
-                
-                st.rerun()
-            else:
-                st.error("❌ اسم المستخدم أو كلمة المرور غير صحيحة")
+                if user:
+                    st.session_state.logged_in = True
+                    st.session_state.username = username
+                    st.session_state.user_role = user[0]
+                    
+                    if user[0] == "pharmacy":
+                        st.session_state.pharmacist_name = user[1] if user[1] else ""
+                    
+                    st.rerun()
+                else:
+                    st.error("❌ اسم المستخدم أو كلمة المرور غير صحيحة")
+            except Exception as e:
+                st.error(f"خطأ: {str(e)}")
     else:
         st.success(f"مرحباً {st.session_state.username}")
         
@@ -433,7 +467,6 @@ with st.sidebar:
             st.info("👑 مدير عام")
         else:
             st.info(f"🏥 {st.session_state.username}")
-            # إظهار آخر دخول
             last_login = get_last_login(st.session_state.username)
             if last_login != "لم يدخل بعد":
                 st.caption(f"📅 آخر دخول: {last_login}")
@@ -453,9 +486,11 @@ if st.session_state.user_role == "pharmacy" and st.session_state.logged_in:
         if st.button("تأكيد الاسم"):
             if pharmacist_name_input.strip():
                 st.session_state.pharmacist_name = pharmacist_name_input
-                update_pharmacist_name(st.session_state.username, pharmacist_name_input)
-                st.success(f"✅ تم تسجيل اسمك: {pharmacist_name_input}")
-                st.rerun()
+                if update_pharmacist_name(st.session_state.username, pharmacist_name_input):
+                    st.success(f"✅ تم تسجيل اسمك: {pharmacist_name_input}")
+                    st.rerun()
+                else:
+                    st.error("❌ حدث خطأ في حفظ الاسم")
             else:
                 st.error("❌ الرجاء إدخال اسم صحيح")
         st.stop()
@@ -466,7 +501,6 @@ if not st.session_state.logged_in:
     <div class="main-header">
         <h1 style="font-size: 2.5rem;">📊 نظام بلسم لإدارة الصيدليات</h1>
         <p style="font-size: 1.2rem;">نظام متكامل لمراقبة طلبات سلة ومطابقتها مع فواتير ABC</p>
-        <p style="font-size: 1rem; margin-top: 1rem;">✅ إدارة الفروع | ✅ متابعة الإضافات والإرجاعات | ✅ تقارير فورية</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -485,23 +519,6 @@ if not st.session_state.logged_in:
             <div class="stat-label">📦 طلب شهرياً</div>
         </div>
         """, unsafe_allow_html=True)
-    with col3:
-        all_adj = get_all_adjustments()
-        pending = len(all_adj[all_adj['status'] != 'تم']) if len(all_adj) > 0 else 0
-        st.markdown(f"""
-        <div class="stat-card">
-            <div class="stat-number">{pending}</div>
-            <div class="stat-label">⏳ إجراءات معلقة</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col4:
-        completed = len(all_adj[all_adj['status'] == 'تم']) if len(all_adj) > 0 else 0
-        st.markdown(f"""
-        <div class="stat-card">
-            <div class="stat-number">{completed}</div>
-            <div class="stat-label">✅ تم إنجازها</div>
-        </div>
-        """, unsafe_allow_html=True)
     
     st.info("👈 الرجاء تسجيل الدخول من القائمة الجانبية للاستمرار")
 
@@ -513,13 +530,12 @@ elif st.session_state.user_role == "admin":
     with st.expander("📂 رفع ملف الطلبات والفواتير", expanded=True):
         uploaded_file = st.file_uploader("اختر ملف Excel", type=['xlsx'], key="admin_upload")
         
-        if uploaded_file and st.session_state.last_file != uploaded_file.name:
+        if uploaded_file:
             if st.button("🔄 معالجة الملف", use_container_width=True):
                 with st.spinner("جاري معالجة الملف..."):
                     result = process_excel(uploaded_file)
                     if result is not None:
                         st.session_state.processed_data = result
-                        st.session_state.last_file = uploaded_file.name
                         st.success("✅ تمت المعالجة بنجاح!")
                         st.balloons()
     
@@ -553,14 +569,12 @@ elif st.session_state.user_role == "admin":
         with tab1:
             additions_df = df[df['action'] == 'إضافة'].copy()
             if len(additions_df) > 0:
-                # إضافة عمود الحالة
                 additions_df['حالة الإجراء'] = additions_df['status'].apply(
                     lambda x: "✅ تمت الإضافة" if x == "تم" else "⏳ لم تبدأ"
                 )
-                display_cols = ['order_number', 'sku', 'product_name', 'salla_qty', 'abc_qty', 
-                               'difference', 'pharmacy_name', 'حالة الإجراء', 'performed_by', 'performed_at',
-                               'order_status', 'city', 'customer_name']
-                st.dataframe(additions_df[display_cols], use_container_width=True)
+                st.dataframe(additions_df[['order_number', 'sku', 'product_name', 'salla_qty', 'abc_qty', 
+                               'difference', 'pharmacy_name', 'حالة الإجراء', 'performed_by']], 
+                               use_container_width=True)
             else:
                 st.success("🎉 لا توجد إضافات مطلوبة!")
         
@@ -570,24 +584,21 @@ elif st.session_state.user_role == "admin":
                 returns_df['حالة الإجراء'] = returns_df['status'].apply(
                     lambda x: "✅ تم الإرجاع" if x == "تم" else "⏳ لم يبدأ"
                 )
-                display_cols = ['order_number', 'sku', 'product_name', 'salla_qty', 'abc_qty', 
-                               'difference', 'pharmacy_name', 'حالة الإجراء', 'performed_by', 'performed_at',
-                               'order_status', 'city', 'customer_name']
-                st.dataframe(returns_df[display_cols], use_container_width=True)
+                st.dataframe(returns_df[['order_number', 'sku', 'product_name', 'salla_qty', 'abc_qty', 
+                               'difference', 'pharmacy_name', 'حالة الإجراء', 'performed_by']], 
+                               use_container_width=True)
             else:
                 st.success("🎉 لا توجد إرجاعات مطلوبة!")
         
         with tab3:
             st.subheader("🏥 أداء الفروع")
-            branch_stats = df.groupby(['pharmacy_name', 'branch_number']).agg({
+            branch_stats = df.groupby('pharmacy_name').agg({
                 'order_number': 'nunique',
                 'action': 'count',
                 'status': lambda x: (x == 'تم').sum()
             }).reset_index()
-            branch_stats.columns = ['اسم الفرع', 'رقم الفرع', 'عدد الطلبات', 'عدد الإجراءات', 'تم إنجازها']
+            branch_stats.columns = ['اسم الفرع', 'عدد الطلبات', 'عدد الإجراءات', 'تم إنجازها']
             branch_stats['المتبقي'] = branch_stats['عدد الإجراءات'] - branch_stats['تم إنجازها']
-            
-            # إضافة آخر دخول لكل فرع
             branch_stats['آخر دخول'] = branch_stats['اسم الفرع'].apply(get_last_login)
             
             st.dataframe(branch_stats, use_container_width=True)
@@ -606,17 +617,16 @@ else:
     </div>
     """, unsafe_allow_html=True)
     
-    # Upload file for pharmacy (optional - data already loaded by admin)
-    with st.expander("📂 رفع ملف الطلبات والفواتير (إذا لم يرفعه المدير)", expanded=False):
+    # File upload section
+    with st.expander("📂 رفع ملف الطلبات والفواتير", expanded=False):
         uploaded_file = st.file_uploader("اختر ملف Excel", type=['xlsx'], key="pharmacy_upload")
         
-        if uploaded_file and st.session_state.last_file != uploaded_file.name:
+        if uploaded_file:
             if st.button("🔄 معالجة الملف", use_container_width=True):
                 with st.spinner("جاري معالجة الملف..."):
                     result = process_excel(uploaded_file)
                     if result is not None:
                         st.session_state.processed_data = result
-                        st.session_state.last_file = uploaded_file.name
                         st.success("✅ تمت المعالجة بنجاح!")
                         st.rerun()
     
@@ -644,44 +654,21 @@ else:
             st.subheader("✅ الأصناف التي تحتاج إلى إضافة")
             for idx, row in additions_df.iterrows():
                 with st.container():
-                    st.markdown(f"""
-                    <table class="styled-table" style="width: 100%; margin-bottom: 10px;">
-                        <tr>
-                            <th style="width: 12%">رقم الطلب</th>
-                            <th style="width: 10%">SKU</th>
-                            <th style="width: 25%">اسم المنتج</th>
-                            <th style="width: 8%">كمية سلة</th>
-                            <th style="width: 8%">كمية ABC</th>
-                            <th style="width: 8%">الفرق</th>
-                            <th style="width: 10%">حالة الطلب</th>
-                            <th style="width: 10%">المدينة</th>
-                            <th style="width: 9%">الإجراء</th>
-                        </tr>
-                        <tr>
-                            <td style="text-align: center">{row['order_number']}</td>
-                            <td style="text-align: center">{row['sku']}</td>
-                            <td style="text-align: center">{row['product_name'][:40]}</td>
-                            <td style="text-align: center">{int(row['salla_qty'])}</td>
-                            <td style="text-align: center">{int(row['abc_qty'])}</td>
-                            <td style="text-align: center; color: {'#28a745' if row['difference'] > 0 else '#dc3545'}">+{int(row['difference'])}</td>
-                            <td style="text-align: center">{row['order_status'][:20]}</td>
-                            <td style="text-align: center">{row['city']}</td>
-                            <td style="text-align: center">
-                    """, unsafe_allow_html=True)
+                    col1, col2, col3, col4, col5, col6 = st.columns([1.5, 1.5, 3, 1, 1, 1.5])
+                    col1.markdown(f"**رقم الطلب**<br>{row['order_number']}", unsafe_allow_html=True)
+                    col2.markdown(f"**SKU**<br>{row['sku']}", unsafe_allow_html=True)
+                    col3.markdown(f"**المنتج**<br>{row['product_name'][:35]}", unsafe_allow_html=True)
+                    col4.markdown(f"**الكمية**<br>{int(row['salla_qty'])}", unsafe_allow_html=True)
+                    col5.markdown(f"**الفرق**<br>+{int(row['difference'])}", unsafe_allow_html=True)
                     
                     if row['status'] == 'تم':
-                        st.markdown(f'<span class="success-badge">✅ تمت الإضافة بواسطة {row["performed_by"] if row["performed_by"] else "غير معروف"}</span>', unsafe_allow_html=True)
+                        col6.markdown(f'<span class="success-badge">✅ تمت<br>{row["performed_by"][:15] if row["performed_by"] else ""}</span>', unsafe_allow_html=True)
                     else:
-                        if st.button(f"➕ تمت الإضافة", key=f"add_{idx}_{row['sku']}"):
+                        if col6.button(f"➕ تمت الإضافة", key=f"add_{idx}_{row['sku']}"):
                             if record_adjustment(row['order_number'], row['sku'], pharmacy_name, 'إضافة'):
-                                st.success("✅ تم تسجيل الإضافة بنجاح!")
+                                st.success("✅ تم تسجيل الإضافة!")
                                 st.rerun()
-                    
-                    st.markdown(f"""
-                            </td>
-                        </tr>
-                    </table>
-                    """, unsafe_allow_html=True)
+                    st.markdown("---")
         
         # Returns section
         returns_df = df[df['action'] == 'إرجاع'].copy()
@@ -689,44 +676,21 @@ else:
             st.subheader("🔄 الأصناف التي تحتاج إلى إرجاع")
             for idx, row in returns_df.iterrows():
                 with st.container():
-                    st.markdown(f"""
-                    <table class="styled-table" style="width: 100%; margin-bottom: 10px;">
-                        <tr>
-                            <th style="width: 12%">رقم الطلب</th>
-                            <th style="width: 10%">SKU</th>
-                            <th style="width: 25%">اسم المنتج</th>
-                            <th style="width: 8%">كمية سلة</th>
-                            <th style="width: 8%">كمية ABC</th>
-                            <th style="width: 8%">الفرق</th>
-                            <th style="width: 10%">حالة الطلب</th>
-                            <th style="width: 10%">المدينة</th>
-                            <th style="width: 9%">الإجراء</th>
-                        </tr>
-                        <tr>
-                            <td style="text-align: center">{row['order_number']}</td>
-                            <td style="text-align: center">{row['sku']}</td>
-                            <td style="text-align: center">{row['product_name'][:40]}</td>
-                            <td style="text-align: center">{int(row['salla_qty'])}</td>
-                            <td style="text-align: center">{int(row['abc_qty'])}</td>
-                            <td style="text-align: center; color: {'#28a745' if row['difference'] > 0 else '#dc3545'}">{int(row['difference'])}</td>
-                            <td style="text-align: center">{row['order_status'][:20]}</td>
-                            <td style="text-align: center">{row['city']}</td>
-                            <td style="text-align: center">
-                    """, unsafe_allow_html=True)
+                    col1, col2, col3, col4, col5, col6 = st.columns([1.5, 1.5, 3, 1, 1, 1.5])
+                    col1.markdown(f"**رقم الطلب**<br>{row['order_number']}", unsafe_allow_html=True)
+                    col2.markdown(f"**SKU**<br>{row['sku']}", unsafe_allow_html=True)
+                    col3.markdown(f"**المنتج**<br>{row['product_name'][:35]}", unsafe_allow_html=True)
+                    col4.markdown(f"**كمية ABC**<br>{int(row['abc_qty'])}", unsafe_allow_html=True)
+                    col5.markdown(f"**الفرق**<br>{int(row['difference'])}", unsafe_allow_html=True)
                     
                     if row['status'] == 'تم':
-                        st.markdown(f'<span class="success-badge">✅ تم الإرجاع بواسطة {row["performed_by"] if row["performed_by"] else "غير معروف"}</span>', unsafe_allow_html=True)
+                        col6.markdown(f'<span class="success-badge">✅ تم<br>{row["performed_by"][:15] if row["performed_by"] else ""}</span>', unsafe_allow_html=True)
                     else:
-                        if st.button(f"🔄 تم الإرجاع", key=f"return_{idx}_{row['sku']}"):
+                        if col6.button(f"🔄 تم الإرجاع", key=f"return_{idx}_{row['sku']}"):
                             if record_adjustment(row['order_number'], row['sku'], pharmacy_name, 'إرجاع'):
-                                st.success("✅ تم تسجيل الإرجاع بنجاح!")
+                                st.success("✅ تم تسجيل الإرجاع!")
                                 st.rerun()
-                    
-                    st.markdown(f"""
-                            </td>
-                        </tr>
-                    </table>
-                    """, unsafe_allow_html=True)
+                    st.markdown("---")
         
         if len(additions_df) == 0 and len(returns_df) == 0:
             st.info("🎉 لا توجد إضافات أو إرجاعات مطلوبة لهذا الفرع")
