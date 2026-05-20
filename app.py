@@ -9,6 +9,23 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 
+# ========== إعادة بناء قاعدة البيانات ==========
+def reset_database():
+    """إعادة بناء قاعدة البيانات من الصفر"""
+    db_path = 'data/pharmacy_reconciliation.db'
+    if os.path.exists(db_path):
+        try:
+            os.remove(db_path)
+            st.warning("⚠️ تم حذف قاعدة البيانات القديمة. سيتم إنشاء قاعدة بيانات جديدة.")
+        except Exception as e:
+            st.error(f"خطأ في حذف قاعدة البيانات: {str(e)}")
+    
+    # إعادة إنشاء المجلد إذا لزم الأمر
+    os.makedirs('data', exist_ok=True)
+
+# تشغيل إعادة البناء
+reset_database()
+
 try:
     from pandas.io.formats.style import Styler as PandasStyler
 except Exception:
