@@ -7,6 +7,11 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
+try:
+    from pandas.io.formats.style import Styler as PandasStyler
+except Exception:
+    PandasStyler = None
+
 
 st.set_page_config(
     page_title="نظام بلسم العلا - مطابقة الطلبات والفواتير",
@@ -96,6 +101,18 @@ st.markdown(
         border-right-color: #d9534f;
     }
 
+    .action-card-payment {
+        background: #fff7e8;
+        border-color: #f3d08a;
+        border-right-color: #d48b00;
+    }
+
+    .action-card-completed {
+        background: #d4edda;
+        border-color: #c3e6cb;
+        border-right-color: #28a745;
+    }
+
     .pill {
         display: inline-block;
         padding: 0.28rem 0.75rem;
@@ -110,6 +127,23 @@ st.markdown(
     .pill-blue { background: #dff1ff; color: #0f5488; }
     .pill-slate { background: #eef3f5; color: #445b66; }
     .pill-cancel { background: #ffd8d8; color: #8f1f1f; }
+    .pill-payment { background: #fff0c2; color: #8a5b00; }
+    .pill-completed { background: #28a745; color: white; }
+
+    .date-accent {
+        color: #0f5488;
+        font-weight: 700;
+    }
+
+    .diff-positive {
+        color: #0f7a3a;
+        font-weight: 800;
+    }
+
+    .diff-negative {
+        color: #a32929;
+        font-weight: 800;
+    }
 
     .metric-box {
         background: white;
@@ -132,6 +166,16 @@ st.markdown(
         margin: 0.3rem 0;
         border-right: 3px solid #1f7a8c;
     }
+    
+    .lock-badge {
+        display: inline-block;
+        padding: 0.2rem 0.6rem;
+        border-radius: 20px;
+        font-size: 0.7rem;
+        font-weight: bold;
+    }
+    .lock-closed { background: #d9534f; color: white; }
+    .lock-open { background: #5cb85c; color: white; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -146,12 +190,58 @@ def pharmacy_names():
     return [f"Balsam Alula Pharmacy {i:02d}" for i in range(1, PHARMACY_COUNT + 1)]
 
 
+def upgrade_database():
+    """ترقية قاعدة البيانات إلى أحدث إصدار"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    cur.execute("PRAGMA table_info(uploads)")
+    existing_columns = [row[1] for row in cur.fetchall()]
+    
+    new_columns = {
+        "session_name": "TEXT DEFAULT ''",
+        "is_locked": "INTEGER DEFAULT 0",
+        "locked_by": "TEXT DEFAULT ''",
+        "locked_at": "TEXT DEFAULT ''",
+        "is_active": "INTEGER DEFAULT 0"
+    }
+    
+    for col_name, col_type in new_columns.items():
+        if col_name not in existing_columns:
+            try:
+                cur.execute(f"ALTER TABLE uploads ADD COLUMN {col_name} {col_type}")
+            except:
+                pass
+    
+    cur.execute("PRAGMA table_info(reconciliation_items)")
+    existing_cols_items = [row[1] for row in cur.fetchall()]
+    
+    new_items_columns = {
+        "profile_type": "TEXT DEFAULT ''",
+        "profile_type_from_abc": "TEXT DEFAULT ''",
+        "receipt_classification": "TEXT DEFAULT ''",
+        "all_abc_pharmacies": "TEXT DEFAULT ''",
+        "other_branch_details": "TEXT DEFAULT ''",
+        "pharmacist_note": "TEXT DEFAULT ''"
+    }
+    
+    for col_name, col_type in new_items_columns.items():
+        if col_name not in existing_cols_items:
+            try:
+                cur.execute(f"ALTER TABLE reconciliation_items ADD COLUMN {col_name} {col_type}")
+            except:
+                pass
+    
+    conn.commit()
+    conn.close()
+
+
 def ensure_database():
+    """تهيئة قاعدة البيانات مع دعم الترقية"""
     os.makedirs(DB_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    # Users table
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS users (
@@ -164,7 +254,6 @@ def ensure_database():
         """
     )
 
-    # Last access table
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS last_access (
@@ -175,12 +264,10 @@ def ensure_database():
         """
     )
 
-    # Uploads table
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS uploads (
             upload_batch_id TEXT PRIMARY KEY,
-            session_name TEXT DEFAULT '',
             file_name TEXT,
             uploaded_by TEXT,
             uploaded_at TEXT,
@@ -190,16 +277,11 @@ def ensure_database():
             total_orphan_salla INTEGER DEFAULT 0,
             total_orphan_abc INTEGER DEFAULT 0,
             total_branch_mismatch INTEGER DEFAULT 0,
-            total_special_review INTEGER DEFAULT 0,
-            is_locked INTEGER DEFAULT 0,
-            locked_by TEXT DEFAULT '',
-            locked_at TEXT DEFAULT '',
-            is_active INTEGER DEFAULT 0
+            total_special_review INTEGER DEFAULT 0
         )
         """
     )
 
-    # Reconciliation items table - with all columns
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS reconciliation_items (
@@ -230,11 +312,6 @@ def ensure_database():
             order_status TEXT DEFAULT '',
             order_date TEXT DEFAULT '',
             invoice_date TEXT DEFAULT '',
-            profile_type TEXT DEFAULT '',
-            receipt_classification TEXT DEFAULT '',
-            all_abc_pharmacies TEXT DEFAULT '',
-            other_branch_details TEXT DEFAULT '',
-            pharmacist_note TEXT DEFAULT '',
             total_amount REAL DEFAULT 0,
             first_seen_at TEXT,
             last_seen_at TEXT,
@@ -243,7 +320,6 @@ def ensure_database():
         """
     )
 
-    # Insert pharmacies
     for index, name in enumerate(pharmacy_names(), start=1):
         cur.execute(
             """
@@ -253,7 +329,6 @@ def ensure_database():
             (name, f"balsam{index}"),
         )
 
-    # Insert admin
     cur.execute(
         """
         INSERT OR IGNORE INTO users (username, password, role, pharmacist_name, last_login)
@@ -263,6 +338,8 @@ def ensure_database():
 
     conn.commit()
     conn.close()
+    
+    upgrade_database()
 
 
 def normalize_text(value) -> str:
@@ -281,6 +358,11 @@ def normalize_city(value) -> str:
 def is_cancelled_or_returned_status(status_text: str) -> bool:
     status = normalize_text(status_text)
     return any(token in status for token in ["ملغي", "مسترجع"])
+
+
+def is_pending_payment_status(status_text: str) -> bool:
+    status = normalize_text(status_text)
+    return "بانتظار الدفع" in status
 
 
 def cancel_status_label(status_text: str) -> str:
@@ -310,6 +392,9 @@ def normalize_sku(value) -> str:
     if not text:
         return ""
     text = text.replace(".0", "")
+    invalid_skus = {"0", "1", "200"}
+    if text in invalid_skus:
+        return ""
     if re.fullmatch(r"\d+", text):
         return text
     return ""
@@ -399,22 +484,52 @@ def get_all_last_logins() -> pd.DataFrame:
 
 def get_latest_upload_summary():
     conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    cur.execute("PRAGMA table_info(uploads)")
+    existing_columns = [row[1] for row in cur.fetchall()]
+    
+    select_cols = ["upload_batch_id", "file_name", "uploaded_by", "uploaded_at", 
+                   "total_cases", "total_additions", "total_returns", 
+                   "total_orphan_salla", "total_orphan_abc", 
+                   "total_branch_mismatch", "total_special_review"]
+    
+    if "is_locked" in existing_columns:
+        select_cols.append("is_locked")
+    else:
+        select_cols.append("0 as is_locked")
+        
+    if "session_name" in existing_columns:
+        select_cols.append("session_name")
+    else:
+        select_cols.append("'' as session_name")
+    
+    query = f"""
+        SELECT {', '.join(select_cols)}
+        FROM uploads
+        WHERE is_active = 1
+        ORDER BY uploaded_at DESC
+        LIMIT 1
+    """
+    
     try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
-                   total_additions, total_returns, total_orphan_salla, total_orphan_abc,
-                   total_branch_mismatch, total_special_review, is_locked, session_name
-            FROM uploads
-            WHERE is_active = 1
-            ORDER BY uploaded_at DESC
-            LIMIT 1
-        """)
-        return cur.fetchone()
-    except Exception:
-        return None
-    finally:
+        cur.execute(query)
+        row = cur.fetchone()
         conn.close()
+        return row
+    except Exception:
+        conn.close()
+        return None
+
+
+def build_item_key(row: pd.Series) -> str:
+    parts = [
+        normalize_text(row.get("pharmacy_name")),
+        normalize_text(row.get("order_number")),
+        normalize_text(row.get("sku")),
+        normalize_text(row.get("case_type")),
+    ]
+    return "||".join(parts)
 
 
 def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
@@ -430,7 +545,12 @@ def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
     df["order_date"] = df["تاريخ الطلب"].apply(normalize_text)
     df["total_amount"] = pd.to_numeric(df["إجمالي الطلب"], errors="coerce").fillna(0)
 
-    df = df[(df["order_number"] != "") & (df["sku"] != "") & (df["quantity"] != 0)].copy()
+    df = df[
+        (df["order_number"] != "")
+        & (df["sku"] != "")
+        & (df["quantity"] != 0)
+        & (df["order_status"] != "محذوف")
+    ].copy()
 
     branch_info = df.apply(lambda row: determine_branch(row["order_status"], row["city"]), axis=1)
     df["pharmacy_name"] = branch_info.apply(lambda value: value[0])
@@ -466,8 +586,12 @@ def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
 
 def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     df = df_abc.copy()
+    
     if "نوع البروفايل" in df.columns:
         df = df[df["نوع البروفايل"].astype(str).str.strip() != EXCLUDED_PROFILE].copy()
+    
+    if "اسم الصنف" in df.columns:
+        df = df[~df["اسم الصنف"].astype(str).str.upper().str.contains("DELIVERY FEE", na=False)].copy()
 
     df["order_number"] = df["رقم الطلب"].apply(normalize_order_number)
     df["sku"] = df["رقم الصنف"].apply(normalize_sku)
@@ -479,12 +603,17 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     df["all_abc_pharmacies"] = df["abc_pharmacy_name"]
     df["abc_branch_number"] = df["abc_pharmacy_name"].apply(get_branch_number)
     df["profile_type"] = df["نوع البروفايل"].apply(normalize_text) if "نوع البروفايل" in df.columns else ""
+    df["profile_type_from_abc"] = df["نوع البروفايل"].apply(normalize_text) if "نوع البروفايل" in df.columns else ""
+    
     if "Receipt Classification" in df.columns:
         df["receipt_classification"] = df["Receipt Classification"].apply(normalize_text)
     else:
         df["receipt_classification"] = ""
 
-    df = df[(df["sku"] != "") & (df["order_number"] != "")].copy()
+    df = df[
+        (df["sku"] != "")
+        & (df["order_number"] != "")
+    ].copy()
 
     grouped = (
         df.groupby(["order_number", "sku"], as_index=False)
@@ -497,6 +626,9 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
                 "abc_pharmacy_name": "first",
                 "abc_branch_number": "first",
                 "profile_type": lambda values: " | ".join(
+                    sorted({normalize_text(value) for value in values if normalize_text(value)})
+                ),
+                "profile_type_from_abc": lambda values: " | ".join(
                     sorted({normalize_text(value) for value in values if normalize_text(value)})
                 ),
                 "receipt_classification": lambda values: " | ".join(
@@ -519,16 +651,6 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     return grouped
 
 
-def build_item_key(row: pd.Series) -> str:
-    parts = [
-        normalize_text(row.get("pharmacy_name", "")),
-        normalize_text(row.get("order_number", "")),
-        normalize_text(row.get("sku", "")),
-        normalize_text(row.get("case_type", "")),
-    ]
-    return "||".join(parts)
-
-
 def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame:
     salla_grouped = prepare_salla_frame(df_salla)
     abc_grouped = prepare_abc_frame(df_abc)
@@ -542,17 +664,33 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         indicator=True,
     )
 
-    for column in ["salla_qty", "abc_qty", "total_amount"]:
+    for column in [
+        "salla_qty",
+        "abc_qty",
+        "total_amount",
+    ]:
         if column in merged.columns:
             merged[column] = pd.to_numeric(merged[column], errors="coerce").fillna(0)
-        else:
-            merged[column] = 0
 
     text_columns = [
-        "salla_product_name", "abc_product_name", "customer_name", "customer_phone",
-        "city", "order_status", "order_date", "invoice_number", "invoice_date",
-        "salla_pharmacy_name", "abc_pharmacy_name", "salla_branch_number", "abc_branch_number",
-        "profile_type", "receipt_classification", "all_abc_pharmacies", "other_branch_details"
+        "salla_product_name",
+        "abc_product_name",
+        "customer_name",
+        "customer_phone",
+        "city",
+        "order_status",
+        "order_date",
+        "invoice_number",
+        "invoice_date",
+        "salla_pharmacy_name",
+        "abc_pharmacy_name",
+        "salla_branch_number",
+        "abc_branch_number",
+        "profile_type",
+        "profile_type_from_abc",
+        "receipt_classification",
+        "all_abc_pharmacies",
+        "other_branch_details",
     ]
     for column in text_columns:
         if column not in merged.columns:
@@ -632,16 +770,37 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     result["performed_at"] = ""
 
     ordered_columns = [
-        "item_key", "order_number", "invoice_number", "sku", "product_name",
-        "salla_product_name", "abc_product_name", "pharmacy_name",
-        "salla_pharmacy_name", "abc_pharmacy_name", "branch_number",
-        "salla_qty", "abc_qty", "difference", "case_type", "case_label", "case_reason",
-        "customer_name", "customer_phone", "city", "order_status", "order_date",
-        "invoice_date", "profile_type", "receipt_classification",
-        "all_abc_pharmacies", "other_branch_details", "total_amount"
+        "item_key",
+        "order_number",
+        "invoice_number",
+        "sku",
+        "product_name",
+        "salla_product_name",
+        "abc_product_name",
+        "pharmacy_name",
+        "salla_pharmacy_name",
+        "abc_pharmacy_name",
+        "branch_number",
+        "salla_qty",
+        "abc_qty",
+        "difference",
+        "case_type",
+        "case_label",
+        "case_reason",
+        "customer_name",
+        "customer_phone",
+        "city",
+        "order_status",
+        "order_date",
+        "invoice_date",
+        "profile_type",
+        "profile_type_from_abc",
+        "receipt_classification",
+        "all_abc_pharmacies",
+        "other_branch_details",
+        "total_amount",
     ]
     
-    # Ensure all columns exist
     for col in ordered_columns:
         if col not in result.columns:
             result[col] = ""
@@ -649,11 +808,153 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     return result[ordered_columns]
 
 
+def create_session_from_upload(upload_batch_id: str, file_name: str, uploaded_by: str):
+    """إنشاء جلسة جديدة مع اسم قابل للقراءة"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
+    cur.execute("""
+        UPDATE uploads 
+        SET session_name = ?, is_locked = 0, locked_by = '', locked_at = '', is_active = 1
+        WHERE upload_batch_id = ?
+    """, (session_name, upload_batch_id))
+    
+    cur.execute("""
+        UPDATE uploads SET is_active = 0 
+        WHERE upload_batch_id != ?
+    """, (upload_batch_id,))
+    
+    conn.commit()
+    conn.close()
+    return session_name
+
+
+def get_all_sessions() -> pd.DataFrame:
+    """الحصول على جميع الجلسات السابقة"""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(uploads)")
+        existing_columns = [row[1] for row in cur.fetchall()]
+        
+        select_cols = ["upload_batch_id", "file_name", "uploaded_by", "uploaded_at", 
+                       "total_cases", "total_additions", "total_returns"]
+        
+        if "session_name" in existing_columns:
+            select_cols.append("session_name")
+        else:
+            select_cols.append("'' as session_name")
+            
+        if "is_locked" in existing_columns:
+            select_cols.append("is_locked")
+        else:
+            select_cols.append("0 as is_locked")
+            
+        if "locked_by" in existing_columns:
+            select_cols.append("locked_by")
+        else:
+            select_cols.append("'' as locked_by")
+            
+        if "locked_at" in existing_columns:
+            select_cols.append("locked_at")
+        else:
+            select_cols.append("'' as locked_at")
+            
+        if "is_active" in existing_columns:
+            select_cols.append("is_active")
+        else:
+            select_cols.append("0 as is_active")
+        
+        query = f"""
+            SELECT {', '.join(select_cols)}
+            FROM uploads
+            ORDER BY uploaded_at DESC
+        """
+        
+        df = pd.read_sql_query(query, conn)
+        
+        required_cols = ['upload_batch_id', 'file_name', 'uploaded_by', 'uploaded_at', 
+                         'total_cases', 'total_additions', 'total_returns']
+        for col in required_cols:
+            if col not in df.columns:
+                df[col] = ''
+        
+        return df
+    except Exception as e:
+        st.warning(f"خطأ في تحميل الجلسات: {str(e)[:100]}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+
+def get_session_items(upload_batch_id: str) -> pd.DataFrame:
+    """الحصول على عناصر جلسة محددة"""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        return pd.read_sql_query("""
+            SELECT order_number, sku, product_name, case_label, status, performed_by
+            FROM reconciliation_items
+            WHERE upload_batch_id = ?
+        """, conn, params=(upload_batch_id,))
+    finally:
+        conn.close()
+
+
+def lock_session(upload_batch_id: str, locked_by: str):
+    """قفل الجلسة لمنع التعديل"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE uploads 
+        SET is_locked = 1, locked_by = ?, locked_at = ?
+        WHERE upload_batch_id = ?
+    """, (locked_by, now_str(), upload_batch_id))
+    conn.commit()
+    conn.close()
+
+
+def unlock_session(upload_batch_id: str):
+    """فتح الجلسة للسماح بالتعديل"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE uploads 
+        SET is_locked = 0, locked_by = '', locked_at = ''
+        WHERE upload_batch_id = ?
+    """, (upload_batch_id,))
+    conn.commit()
+    conn.close()
+
+
+def activate_session(upload_batch_id: str):
+    """تفعيل جلسة معينة (جعلها الجلسة النشطة)"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    cur.execute("UPDATE uploads SET is_active = 0")
+    cur.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
+    
+    conn.commit()
+    conn.close()
+
+
+def reopen_case(order_number: str, sku: str, pharmacy_name: str, case_type: str):
+    """إعادة فتح حالة مغلقة"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE reconciliation_items
+        SET status = 'قيد المتابعة', performed_by = '', performed_at = ''
+        WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
+    """, (order_number, sku, pharmacy_name, case_type))
+    conn.commit()
+    conn.close()
+
+
 def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: str, uploaded_by: str):
     upload_batch_id = uuid.uuid4().hex
     timestamp = now_str()
-    session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
-    
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
@@ -662,56 +963,143 @@ def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: st
     cur.execute(
         """
         INSERT INTO uploads (
-            upload_batch_id, session_name, file_name, uploaded_by, uploaded_at, total_cases,
+            upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
             total_additions, total_returns, total_orphan_salla, total_orphan_abc,
             total_branch_mismatch, total_special_review, is_locked, is_active
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)
         """,
         (
-            upload_batch_id, session_name, uploaded_file_name, uploaded_by, timestamp,
+            upload_batch_id,
+            uploaded_file_name,
+            uploaded_by,
+            timestamp,
             len(results),
             int((results["case_type"] == "addition").sum()),
             int((results["case_type"] == "return").sum()),
             int((results["case_type"] == "orphan_salla").sum()),
-            int((results["case_type"] == "orphan_abc").sum()),
+            int((results["case_type"].isin(["orphan_abc", "post_cutoff_abc"])).sum()),
             int((results["case_type"] == "branch_mismatch").sum()),
             int((results["case_type"] == "special_review").sum()),
         ),
     )
 
-    # تعطيل الجلسات الأخرى
-    cur.execute("UPDATE uploads SET is_active = 0 WHERE upload_batch_id != ?", (upload_batch_id,))
+    existing_map = {}
+    existing_rows = cur.execute(
+        "SELECT item_key, status, performed_by, performed_at, first_seen_at, pharmacist_note FROM reconciliation_items"
+    ).fetchall()
+    for item_key, status, performed_by, performed_at, first_seen_at, pharmacist_note in existing_rows:
+        existing_map[item_key] = {
+            "status": status,
+            "performed_by": performed_by,
+            "performed_at": performed_at,
+            "first_seen_at": first_seen_at or timestamp,
+            "pharmacist_note": pharmacist_note or "",
+        }
 
     for _, row in results.iterrows():
+        previous = existing_map.get(row["item_key"], {})
         cur.execute(
             """
-            INSERT OR REPLACE INTO reconciliation_items (
+            INSERT INTO reconciliation_items (
                 item_key, upload_batch_id, order_number, invoice_number, sku, product_name,
                 salla_product_name, abc_product_name, pharmacy_name, salla_pharmacy_name,
                 abc_pharmacy_name, branch_number, salla_qty, abc_qty, difference,
                 case_type, case_label, case_reason, status, performed_by, performed_at,
                 customer_name, customer_phone, city, order_status, order_date,
-                invoice_date, profile_type, receipt_classification, all_abc_pharmacies,
-                other_branch_details, total_amount, first_seen_at, last_seen_at, active
+                invoice_date, profile_type, profile_type_from_abc, receipt_classification, 
+                all_abc_pharmacies, other_branch_details, pharmacist_note, total_amount, 
+                first_seen_at, last_seen_at, active
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            ON CONFLICT(item_key) DO UPDATE SET
+                upload_batch_id = excluded.upload_batch_id,
+                order_number = excluded.order_number,
+                invoice_number = excluded.invoice_number,
+                sku = excluded.sku,
+                product_name = excluded.product_name,
+                salla_product_name = excluded.salla_product_name,
+                abc_product_name = excluded.abc_product_name,
+                pharmacy_name = excluded.pharmacy_name,
+                salla_pharmacy_name = excluded.salla_pharmacy_name,
+                abc_pharmacy_name = excluded.abc_pharmacy_name,
+                branch_number = excluded.branch_number,
+                salla_qty = excluded.salla_qty,
+                abc_qty = excluded.abc_qty,
+                difference = excluded.difference,
+                case_type = excluded.case_type,
+                case_label = excluded.case_label,
+                case_reason = excluded.case_reason,
+                customer_name = excluded.customer_name,
+                customer_phone = excluded.customer_phone,
+                city = excluded.city,
+                order_status = excluded.order_status,
+                order_date = excluded.order_date,
+                invoice_date = excluded.invoice_date,
+                profile_type = excluded.profile_type,
+                profile_type_from_abc = excluded.profile_type_from_abc,
+                receipt_classification = excluded.receipt_classification,
+                all_abc_pharmacies = excluded.all_abc_pharmacies,
+                other_branch_details = excluded.other_branch_details,
+                pharmacist_note = reconciliation_items.pharmacist_note,
+                total_amount = excluded.total_amount,
+                first_seen_at = reconciliation_items.first_seen_at,
+                last_seen_at = excluded.last_seen_at,
+                active = 1
             """,
             (
-                row["item_key"], upload_batch_id, row["order_number"], row["invoice_number"],
-                row["sku"], row["product_name"], row["salla_product_name"], row["abc_product_name"],
-                row["pharmacy_name"], row["salla_pharmacy_name"], row["abc_pharmacy_name"],
-                row["branch_number"], float(row["salla_qty"]), float(row["abc_qty"]),
-                float(row["difference"]), row["case_type"], row["case_label"], row["case_reason"],
-                STATUS_PENDING, "", "", row["customer_name"], row["customer_phone"], row["city"],
-                row["order_status"], row["order_date"], row["invoice_date"], row["profile_type"],
-                row["receipt_classification"], row["all_abc_pharmacies"], row["other_branch_details"],
-                float(row["total_amount"]), timestamp, timestamp
+                row["item_key"],
+                upload_batch_id,
+                row["order_number"],
+                row["invoice_number"],
+                row["sku"],
+                row["product_name"],
+                row["salla_product_name"],
+                row["abc_product_name"],
+                row["pharmacy_name"],
+                row["salla_pharmacy_name"],
+                row["abc_pharmacy_name"],
+                row["branch_number"],
+                numeric_value(row["salla_qty"]),
+                numeric_value(row["abc_qty"]),
+                numeric_value(row["difference"]),
+                row["case_type"],
+                row["case_label"],
+                row["case_reason"],
+                previous.get("status", STATUS_PENDING),
+                previous.get("performed_by", ""),
+                previous.get("performed_at", ""),
+                row["customer_name"],
+                row["customer_phone"],
+                row["city"],
+                row["order_status"],
+                row["order_date"],
+                row["invoice_date"],
+                row.get("profile_type", ""),
+                row.get("profile_type_from_abc", ""),
+                row.get("receipt_classification", ""),
+                row.get("all_abc_pharmacies", ""),
+                row.get("other_branch_details", ""),
+                previous.get("pharmacist_note", ""),
+                numeric_value(row["total_amount"]),
+                previous.get("first_seen_at", timestamp),
+                timestamp,
             ),
         )
 
+    cur.execute(
+        """
+        UPDATE reconciliation_items
+        SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END
+        """,
+        (upload_batch_id,),
+    )
+
     conn.commit()
     conn.close()
+    
+    create_session_from_upload(upload_batch_id, uploaded_file_name, uploaded_by)
+    
     return upload_batch_id
 
 
@@ -726,47 +1114,58 @@ def process_excel(uploaded_file, uploaded_by: str):
 def fetch_active_items(pharmacy_name: str | None = None) -> pd.DataFrame:
     conn = sqlite3.connect(DB_PATH)
     
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT upload_batch_id FROM uploads 
+        WHERE is_active = 1
+        ORDER BY uploaded_at DESC LIMIT 1
+    """)
+    active_session = cur.fetchone()
+    
+    if not active_session:
+        conn.close()
+        return pd.DataFrame()
+    
+    active_batch_id = active_session[0]
+    
+    cur.execute("PRAGMA table_info(uploads)")
+    existing_columns = [row[1] for row in cur.fetchall()]
+    has_lock_column = "is_locked" in existing_columns
+    
+    if has_lock_column:
+        cur.execute("SELECT is_locked FROM uploads WHERE upload_batch_id = ?", (active_batch_id,))
+        lock_result = cur.fetchone()
+        is_locked = lock_result[0] if lock_result else 0
+    else:
+        is_locked = 0
+    
+    query = """
+        SELECT order_number, invoice_number, sku, product_name, pharmacy_name, branch_number,
+               salla_qty, abc_qty, difference, case_type, case_label, case_reason, status,
+               performed_by, performed_at, customer_name, customer_phone, city, order_status,
+               order_date, invoice_date, total_amount, first_seen_at, last_seen_at,
+               profile_type, profile_type_from_abc, receipt_classification, 
+               all_abc_pharmacies, other_branch_details, pharmacist_note,
+               ? as is_locked
+        FROM reconciliation_items
+        WHERE active = 1 AND upload_batch_id = ?
+    """
+    params = [1 if is_locked else 0, active_batch_id]
+    
+    if pharmacy_name:
+        query += " AND pharmacy_name = ?"
+        params.append(pharmacy_name)
+    
+    query += " ORDER BY case_type, order_number DESC, sku"
+    
     try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT upload_batch_id, is_locked FROM uploads 
-            WHERE is_active = 1
-            ORDER BY uploaded_at DESC LIMIT 1
-        """)
-        active = cur.fetchone()
-        
-        if not active:
-            return pd.DataFrame()
-        
-        active_batch_id, is_locked = active
-        
-        query = """
-            SELECT order_number, invoice_number, sku, product_name, pharmacy_name, branch_number,
-                   salla_qty, abc_qty, difference, case_type, case_label, case_reason, status,
-                   performed_by, performed_at, customer_name, customer_phone, city, order_status,
-                   order_date, invoice_date, profile_type, receipt_classification, all_abc_pharmacies,
-                   other_branch_details, pharmacist_note, total_amount,
-                   ? as is_locked
-            FROM reconciliation_items
-            WHERE active = 1 AND upload_batch_id = ?
-        """
-        params = [1 if is_locked else 0, active_batch_id]
-        
-        if pharmacy_name:
-            query += " AND pharmacy_name = ?"
-            params.append(pharmacy_name)
-        
-        query += " ORDER BY case_type, order_number DESC, sku"
-        
         df = pd.read_sql_query(query, conn, params=params)
-        
-        # Add missing columns if needed
-        for col in ['profile_type', 'receipt_classification', 'all_abc_pharmacies', 'other_branch_details', 'pharmacist_note', 'abc_pharmacy_name']:
+        for col in ['abc_pharmacy_name', 'profile_type', 'profile_type_from_abc', 'receipt_classification', 'all_abc_pharmacies', 'other_branch_details', 'pharmacist_note']:
             if col not in df.columns:
                 df[col] = ''
-        
         return df
     except Exception as e:
+        st.warning(f"خطأ في جلب البيانات: {str(e)[:100]}")
         return pd.DataFrame()
     finally:
         conn.close()
@@ -804,7 +1203,7 @@ def save_case_note(order_number: str, sku: str, pharmacy_name: str, case_type: s
 
 def status_pill(status: str) -> str:
     if status == STATUS_DONE:
-        return '<span class="pill pill-green">مغلق</span>'
+        return '<span class="pill pill-completed">مغلق</span>'
     return '<span class="pill pill-amber">قيد المتابعة</span>'
 
 
@@ -824,6 +1223,10 @@ def case_pill(case_type: str) -> str:
 def status_alert_pill(order_status: str) -> str:
     label = cancel_status_label(order_status)
     return f'<span class="pill pill-cancel">{label}</span>' if label else ""
+
+
+def payment_alert_pill(order_status: str) -> str:
+    return '<span class="pill pill-payment">بانتظار الدفع</span>' if is_pending_payment_status(order_status) else ""
 
 
 def render_metrics(df: pd.DataFrame):
@@ -856,13 +1259,29 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
 
     for idx, row in df.iterrows():
         card_classes = "action-card"
-        if is_cancelled_or_returned_status(row["order_status"]):
+        if row["status"] == STATUS_DONE:
+            card_classes += " action-card-completed"
+        elif is_cancelled_or_returned_status(row["order_status"]):
             card_classes += " action-card-alert"
+        elif is_pending_payment_status(row["order_status"]):
+            card_classes += " action-card-payment"
 
-        st.markdown(f'<div class="{card_classes}">', unsafe_allow_html=True)
+        diff_value = numeric_value(row["difference"])
+        diff_class = "diff-positive" if diff_value > 0 else ("diff-negative" if diff_value < 0 else "")
+        diff_html = f'<span class="{diff_class}">{diff_value}</span>' if diff_class else str(diff_value)
+        order_date_html = f'<span class="date-accent">{row["order_date"] or "غير متوفر"}</span>'
+        invoice_date_html = f'<span class="date-accent">{row["invoice_date"] or "غير متوفر"}</span>'
+
+        with st.container(border=True):
+            st.markdown(
+                f'<div class="{card_classes}" style="padding:0.8rem;border-radius:14px;"></div>',
+                unsafe_allow_html=True,
+            )
         badges = f"{case_pill(row['case_type'])}&nbsp; {status_pill(row['status'])}"
         if status_alert_pill(row["order_status"]):
             badges += f"&nbsp; {status_alert_pill(row['order_status'])}"
+        if payment_alert_pill(row["order_status"]):
+            badges += f"&nbsp; {payment_alert_pill(row['order_status'])}"
         st.markdown(
             f"""
             <div style="display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap;">
@@ -874,27 +1293,26 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
         )
 
         info_cols = st.columns(4)
-        
-        # Safe dictionary getter
-        def safe_get(val, default="غير متوفر"):
-            if pd.isna(val) or val == "":
-                return default
-            return val
-        
         info_items = [
-            ("رقم الطلب", safe_get(row["order_number"])),
-            ("رقم الفاتورة", safe_get(row["invoice_number"])),
-            ("SKU", safe_get(row["sku"])),
-            ("المنتج", safe_get(row["product_name"])[:70]),
+            ("رقم الطلب", row["order_number"]),
+            ("رقم الفاتورة", row["invoice_number"] or "غير متوفر"),
+            ("SKU", row["sku"]),
+            ("المنتج", row["product_name"][:70]),
             ("كمية سلة", int(row["salla_qty"]) if pd.notna(row["salla_qty"]) else 0),
             ("كمية ABC", int(row["abc_qty"]) if pd.notna(row["abc_qty"]) else 0),
-            ("الفرق", safe_get(row["difference"])),
-            ("حالة الطلب", safe_get(row["order_status"])),
-            ("التفصيل", safe_get(row["case_reason"])[:100]),
+            ("الفرق", diff_html),
+            ("حالة الطلب", row["order_status"] or "غير متوفرة"),
+            ("تاريخ الطلب", order_date_html),
+            ("تاريخ الفاتورة", invoice_date_html),
+            ("تاريخ التنفيذ", row["performed_at"] or "لم يُنفذ بعد"),
+            ("نوع البروفايل", row.get("profile_type", "") or row.get("profile_type_from_abc", "") or "غير متوفر"),
+            ("تصنيف البيع", row.get("receipt_classification", "") or "غير متوفر"),
+            ("فروع ABC", row.get("all_abc_pharmacies", "") or row.get("abc_pharmacy_name", "") or "غير متوفر"),
+            ("التفصيل", row.get("case_reason", "") or "غير متوفر"),
         ]
         for item_index, (label, value) in enumerate(info_items):
             with info_cols[item_index % 4]:
-                st.markdown(f"**{label}**  \n{value}")
+                st.markdown(f"**{label}**  \n{value}", unsafe_allow_html=True)
 
         note_key = f"note_{row['case_type']}_{row['order_number']}_{row['sku']}_{idx}"
         note_value = st.text_area(
@@ -904,7 +1322,26 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
             height=80,
         )
 
-        action_cols = st.columns([1, 1, 6])
+        is_closed = row["status"] == STATUS_DONE
+        summary_cols = st.columns([2, 2, 2, 2, 1])
+        with summary_cols[0]:
+            st.caption(f"رقم الطلب: {row['order_number']}")
+        with summary_cols[1]:
+            st.caption(f"SKU: {row['sku']}")
+        with summary_cols[2]:
+            st.caption(f"الفرق: {diff_value}")
+        with summary_cols[3]:
+            st.caption(f"كمية سلة/ABC: {int(row['salla_qty']) if pd.notna(row['salla_qty']) else 0} / {int(row['abc_qty']) if pd.notna(row['abc_qty']) else 0}")
+        with summary_cols[4]:
+            toggle_label = "إخفاء التفاصيل" if st.session_state.get(f"show_{note_key}", not is_closed) else "إظهار البطاقة"
+            if st.button(toggle_label, key=f"toggle_{note_key}", use_container_width=True):
+                st.session_state[f"show_{note_key}"] = not st.session_state.get(f"show_{note_key}", not is_closed)
+                st.rerun()
+
+        if is_closed and not st.session_state.get(f"show_{note_key}", False):
+            continue
+
+        action_cols = st.columns([1, 1, 1, 5])
         with action_cols[0]:
             if st.button("حفظ الملحوظة", key=f"save_{note_key}", use_container_width=True):
                 save_case_note(
@@ -936,7 +1373,23 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
                     )
                     st.rerun()
 
-        st.markdown("</div>", unsafe_allow_html=True)
+        if st.session_state.user_role == "admin" and row["status"] == STATUS_DONE:
+            with action_cols[2]:
+                if st.button("🔓 إعادة فتح", key=f"reopen_{note_key}", use_container_width=True):
+                    save_case_note(
+                        order_number=row["order_number"],
+                        sku=row["sku"],
+                        pharmacy_name=pharmacy_name,
+                        case_type=row["case_type"],
+                        note=note_value,
+                    )
+                    reopen_case(
+                        order_number=row["order_number"],
+                        sku=row["sku"],
+                        pharmacy_name=pharmacy_name,
+                        case_type=row["case_type"],
+                    )
+                    st.rerun()
 
 
 def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -961,7 +1414,14 @@ def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
             "order_status": "حالة الطلب",
             "order_date": "تاريخ الطلب",
             "invoice_date": "تاريخ الفاتورة",
+            "profile_type": "نوع البروفايل",
+            "receipt_classification": "تصنيف البيع",
+            "all_abc_pharmacies": "الفروع الظاهرة في ABC",
+            "other_branch_details": "ملاحظة الفروع",
+            "pharmacist_note": "ملحوظة الصيدلي",
             "case_reason": "تفصيل الحالة",
+            "first_seen_at": "أول ظهور",
+            "last_seen_at": "آخر تحديث",
         }
     )
     return display_df
@@ -969,20 +1429,53 @@ def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
 
 def export_tabs_to_excel(dataframes_by_sheet: dict[str, pd.DataFrame]) -> bytes:
     from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.utils.dataframe import dataframe_to_rows
 
     output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        for sheet_name, sheet_df in dataframes_by_sheet.items():
+    workbook = Workbook()
+    default_sheet = workbook.active
+    default_sheet.title = "ملخص"
+    default_sheet.append(["ملاحظة"])
+    default_sheet.append(["لا توجد بيانات مطابقة للتصدير حسب الفلاتر الحالية."])
+
+    wrote_any_sheet = False
+    seen_sheet_names = set()
+
+    for sheet_name, sheet_df in dataframes_by_sheet.items():
+        if sheet_df is None:
+            continue
+
+        if PandasStyler is not None and isinstance(sheet_df, PandasStyler):
+            export_df = sheet_df.data.copy()
+        elif isinstance(sheet_df, pd.Series):
+            export_df = sheet_df.to_frame()
+        elif isinstance(sheet_df, pd.DataFrame):
             export_df = sheet_df.copy()
-            if isinstance(export_df, pd.io.formats.style.Styler):
-                export_df = export_df.data
-            if len(export_df) > 0:
-                export_df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
-            else:
-                # Create empty sheet with message
-                pd.DataFrame({"ملاحظة": ["لا توجد بيانات في هذا التبويب"]}).to_excel(
-                    writer, sheet_name=sheet_name[:31], index=False
-                )
+        else:
+            export_df = pd.DataFrame(sheet_df)
+
+        safe_sheet_name = (str(sheet_name).strip() or "Sheet")[:31]
+        if safe_sheet_name in seen_sheet_names:
+            suffix = 2
+            base_name = safe_sheet_name[:28]
+            while f"{base_name}_{suffix}" in seen_sheet_names:
+                suffix += 1
+            safe_sheet_name = f"{base_name}_{suffix}"
+        seen_sheet_names.add(safe_sheet_name)
+
+        worksheet = workbook.create_sheet(title=safe_sheet_name)
+        if export_df.empty:
+            worksheet.append(["لا توجد بيانات"])
+        else:
+            for row in dataframe_to_rows(export_df, index=False, header=True):
+                worksheet.append(row)
+        wrote_any_sheet = True
+
+    if wrote_any_sheet and "ملخص" in workbook.sheetnames and len(workbook.sheetnames) > 1:
+        workbook.remove(workbook["ملخص"])
+
+    workbook.save(output)
     output.seek(0)
     return output.getvalue()
 
@@ -998,12 +1491,122 @@ def render_admin_dashboard():
         unsafe_allow_html=True,
     )
 
+    latest = get_latest_upload_summary()
+    if latest:
+        batch_id, file_name, uploaded_by, uploaded_at, total_cases, additions, returns, orphan_salla, orphan_abc, branch_mismatch, special_review, is_locked, session_name = latest
+        lock_status = "🔒 مقفلة" if is_locked else "🔓 مفتوحة"
+        st.markdown(
+            f"""
+            <div class="note-card">
+                <strong>الجلسة النشطة:</strong> {session_name or 'غير مسماة'} &nbsp; | &nbsp;
+                <strong>الملف:</strong> {file_name} &nbsp; | &nbsp;
+                <strong>بواسطة:</strong> {uploaded_by} &nbsp; | &nbsp;
+                <strong>التاريخ:</strong> {uploaded_at[:16] if uploaded_at else ''} &nbsp; | &nbsp;
+                <strong>الحالة:</strong> {lock_status}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    refresh_col, info_col = st.columns([1, 4])
+    with refresh_col:
+        if st.button("تحديث الصفحة", use_container_width=True):
+            st.rerun()
+    with info_col:
+        st.caption("يعرض آخر الإجراءات المنفذة وآخر دخول للصيادلة والحالات المحدثة بعد الرفع.")
+
     with st.expander("رفع ملف الطلبات والفواتير", expanded=True):
         uploaded_file = st.file_uploader("اختر ملف Excel", type=["xlsx"])
         if uploaded_file and st.button("معالجة الملف و ترحيل الحالات", use_container_width=True):
             with st.spinner("جاري قراءة الملف وتصنيف الحالات بدقة..."):
                 results, upload_batch_id = process_excel(uploaded_file, st.session_state.username)
-            st.success(f"✅ تمت المعالجة بنجاح. تم إنشاء جلسة جديدة")
+            st.success(f"✅ تمت المعالجة بنجاح. تم إنشاء جلسة جديدة: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+            st.session_state.last_processed_preview = results.head(20)
+            st.rerun()
+
+    st.markdown('<div class="section-title">📋 إدارة الجلسات السابقة</div>', unsafe_allow_html=True)
+    
+    sessions_df = get_all_sessions()
+    if not sessions_df.empty:
+        for _, session in sessions_df.iterrows():
+            col1, col2, col3, col4, col5 = st.columns([2.5, 2.5, 2, 1.5, 2])
+            
+            session_name_val = session.get('session_name', '')
+            if not session_name_val or pd.isna(session_name_val):
+                session_name_val = session['upload_batch_id'][:8]
+            
+            with col1:
+                st.markdown(f"""
+                <div class="session-card">
+                    <strong>📅 {session_name_val}</strong><br>
+                    <small>{session['file_name'][:35] if session['file_name'] else ''}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                is_active = session.get('is_active', 0)
+                active_badge = "✅ نشطة" if is_active else "⏸ غير نشطة"
+                st.markdown(f"""
+                <div class="session-card">
+                    <small>👤 {session['uploaded_by']}<br>
+                    📅 {session['uploaded_at'][:16] if session['uploaded_at'] else ''}<br>
+                    {active_badge}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                st.markdown(f"""
+                <div class="session-card">
+                    <small>📊 {int(session.get('total_cases', 0))} حالة<br>
+                    ➕ {int(session.get('total_additions', 0))} | ➖ {int(session.get('total_returns', 0))}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col4:
+                is_locked = session.get('is_locked', 0)
+                lock_class = "lock-closed" if is_locked else "lock-open"
+                lock_text = "مقفلة" if is_locked else "مفتوحة"
+                st.markdown(f"""
+                <div class="session-card" style="text-align: center;">
+                    <span class="lock-badge {lock_class}">🔒 {lock_text}</span>
+                    <br><small>{session.get('locked_by', '')[:15] if session.get('locked_by') else ''}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col5:
+                btn1, btn2, btn3 = st.columns(3)
+                with btn1:
+                    if not is_locked:
+                        if st.button(f"🔒 قفل", key=f"lock_{session['upload_batch_id']}", use_container_width=True):
+                            lock_session(session['upload_batch_id'], st.session_state.username)
+                            st.rerun()
+                    else:
+                        if st.button(f"🔓 فتح", key=f"unlock_{session['upload_batch_id']}", use_container_width=True):
+                            unlock_session(session['upload_batch_id'])
+                            st.rerun()
+                
+                with btn2:
+                    if not is_active:
+                        if st.button(f"⭐ تفعيل", key=f"activate_{session['upload_batch_id']}", use_container_width=True):
+                            activate_session(session['upload_batch_id'])
+                            st.rerun()
+                
+                with btn3:
+                    if st.button(f"👁️ عرض", key=f"view_{session['upload_batch_id']}", use_container_width=True):
+                        st.session_state.view_session_id = session['upload_batch_id']
+                        st.rerun()
+        
+        st.markdown("---")
+    
+    if st.session_state.get('view_session_id'):
+        st.markdown(f'<div class="section-title">📄 عرض الجلسة المحددة</div>', unsafe_allow_html=True)
+        
+        session_items = get_session_items(st.session_state.view_session_id)
+        if not session_items.empty:
+            st.dataframe(session_items, use_container_width=True)
+        
+        if st.button("إغلاق العرض", use_container_width=True):
+            del st.session_state.view_session_id
             st.rerun()
 
     df = fetch_active_items()
@@ -1012,20 +1615,36 @@ def render_admin_dashboard():
         return
 
     render_metrics(df)
-    
-    filter_col1, filter_col2 = st.columns(2)
+    filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
     with filter_col1:
         branch_options = ["الكل"] + sorted(df["pharmacy_name"].dropna().astype(str).unique().tolist())
         selected_branch = st.selectbox("فلتر الفرع", branch_options)
     with filter_col2:
         performer_values = sorted({value for value in df["performed_by"].fillna("").astype(str).tolist() if value.strip()})
         selected_performer = st.selectbox("فلتر المنفذ", ["الكل"] + performer_values)
+    with filter_col3:
+        date_from = st.date_input("من تاريخ", value=None)
+    with filter_col4:
+        date_to = st.date_input("إلى تاريخ", value=None)
 
     filtered_df = df.copy()
     if selected_branch != "الكل":
         filtered_df = filtered_df[filtered_df["pharmacy_name"] == selected_branch]
     if selected_performer != "الكل":
         filtered_df = filtered_df[filtered_df["performed_by"] == selected_performer]
+    if date_from or date_to:
+        pivot_dates = pd.to_datetime(
+            filtered_df["performed_at"].replace("", pd.NA).fillna(filtered_df["invoice_date"]).fillna(filtered_df["order_date"]),
+            errors="coerce",
+        )
+        if date_from:
+            filtered_df = filtered_df[pivot_dates.dt.date >= date_from]
+            pivot_dates = pd.to_datetime(
+                filtered_df["performed_at"].replace("", pd.NA).fillna(filtered_df["invoice_date"]).fillna(filtered_df["order_date"]),
+                errors="coerce",
+            )
+        if date_to:
+            filtered_df = filtered_df[pivot_dates.dt.date <= date_to]
 
     admin_df = prepare_display_df(filtered_df)
 
@@ -1050,6 +1669,8 @@ def render_admin_dashboard():
     returns_admin = admin_df[(filtered_df["case_type"] == "return") & (~filtered_df["order_status"].apply(is_cancelled_or_returned_status))]
     orphan_salla_admin = admin_df[(filtered_df["case_type"] == "orphan_salla") & (~filtered_df["order_status"].apply(is_cancelled_or_returned_status))]
     orphan_abc_admin = admin_df[(filtered_df["case_type"] == "orphan_abc") & (~filtered_df["order_status"].apply(is_cancelled_or_returned_status))]
+    post_cutoff_admin = admin_df[filtered_df["case_type"] == "post_cutoff_abc"]
+    payment_pending_admin = admin_df[filtered_df["order_status"].apply(is_pending_payment_status)]
     cancelled_admin = prepare_display_df(filtered_df[filtered_df["order_status"].apply(is_cancelled_or_returned_status)])
 
     export_bytes = export_tabs_to_excel(
@@ -1058,31 +1679,59 @@ def render_admin_dashboard():
             "الإرجاعات": returns_admin,
             "طلبات بدون فاتورة": orphan_salla_admin,
             "فواتير بدون طلب": orphan_abc_admin,
+            "فواتير بعد آخر طلب": post_cutoff_admin,
+            "بانتظار الدفع": payment_pending_admin,
             "الملغي_والمسترجع": cancelled_admin,
         }
     )
     st.download_button(
-        "📥 تصدير إلى Excel",
+        "📥 تصدير كل التبويبات إلى Excel",
         data=export_bytes,
         file_name=f"balsam_reconciliation_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", "الملغي/المسترجع"]
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", "فواتير بعد آخر طلب", "بانتظار الدفع", "الملغي/المسترجع"]
     )
 
+    def styled_frame(input_df):
+        def row_style(row):
+            case_type = row.get("نوع الحالة", "")
+            order_status = row.get("حالة الطلب", "")
+            status = row.get("الحالة", "")
+            
+            if status == "تم":
+                color = "background-color: #d4edda"
+            elif is_cancelled_or_returned_status(order_status):
+                color = "background-color: #ffe5e5"
+            elif is_pending_payment_status(order_status):
+                color = "background-color: #fff4d6"
+            elif case_type == "إرجاع":
+                color = "background-color: #ffe0df"
+            elif case_type == "إضافة":
+                color = "background-color: #dff1ff"
+            else:
+                color = "background-color: #ffe9cc"
+            return [color] * len(row)
+
+        return input_df.style.apply(row_style, axis=1)
+
     with tab1:
-        st.dataframe(additions_admin, use_container_width=True)
+        st.dataframe(styled_frame(additions_admin), use_container_width=True)
     with tab2:
-        st.dataframe(returns_admin, use_container_width=True)
+        st.dataframe(styled_frame(returns_admin), use_container_width=True)
     with tab3:
-        st.dataframe(orphan_salla_admin, use_container_width=True)
+        st.dataframe(styled_frame(orphan_salla_admin), use_container_width=True)
     with tab4:
-        st.dataframe(orphan_abc_admin, use_container_width=True)
+        st.dataframe(styled_frame(orphan_abc_admin), use_container_width=True)
     with tab5:
-        st.dataframe(cancelled_admin, use_container_width=True)
+        st.dataframe(styled_frame(post_cutoff_admin), use_container_width=True)
+    with tab6:
+        st.dataframe(styled_frame(payment_pending_admin), use_container_width=True)
+    with tab7:
+        st.dataframe(styled_frame(cancelled_admin), use_container_width=True)
 
 
 def render_pharmacy_dashboard():
@@ -1108,7 +1757,7 @@ def render_pharmacy_dashboard():
     is_locked = df['is_locked'].iloc[0] == 1 if not df.empty else False
     
     if is_locked:
-        st.warning("🔒 هذه الجلسة مقفلة ولا يمكن إجراء تعديلات عليها.")
+        st.warning("🔒 هذه الجلسة مقفلة ولا يمكن إجراء تعديلات عليها. الرجاء التواصل مع المدير لفتحها.")
         allow_actions = False
     else:
         allow_actions = True
@@ -1116,14 +1765,38 @@ def render_pharmacy_dashboard():
     render_metrics(df)
 
     active_non_cancelled = ~df["order_status"].apply(is_cancelled_or_returned_status)
-    additions_df = df[(df["case_type"] == "addition") & active_non_cancelled].copy()
-    returns_df = df[(df["case_type"] == "return") & active_non_cancelled].copy()
-    orphan_salla_df = df[(df["case_type"] == "orphan_salla") & active_non_cancelled].copy()
-    orphan_abc_df = df[(df["case_type"] == "orphan_abc") & active_non_cancelled].copy()
+    active_non_payment = ~df["order_status"].apply(is_pending_payment_status)
+    active_operational = active_non_cancelled & active_non_payment
+    additions_df = df[(df["case_type"] == "addition") & active_operational].copy()
+    returns_df = df[(df["case_type"] == "return") & active_operational].copy()
+    orphan_salla_df = df[(df["case_type"] == "orphan_salla") & active_operational].copy()
+    orphan_abc_df = df[(df["case_type"] == "orphan_abc") & active_operational].copy()
+    post_cutoff_df = df[df["case_type"] == "post_cutoff_abc"].copy()
     cancelled_df = df[df["order_status"].apply(is_cancelled_or_returned_status)].copy()
+    payment_pending_df = df[df["order_status"].apply(is_pending_payment_status)].copy()
+    review_df = df[(df["case_type"].isin(["branch_mismatch", "special_review"])) & active_operational].copy()
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", "الملغي/المسترجع"]
+    pharmacy_export = export_tabs_to_excel(
+        {
+            "الإضافات": prepare_display_df(additions_df),
+            "الإرجاعات": prepare_display_df(returns_df),
+            "طلبات بدون فاتورة": prepare_display_df(orphan_salla_df),
+            "فواتير بدون طلب": prepare_display_df(orphan_abc_df),
+            "فواتير بعد آخر طلب": prepare_display_df(post_cutoff_df),
+            "بانتظار الدفع": prepare_display_df(payment_pending_df),
+            "الملغي_والمسترجع": prepare_display_df(cancelled_df if not cancelled_df.empty else review_df),
+        }
+    )
+    st.download_button(
+        "تصدير تبويبات الفرع إلى Excel",
+        data=pharmacy_export,
+        file_name=f"{pharmacy_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
+
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", "فواتير بعد آخر طلب", "بانتظار الدفع", "الملغي/المسترجع"]
     )
 
     with tab1:
@@ -1135,11 +1808,16 @@ def render_pharmacy_dashboard():
     with tab4:
         render_case_cards(orphan_abc_df, allow_actions, pharmacist_name, pharmacy_name)
     with tab5:
-        render_case_cards(cancelled_df, False, pharmacist_name, pharmacy_name)
+        render_case_cards(post_cutoff_df, False, pharmacist_name, pharmacy_name)
+    with tab6:
+        render_case_cards(payment_pending_df, False, pharmacist_name, pharmacy_name)
+    with tab7:
+        render_case_cards(cancelled_df if not cancelled_df.empty else review_df, False, pharmacist_name, pharmacy_name)
 
 
 # ========== INITIALIZATION ==========
 ensure_database()
+
 
 for key, default_value in {
     "logged_in": False,
@@ -1147,6 +1825,7 @@ for key, default_value in {
     "user_role": "",
     "pharmacist_name": "",
     "last_processed_preview": None,
+    "view_session_id": None,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default_value
@@ -1174,7 +1853,7 @@ with st.sidebar:
     else:
         st.success(st.session_state.username)
         if st.button("تسجيل خروج", use_container_width=True):
-            for key in ["logged_in", "username", "user_role", "pharmacist_name", "last_processed_preview"]:
+            for key in ["logged_in", "username", "user_role", "pharmacist_name", "last_processed_preview", "view_session_id"]:
                 st.session_state[key] = False if key == "logged_in" else None
             st.rerun()
 
@@ -1185,22 +1864,38 @@ if not st.session_state.logged_in:
         """
         <div class="hero">
             <h1>نظام بلسم العلا لمراقبة إدخالات الفواتير</h1>
-            <p>يعرض الإضافات والإرجاعات الفعلية، ويفصل السطور غير المربوطة وحالات اختلاف الفرع.</p>
+            <p>يعرض الإضافات والإرجاعات الفعلية، ويفصل السطور غير المربوطة وحالات اختلاف الفرع، ويحافظ على حالة كل فرع بين عمليات الرفع.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        """
+        <div class="note-card">
+            <strong>ما الذي يجب فعله في هذا البرنامج؟</strong><br>
+            1. المراجعة الدقيقة للاضافات والارجاعات.<br>
+            2. تأكيد إضافة الطلبات التي لم يتم ادخالها على ABC.<br>
+            3. تأكيد إرجاع الطلبات التي دخلت على ABC بالخطأ.
         </div>
         """,
         unsafe_allow_html=True,
     )
 elif st.session_state.user_role == "pharmacy":
-    if not st.session_state.pharmacist_name:
-        st.markdown("### 👤 الرجاء إدخال اسم الصيدلي")
-        pharmacist_name_input = st.text_input("اسم الصيدلي")
+    st.markdown("### 👤 الرجاء إدخال اسم الصيدلي")
+    pharmacist_name_input = st.text_input("اسم الصيدلي", value=st.session_state.pharmacist_name or "")
+    
+    col1, col2 = st.columns([1, 3])
+    with col1:
         if st.button("تأكيد الاسم", use_container_width=True):
             if pharmacist_name_input.strip():
                 st.session_state.pharmacist_name = pharmacist_name_input.strip()
                 update_last_access(st.session_state.username, st.session_state.pharmacist_name)
-                st.success("✅ تم حفظ الاسم")
+                st.success("✅ تم حفظ الاسم بنجاح.")
                 st.rerun()
-    else:
+            else:
+                st.error("❌ الرجاء إدخال اسم صحيح")
+    
+    if st.session_state.pharmacist_name:
         update_last_access(st.session_state.username, st.session_state.pharmacist_name)
         render_pharmacy_dashboard()
 else:
