@@ -176,6 +176,14 @@ st.markdown(
     }
     .lock-closed { background: #d9534f; color: white; }
     .lock-open { background: #5cb85c; color: white; }
+    
+    .info-box {
+        background: #e8f4f8;
+        padding: 0.8rem;
+        border-radius: 12px;
+        margin: 0.5rem 0;
+        border-right: 4px solid #1f7a8c;
+    }
 </style>
 """,
     unsafe_allow_html=True,
@@ -222,7 +230,10 @@ def upgrade_database():
         "receipt_classification": "TEXT DEFAULT ''",
         "all_abc_pharmacies": "TEXT DEFAULT ''",
         "other_branch_details": "TEXT DEFAULT ''",
-        "pharmacist_note": "TEXT DEFAULT ''"
+        "pharmacist_note": "TEXT DEFAULT ''",
+        "hidden_from_pharmacy": "INTEGER DEFAULT 0",
+        "hidden_by": "TEXT DEFAULT ''",
+        "hidden_at": "TEXT DEFAULT ''"
     }
     
     for col_name, col_type in new_items_columns.items():
@@ -939,6 +950,32 @@ def activate_session(upload_batch_id: str):
     conn.close()
 
 
+def hide_item_from_pharmacy(item_key: str, hidden_by: str):
+    """إخفاء عنصر من ظهوره للصيدلية"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE reconciliation_items 
+        SET hidden_from_pharmacy = 1, hidden_by = ?, hidden_at = ?
+        WHERE item_key = ?
+    """, (hidden_by, now_str(), item_key))
+    conn.commit()
+    conn.close()
+
+
+def unhide_item_from_pharmacy(item_key: str):
+    """إظهار عنصر مرة أخرى للصيدلية"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE reconciliation_items 
+        SET hidden_from_pharmacy = 0, hidden_by = '', hidden_at = ''
+        WHERE item_key = ?
+    """, (item_key,))
+    conn.commit()
+    conn.close()
+
+
 def reopen_case(order_number: str, sku: str, pharmacy_name: str, case_type: str):
     """إعادة فتح حالة مغلقة"""
     conn = sqlite3.connect(DB_PATH)
@@ -950,6 +987,41 @@ def reopen_case(order_number: str, sku: str, pharmacy_name: str, case_type: str)
     """, (order_number, sku, pharmacy_name, case_type))
     conn.commit()
     conn.close()
+
+
+def reopen_case_by_item_key(item_key: str):
+    """إعادة فتح حالة مغلقة باستخدام المفتاح"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE reconciliation_items
+        SET status = 'قيد المتابعة', performed_by = '', performed_at = ''
+        WHERE item_key = ?
+    """, (item_key,))
+    conn.commit()
+    conn.close()
+
+
+def get_completed_items(pharmacy_name: str = None) -> pd.DataFrame:
+    """الحصول على العناصر المكتملة"""
+    conn = sqlite3.connect(DB_PATH)
+    query = """
+        SELECT order_number, invoice_number, sku, product_name, case_type, case_label,
+               performed_by, performed_at, status, item_key
+        FROM reconciliation_items
+        WHERE active = 1 AND status = 'تم'
+    """
+    params = []
+    if pharmacy_name:
+        query += " AND pharmacy_name = ?"
+        params.append(pharmacy_name)
+    query += " ORDER BY performed_at DESC"
+    
+    try:
+        df = pd.read_sql_query(query, conn, params=params if params else None)
+        return df
+    finally:
+        conn.close()
 
 
 def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: str, uploaded_by: str):
@@ -1009,9 +1081,9 @@ def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: st
                 customer_name, customer_phone, city, order_status, order_date,
                 invoice_date, profile_type, profile_type_from_abc, receipt_classification, 
                 all_abc_pharmacies, other_branch_details, pharmacist_note, total_amount, 
-                first_seen_at, last_seen_at, active
+                first_seen_at, last_seen_at, active, hidden_from_pharmacy
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
             ON CONFLICT(item_key) DO UPDATE SET
                 upload_batch_id = excluded.upload_batch_id,
                 order_number = excluded.order_number,
@@ -1045,7 +1117,8 @@ def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: st
                 total_amount = excluded.total_amount,
                 first_seen_at = reconciliation_items.first_seen_at,
                 last_seen_at = excluded.last_seen_at,
-                active = 1
+                active = 1,
+                hidden_from_pharmacy = reconciliation_items.hidden_from_pharmacy
             """,
             (
                 row["item_key"],
@@ -1111,7 +1184,7 @@ def process_excel(uploaded_file, uploaded_by: str):
     return results, upload_batch_id
 
 
-def fetch_active_items(pharmacy_name: str | None = None) -> pd.DataFrame:
+def fetch_active_items(pharmacy_name: str | None = None, include_hidden: bool = False) -> pd.DataFrame:
     conn = sqlite3.connect(DB_PATH)
     
     cur = conn.cursor()
@@ -1139,28 +1212,43 @@ def fetch_active_items(pharmacy_name: str | None = None) -> pd.DataFrame:
     else:
         is_locked = 0
     
+    cur.execute("PRAGMA table_info(reconciliation_items)")
+    item_columns = [row[1] for row in cur.fetchall()]
+    has_hidden_column = "hidden_from_pharmacy" in item_columns
+    
     query = """
         SELECT order_number, invoice_number, sku, product_name, pharmacy_name, branch_number,
                salla_qty, abc_qty, difference, case_type, case_label, case_reason, status,
                performed_by, performed_at, customer_name, customer_phone, city, order_status,
                order_date, invoice_date, total_amount, first_seen_at, last_seen_at,
                profile_type, profile_type_from_abc, receipt_classification, 
-               all_abc_pharmacies, other_branch_details, pharmacist_note,
+               all_abc_pharmacies, other_branch_details, pharmacist_note, item_key,
                ? as is_locked
+    """
+    
+    if has_hidden_column:
+        query += ", hidden_from_pharmacy"
+    else:
+        query += ", 0 as hidden_from_pharmacy"
+    
+    query += """
         FROM reconciliation_items
-        WHERE active = 1 AND upload_batch_id = ?
+        WHERE active = 1 AND upload_batch_id = ? AND status != 'تم'
     """
     params = [1 if is_locked else 0, active_batch_id]
     
     if pharmacy_name:
         query += " AND pharmacy_name = ?"
         params.append(pharmacy_name)
+        
+        if not include_hidden and has_hidden_column:
+            query += " AND (hidden_from_pharmacy = 0 OR hidden_from_pharmacy IS NULL)"
     
     query += " ORDER BY case_type, order_number DESC, sku"
     
     try:
         df = pd.read_sql_query(query, conn, params=params)
-        for col in ['abc_pharmacy_name', 'profile_type', 'profile_type_from_abc', 'receipt_classification', 'all_abc_pharmacies', 'other_branch_details', 'pharmacist_note']:
+        for col in ['abc_pharmacy_name', 'profile_type', 'profile_type_from_abc', 'receipt_classification', 'all_abc_pharmacies', 'other_branch_details', 'pharmacist_note', 'item_key']:
             if col not in df.columns:
                 df[col] = ''
         return df
@@ -1252,111 +1340,71 @@ def render_metrics(df: pd.DataFrame):
             )
 
 
-def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: str, pharmacy_name: str):
+def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: str, pharmacy_name: str, is_admin: bool = False):
     if df.empty:
         st.success("لا توجد حالات في هذا القسم.")
         return
 
     for idx, row in df.iterrows():
-        card_classes = "action-card"
-        if row["status"] == STATUS_DONE:
-            card_classes += " action-card-completed"
-        elif is_cancelled_or_returned_status(row["order_status"]):
-            card_classes += " action-card-alert"
-        elif is_pending_payment_status(row["order_status"]):
-            card_classes += " action-card-payment"
-
-        diff_value = numeric_value(row["difference"])
-        diff_class = "diff-positive" if diff_value > 0 else ("diff-negative" if diff_value < 0 else "")
-        diff_html = f'<span class="{diff_class}">{diff_value}</span>' if diff_class else str(diff_value)
-        order_date_html = f'<span class="date-accent">{row["order_date"] or "غير متوفر"}</span>'
-        invoice_date_html = f'<span class="date-accent">{row["invoice_date"] or "غير متوفر"}</span>'
-
-        with st.container(border=True):
-            st.markdown(
-                f'<div class="{card_classes}" style="padding:0.8rem;border-radius:14px;"></div>',
-                unsafe_allow_html=True,
+        with st.container():
+            # استخدام أعمدة منظمة بدلاً من كارد مفتوح
+            col1, col2 = st.columns([4, 1])
+            
+            with col1:
+                subcol1, subcol2, subcol3, subcol4 = st.columns(4)
+                with subcol1:
+                    st.markdown(f"**📋 رقم الطلب:** {row['order_number']}")
+                    st.markdown(f"**🏷️ SKU:** {row['sku']}")
+                    diff_value = numeric_value(row['difference'])
+                    diff_class = "positive" if diff_value > 0 else "negative"
+                    st.markdown(f"**📊 الفرق:** {'+' if diff_value > 0 else ''}{diff_value}")
+                with subcol2:
+                    st.markdown(f"**📦 المنتج:** {row['product_name'][:40]}...")
+                    st.markdown(f"**🏥 الفرع:** {row['pharmacy_name'] or 'غير محدد'}")
+                with subcol3:
+                    st.markdown(f"**🧾 رقم الفاتورة:** {row['invoice_number'] or 'غير متوفر'}")
+                    st.markdown(f"**📅 تاريخ الطلب:** {row['order_date'][:16] if row['order_date'] else 'غير متوفر'}")
+                with subcol4:
+                    st.markdown(f"**✅ الحالة:** {status_pill(row['status'])}", unsafe_allow_html=True)
+                    st.markdown(f"**🧾 تاريخ الفاتورة:** {row['invoice_date'][:16] if row['invoice_date'] else 'غير متوفر'}")
+            
+            with col2:
+                if is_admin and row.get('hidden_from_pharmacy', 0) == 1:
+                    if st.button("👁️ إظهار", key=f"unhide_{idx}_{row['sku']}", use_container_width=True):
+                        unhide_item_from_pharmacy(row['item_key'])
+                        st.rerun()
+                elif is_admin and row.get('hidden_from_pharmacy', 0) == 0:
+                    if st.button("🙈 إخفاء", key=f"hide_{idx}_{row['sku']}", use_container_width=True):
+                        hide_item_from_pharmacy(row['item_key'], st.session_state.username)
+                        st.rerun()
+            
+            # التفاصيل الإضافية
+            with st.expander("📋 تفاصيل إضافية"):
+                detail_cols = st.columns(3)
+                with detail_cols[0]:
+                    st.markdown(f"**كمية سلة:** {int(row['salla_qty']) if pd.notna(row['salla_qty']) else 0}")
+                    st.markdown(f"**كمية ABC:** {int(row['abc_qty']) if pd.notna(row['abc_qty']) else 0}")
+                with detail_cols[1]:
+                    st.markdown(f"**حالة الطلب:** {row['order_status'] or 'غير متوفرة'}")
+                    st.markdown(f"**نوع البروفايل:** {row.get('profile_type', '') or row.get('profile_type_from_abc', '') or 'غير متوفر'}")
+                with detail_cols[2]:
+                    st.markdown(f"**تصنيف البيع:** {row.get('receipt_classification', '') or 'غير متوفر'}")
+                    st.markdown(f"**فروع ABC:** {row.get('all_abc_pharmacies', '') or row.get('abc_pharmacy_name', '') or 'غير متوفر'}")
+                st.markdown(f"**التفصيل:** {row.get('case_reason', '')}")
+            
+            # ملحوظة الصيدلي
+            note_key = f"note_{row['case_type']}_{row['order_number']}_{row['sku']}_{idx}"
+            note_value = st.text_area(
+                "📝 ملحوظة الصيدلي",
+                value=row.get("pharmacist_note", "") or "",
+                key=note_key,
+                height=60,
             )
-        badges = f"{case_pill(row['case_type'])}&nbsp; {status_pill(row['status'])}"
-        if status_alert_pill(row["order_status"]):
-            badges += f"&nbsp; {status_alert_pill(row['order_status'])}"
-        if payment_alert_pill(row["order_status"]):
-            badges += f"&nbsp; {payment_alert_pill(row['order_status'])}"
-        st.markdown(
-            f"""
-            <div style="display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap;">
-                <div>{badges}</div>
-                <div style="font-weight:700;color:#48606a;">الفرع: {row['pharmacy_name'] or 'غير محدد'}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        info_cols = st.columns(4)
-        info_items = [
-            ("رقم الطلب", row["order_number"]),
-            ("رقم الفاتورة", row["invoice_number"] or "غير متوفر"),
-            ("SKU", row["sku"]),
-            ("المنتج", row["product_name"][:70]),
-            ("كمية سلة", int(row["salla_qty"]) if pd.notna(row["salla_qty"]) else 0),
-            ("كمية ABC", int(row["abc_qty"]) if pd.notna(row["abc_qty"]) else 0),
-            ("الفرق", diff_html),
-            ("حالة الطلب", row["order_status"] or "غير متوفرة"),
-            ("تاريخ الطلب", order_date_html),
-            ("تاريخ الفاتورة", invoice_date_html),
-            ("تاريخ التنفيذ", row["performed_at"] or "لم يُنفذ بعد"),
-            ("نوع البروفايل", row.get("profile_type", "") or row.get("profile_type_from_abc", "") or "غير متوفر"),
-            ("تصنيف البيع", row.get("receipt_classification", "") or "غير متوفر"),
-            ("فروع ABC", row.get("all_abc_pharmacies", "") or row.get("abc_pharmacy_name", "") or "غير متوفر"),
-            ("التفصيل", row.get("case_reason", "") or "غير متوفر"),
-        ]
-        for item_index, (label, value) in enumerate(info_items):
-            with info_cols[item_index % 4]:
-                st.markdown(f"**{label}**  \n{value}", unsafe_allow_html=True)
-
-        note_key = f"note_{row['case_type']}_{row['order_number']}_{row['sku']}_{idx}"
-        note_value = st.text_area(
-            "ملحوظة الصيدلي",
-            value=row.get("pharmacist_note", "") or "",
-            key=note_key,
-            height=80,
-        )
-
-        is_closed = row["status"] == STATUS_DONE
-        summary_cols = st.columns([2, 2, 2, 2, 1])
-        with summary_cols[0]:
-            st.caption(f"رقم الطلب: {row['order_number']}")
-        with summary_cols[1]:
-            st.caption(f"SKU: {row['sku']}")
-        with summary_cols[2]:
-            st.caption(f"الفرق: {diff_value}")
-        with summary_cols[3]:
-            st.caption(f"كمية سلة/ABC: {int(row['salla_qty']) if pd.notna(row['salla_qty']) else 0} / {int(row['abc_qty']) if pd.notna(row['abc_qty']) else 0}")
-        with summary_cols[4]:
-            toggle_label = "إخفاء التفاصيل" if st.session_state.get(f"show_{note_key}", not is_closed) else "إظهار البطاقة"
-            if st.button(toggle_label, key=f"toggle_{note_key}", use_container_width=True):
-                st.session_state[f"show_{note_key}"] = not st.session_state.get(f"show_{note_key}", not is_closed)
-                st.rerun()
-
-        if is_closed and not st.session_state.get(f"show_{note_key}", False):
-            continue
-
-        action_cols = st.columns([1, 1, 1, 5])
-        with action_cols[0]:
-            if st.button("حفظ الملحوظة", key=f"save_{note_key}", use_container_width=True):
-                save_case_note(
-                    order_number=row["order_number"],
-                    sku=row["sku"],
-                    pharmacy_name=pharmacy_name,
-                    case_type=row["case_type"],
-                    note=note_value,
-                )
-                st.rerun()
-
-        if allow_actions and row["status"] != STATUS_DONE and row["case_type"] in {"addition", "return", "orphan_salla", "orphan_abc"}:
-            button_label = "تأكيد الإضافة" if row["case_type"] in {"addition", "orphan_salla"} else "تأكيد الإرجاع"
-            with action_cols[1]:
-                if st.button(button_label, key=f"done_{note_key}", use_container_width=True):
+            
+            # أزرار الإجراءات
+            btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 4])
+            with btn_col1:
+                if st.button("💾 حفظ", key=f"save_{note_key}", use_container_width=True):
                     save_case_note(
                         order_number=row["order_number"],
                         sku=row["sku"],
@@ -1364,32 +1412,91 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
                         case_type=row["case_type"],
                         note=note_value,
                     )
-                    mark_case_done(
-                        order_number=row["order_number"],
-                        sku=row["sku"],
-                        pharmacy_name=pharmacy_name,
-                        case_type=row["case_type"],
-                        performed_by=pharmacist_name,
-                    )
                     st.rerun()
+            
+            if allow_actions and row["status"] != STATUS_DONE and row["case_type"] in {"addition", "return", "orphan_salla", "orphan_abc"}:
+                button_label = "✅ تأكيد" if row["case_type"] in {"addition", "orphan_salla"} else "🔄 تأكيد"
+                with btn_col2:
+                    if st.button(button_label, key=f"done_{note_key}", use_container_width=True):
+                        save_case_note(
+                            order_number=row["order_number"],
+                            sku=row["sku"],
+                            pharmacy_name=pharmacy_name,
+                            case_type=row["case_type"],
+                            note=note_value,
+                        )
+                        mark_case_done(
+                            order_number=row["order_number"],
+                            sku=row["sku"],
+                            pharmacy_name=pharmacy_name,
+                            case_type=row["case_type"],
+                            performed_by=pharmacist_name,
+                        )
+                        st.rerun()
+            
+            if is_admin and row["status"] == STATUS_DONE:
+                with btn_col2:
+                    if st.button("🔓 إعادة فتح", key=f"reopen_{note_key}", use_container_width=True):
+                        reopen_case(
+                            order_number=row["order_number"],
+                            sku=row["sku"],
+                            pharmacy_name=pharmacy_name,
+                            case_type=row["case_type"],
+                        )
+                        st.rerun()
+            
+            st.markdown("---")
 
-        if st.session_state.user_role == "admin" and row["status"] == STATUS_DONE:
-            with action_cols[2]:
-                if st.button("🔓 إعادة فتح", key=f"reopen_{note_key}", use_container_width=True):
-                    save_case_note(
-                        order_number=row["order_number"],
-                        sku=row["sku"],
-                        pharmacy_name=pharmacy_name,
-                        case_type=row["case_type"],
-                        note=note_value,
-                    )
-                    reopen_case(
-                        order_number=row["order_number"],
-                        sku=row["sku"],
-                        pharmacy_name=pharmacy_name,
-                        case_type=row["case_type"],
-                    )
+
+def render_completed_table(df: pd.DataFrame, is_admin: bool = False):
+    """عرض جدول المكتملات"""
+    if df.empty:
+        st.info("لا توجد طلبات مكتملة بعد.")
+        return
+    
+    display_df = df.copy()
+    display_df = display_df.rename(columns={
+        "order_number": "رقم الطلب",
+        "invoice_number": "رقم الفاتورة",
+        "sku": "SKU",
+        "product_name": "المنتج",
+        "case_label": "نوع الإجراء",
+        "performed_by": "تم بواسطة",
+        "performed_at": "تاريخ الإكمال",
+        "status": "الحالة"
+    })
+    
+    cols_to_show = ["رقم الطلب", "رقم الفاتورة", "SKU", "المنتج", "نوع الإجراء", "تم بواسطة", "تاريخ الإكمال"]
+    
+    if is_admin:
+        cols_to_show.append("إعادة فتح")
+        # عرض الجدول مع أزرار إعادة فتح
+        for idx, row in display_df.iterrows():
+            col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1, 1, 0.8, 2, 0.8, 1, 1.5, 0.8])
+            with col1:
+                st.write(row["رقم الطلب"])
+            with col2:
+                st.write(row["رقم الفاتورة"])
+            with col3:
+                st.write(row["SKU"])
+            with col4:
+                st.write(row["المنتج"][:40])
+            with col5:
+                st.write(row["نوع الإجراء"])
+            with col6:
+                st.write(row["تم بواسطة"])
+            with col7:
+                st.write(row["تاريخ الإكمال"])
+            with col8:
+                if st.button("🔓 فتح", key=f"reopen_completed_{idx}"):
+                    if 'item_key' in row:
+                        reopen_case_by_item_key(row['item_key'])
+                    else:
+                        st.warning("لا يمكن إعادة فتح هذا العنصر")
                     st.rerun()
+            st.divider()
+    else:
+        st.dataframe(display_df[cols_to_show], use_container_width=True)
 
 
 def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -1609,7 +1716,7 @@ def render_admin_dashboard():
             del st.session_state.view_session_id
             st.rerun()
 
-    df = fetch_active_items()
+    df = fetch_active_items(include_hidden=True)
     if df.empty:
         st.info("لا توجد بيانات فعالة بعد. ارفع الملف من الأعلى لبدء التحليل.")
         return
@@ -1692,8 +1799,8 @@ def render_admin_dashboard():
         use_container_width=True,
     )
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
-        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", "فواتير بعد آخر طلب", "بانتظار الدفع", "الملغي/المسترجع"]
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
+        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", "فواتير بعد آخر طلب", "بانتظار الدفع", "الملغي/المسترجع", "✅ تم الانتهاء"]
     )
 
     def styled_frame(input_df):
@@ -1732,6 +1839,9 @@ def render_admin_dashboard():
         st.dataframe(styled_frame(payment_pending_admin), use_container_width=True)
     with tab7:
         st.dataframe(styled_frame(cancelled_admin), use_container_width=True)
+    with tab8:
+        completed_df = get_completed_items()
+        render_completed_table(completed_df, is_admin=True)
 
 
 def render_pharmacy_dashboard():
@@ -1743,21 +1853,32 @@ def render_pharmacy_dashboard():
         f"""
         <div class="hero">
             <h1>{pharmacy_name}</h1>
-            <p>فرع رقم {branch_number} | الصيدلي: {pharmacist_name or 'غير مسجل بعد'}</p>
+            <p>فرع رقم {branch_number} | الصيدلي: {pharmacist_name}</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    df = fetch_active_items(pharmacy_name)
+    # عدم ظهور أي شيء إذا لم يدخل الصيدلي اسمه
+    if not pharmacist_name:
+        st.warning("⚠️ الرجاء إدخال اسم الصيدلي من القائمة الجانبية أولاً")
+        return
+
+    df = fetch_active_items(pharmacy_name, include_hidden=False)
+    
     if df.empty:
         st.info("لا توجد حالات نشطة لهذا الفرع حاليًا.")
+        completed_df = get_completed_items(pharmacy_name)
+        if not completed_df.empty:
+            st.markdown("---")
+            st.markdown('<div class="section-title">✅ الطلبات المكتملة</div>', unsafe_allow_html=True)
+            render_completed_table(completed_df, is_admin=False)
         return
 
     is_locked = df['is_locked'].iloc[0] == 1 if not df.empty else False
     
     if is_locked:
-        st.warning("🔒 هذه الجلسة مقفلة ولا يمكن إجراء تعديلات عليها. الرجاء التواصل مع المدير لفتحها.")
+        st.warning("🔒 هذه الجلسة مقفلة ولا يمكن إجراء تعديلات عليها.")
         allow_actions = False
     else:
         allow_actions = True
@@ -1767,6 +1888,7 @@ def render_pharmacy_dashboard():
     active_non_cancelled = ~df["order_status"].apply(is_cancelled_or_returned_status)
     active_non_payment = ~df["order_status"].apply(is_pending_payment_status)
     active_operational = active_non_cancelled & active_non_payment
+    
     additions_df = df[(df["case_type"] == "addition") & active_operational].copy()
     returns_df = df[(df["case_type"] == "return") & active_operational].copy()
     orphan_salla_df = df[(df["case_type"] == "orphan_salla") & active_operational].copy()
@@ -1788,31 +1910,35 @@ def render_pharmacy_dashboard():
         }
     )
     st.download_button(
-        "تصدير تبويبات الفرع إلى Excel",
+        "📥 تصدير تبويبات الفرع إلى Excel",
         data=pharmacy_export,
         file_name=f"{pharmacy_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
-        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", "فواتير بعد آخر طلب", "بانتظار الدفع", "الملغي/المسترجع"]
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
+        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", 
+         "فواتير بعد آخر طلب", "بانتظار الدفع", "الملغي/المسترجع", "✅ تم الانتهاء"]
     )
 
     with tab1:
-        render_case_cards(additions_df, allow_actions, pharmacist_name, pharmacy_name)
+        render_case_cards(additions_df, allow_actions, pharmacist_name, pharmacy_name, is_admin=False)
     with tab2:
-        render_case_cards(returns_df, allow_actions, pharmacist_name, pharmacy_name)
+        render_case_cards(returns_df, allow_actions, pharmacist_name, pharmacy_name, is_admin=False)
     with tab3:
-        render_case_cards(orphan_salla_df, allow_actions, pharmacist_name, pharmacy_name)
+        render_case_cards(orphan_salla_df, allow_actions, pharmacist_name, pharmacy_name, is_admin=False)
     with tab4:
-        render_case_cards(orphan_abc_df, allow_actions, pharmacist_name, pharmacy_name)
+        render_case_cards(orphan_abc_df, allow_actions, pharmacist_name, pharmacy_name, is_admin=False)
     with tab5:
-        render_case_cards(post_cutoff_df, False, pharmacist_name, pharmacy_name)
+        render_case_cards(post_cutoff_df, False, pharmacist_name, pharmacy_name, is_admin=False)
     with tab6:
-        render_case_cards(payment_pending_df, False, pharmacist_name, pharmacy_name)
+        render_case_cards(payment_pending_df, False, pharmacist_name, pharmacy_name, is_admin=False)
     with tab7:
-        render_case_cards(cancelled_df if not cancelled_df.empty else review_df, False, pharmacist_name, pharmacy_name)
+        render_case_cards(cancelled_df if not cancelled_df.empty else review_df, False, pharmacist_name, pharmacy_name, is_admin=False)
+    with tab8:
+        completed_df = get_completed_items(pharmacy_name)
+        render_completed_table(completed_df, is_admin=False)
 
 
 # ========== INITIALIZATION ==========
@@ -1852,7 +1978,20 @@ with st.sidebar:
                 st.error("بيانات الدخول غير صحيحة.")
     else:
         st.success(st.session_state.username)
-        if st.button("تسجيل خروج", use_container_width=True):
+        
+        # إذا كان المستخدم صيدلي وليس لديه اسم، أظهر حقل الإدخال
+        if st.session_state.user_role == "pharmacy" and not st.session_state.pharmacist_name:
+            st.markdown("---")
+            pharmacist_input = st.text_input("👤 اسم الصيدلي", key="pharmacist_name_input")
+            if st.button("💾 حفظ الاسم", use_container_width=True):
+                if pharmacist_input.strip():
+                    st.session_state.pharmacist_name = pharmacist_input.strip()
+                    update_last_access(st.session_state.username, st.session_state.pharmacist_name)
+                    st.success("✅ تم حفظ الاسم")
+                    st.rerun()
+        
+        st.markdown("---")
+        if st.button("🚪 تسجيل خروج", use_container_width=True):
             for key in ["logged_in", "username", "user_role", "pharmacist_name", "last_processed_preview", "view_session_id"]:
                 st.session_state[key] = False if key == "logged_in" else None
             st.rerun()
@@ -1881,22 +2020,9 @@ if not st.session_state.logged_in:
         unsafe_allow_html=True,
     )
 elif st.session_state.user_role == "pharmacy":
-    st.markdown("### 👤 الرجاء إدخال اسم الصيدلي")
-    pharmacist_name_input = st.text_input("اسم الصيدلي", value=st.session_state.pharmacist_name or "")
-    
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        if st.button("تأكيد الاسم", use_container_width=True):
-            if pharmacist_name_input.strip():
-                st.session_state.pharmacist_name = pharmacist_name_input.strip()
-                update_last_access(st.session_state.username, st.session_state.pharmacist_name)
-                st.success("✅ تم حفظ الاسم بنجاح.")
-                st.rerun()
-            else:
-                st.error("❌ الرجاء إدخال اسم صحيح")
-    
-    if st.session_state.pharmacist_name:
-        update_last_access(st.session_state.username, st.session_state.pharmacist_name)
+    if not st.session_state.pharmacist_name:
+        st.info("👈 الرجاء إدخال اسم الصيدلي من القائمة الجانبية")
+    else:
         render_pharmacy_dashboard()
 else:
     render_admin_dashboard()
