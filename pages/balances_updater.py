@@ -17,8 +17,10 @@ def show():
     col1, col2 = st.columns(2)
     with col1:
         abc_file = st.file_uploader("📊 رفع ملف ABC (يبدأ من الصف 5)", type=["xlsx"], key="abc_balances")
+        st.caption("ملف ABC: البيانات تبدأ من الصف 5")
     with col2:
         salla_file = st.file_uploader("📋 رفع ملف Salla", type=["xlsx"], key="salla_balances")
+        st.caption("ملف Salla: يحتوي على أرصدة الفروع")
     
     if abc_file and salla_file:
         if st.button("🔄 تنفيذ تحديث الأرصدة", use_container_width=True):
@@ -40,3 +42,5 @@ def show():
                     )
                 else:
                     st.error(f"❌ خطأ في التحديث: {result}")
+    else:
+        st.info("📂 الرجاء رفع ملفي ABC و Salla لبدء التحديث")
