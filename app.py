@@ -2,6 +2,7 @@ import os
 import re
 import sqlite3
 import uuid
+import hashlib
 from datetime import datetime
 
 import pandas as pd
@@ -265,6 +266,98 @@ def ensure_database():
     conn.commit()
     conn.close()
 
+import hashlib
+
+def create_session_from_upload(upload_batch_id: str, file_name: str, uploaded_by: str):
+    """إنشاء جلسة جديدة مع اسم قابل للقراءة"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    # إضافة عمود session_name إذا لم يكن موجوداً
+    cur.execute("PRAGMA table_info(uploads)")
+    existing_columns = [row[1] for row in cur.fetchall()]
+    
+    if "session_name" not in existing_columns:
+        cur.execute("ALTER TABLE uploads ADD COLUMN session_name TEXT DEFAULT ''")
+    if "is_locked" not in existing_columns:
+        cur.execute("ALTER TABLE uploads ADD COLUMN is_locked INTEGER DEFAULT 0")
+    if "locked_by" not in existing_columns:
+        cur.execute("ALTER TABLE uploads ADD COLUMN locked_by TEXT DEFAULT ''")
+    if "locked_at" not in existing_columns:
+        cur.execute("ALTER TABLE uploads ADD COLUMN locked_at TEXT DEFAULT ''")
+    
+    # إنشاء اسم الجلسة = التاريخ والوقت
+    session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
+    cur.execute("""
+        UPDATE uploads 
+        SET session_name = ?, is_locked = 0, locked_by = '', locked_at = ''
+        WHERE upload_batch_id = ?
+    """, (session_name, upload_batch_id))
+    
+    conn.commit()
+    conn.close()
+    return session_name
+
+def get_all_sessions() -> pd.DataFrame:
+    """الحصول على جميع الجلسات السابقة"""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        df = pd.read_sql_query("""
+            SELECT upload_batch_id, session_name, file_name, uploaded_by, uploaded_at, 
+                   total_cases, total_additions, total_returns, is_locked, locked_by, locked_at
+            FROM uploads
+            ORDER BY uploaded_at DESC
+        """, conn)
+        return df
+    finally:
+        conn.close()
+
+def get_session_items(upload_batch_id: str) -> pd.DataFrame:
+    """الحصول على عناصر جلسة محددة"""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        return pd.read_sql_query("""
+            SELECT * FROM reconciliation_items
+            WHERE upload_batch_id = ? AND active = 1
+        """, conn, params=(upload_batch_id,))
+    finally:
+        conn.close()
+
+def lock_session(upload_batch_id: str, locked_by: str):
+    """قفل الجلسة لمنع التعديل"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE uploads 
+        SET is_locked = 1, locked_by = ?, locked_at = ?
+        WHERE upload_batch_id = ?
+    """, (locked_by, now_str(), upload_batch_id))
+    conn.commit()
+    conn.close()
+
+def unlock_session(upload_batch_id: str):
+    """فتح الجلسة للسماح بالتعديل"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE uploads 
+        SET is_locked = 0, locked_by = '', locked_at = ''
+        WHERE upload_batch_id = ?
+    """, (upload_batch_id,))
+    conn.commit()
+    conn.close()
+
+def activate_session(upload_batch_id: str):
+    """تفعيل جلسة معينة (جعلها الجلسة النشطة)"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    # تعطيل جميع الجلسات الأخرى
+    cur.execute("UPDATE reconciliation_items SET active = 0 WHERE active = 1")
+    cur.execute("UPDATE reconciliation_items SET active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
+    
+    conn.commit()
+    conn.close()
 
 def normalize_text(value) -> str:
     if pd.isna(value):
@@ -842,6 +935,7 @@ def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: st
     )
 
     conn.commit()
+    create_session_from_upload(upload_batch_id, uploaded_file_name, uploaded_by)
     conn.close()
     return upload_batch_id
 
@@ -1119,7 +1213,7 @@ def render_admin_dashboard():
 
     refresh_col, info_col = st.columns([1, 4])
     with refresh_col:
-        if st.button("تحديث الصفحة", use_container_width=True):
+        if st.button("تحديث", use_container_width=True):
             st.rerun()
     with info_col:
         st.caption("يعرض آخر الإجراءات المنفذة وآخر دخول للصيادلة والحالات المحدثة بعد الرفع.")
@@ -1132,10 +1226,123 @@ def render_admin_dashboard():
             st.success(f"تمت المعالجة بنجاح. رقم دفعة الرفع: {upload_batch_id}")
             st.session_state.last_processed_preview = results.head(20)
 
-    df = fetch_active_items()
-    if df.empty:
-        st.info("لا توجد بيانات فعالة بعد. ارفع الملف من الأعلى لبدء التحليل.")
-        return
+    st.markdown('<div class="section-title">📋 إدارة الجلسات</div>', unsafe_allow_html=True)
+    
+    sessions_df = get_all_sessions()
+    if not sessions_df.empty:
+        # عرض الجلسات كبطاقات
+        for _, session in sessions_df.iterrows():
+            col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 1.5, 1.5])
+            
+            # حالة القفل
+            lock_status = "🔒 مقفلة" if session['is_locked'] else "🔓 مفتوحة"
+            lock_color = "#d9534f" if session['is_locked'] else "#5cb85c"
+            
+            with col1:
+                st.markdown(f"""
+                <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 10px; margin: 0.3rem 0;">
+                    <strong>📅 {session['session_name']}</strong><br>
+                    <small>{session['file_name'][:30]}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown(f"""
+                <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 10px; margin: 0.3rem 0;">
+                    <small>👤 {session['uploaded_by']}<br>
+                    📅 {session['uploaded_at'][:16] if session['uploaded_at'] else ''}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                st.markdown(f"""
+                <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 10px; margin: 0.3rem 0;">
+                    <small>📊 {int(session['total_cases'])} حالة<br>
+                    ➕ {int(session['total_additions'])} | ➖ {int(session['total_returns'])}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col4:
+                st.markdown(f"""
+                <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 10px; margin: 0.3rem 0; text-align: center;">
+                    <span style="color: {lock_color}; font-size: 0.9rem;">{lock_status}</span>
+                    <br><small>{session['locked_by'][:15] if session['locked_by'] else ''}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col5:
+                btn_col1, btn_col2 = st.columns(2)
+                with btn_col1:
+                    if not session['is_locked']:
+                        if st.button(f"🔒 قفل", key=f"lock_{session['upload_batch_id']}", use_container_width=True):
+                            lock_session(session['upload_batch_id'], st.session_state.username)
+                            st.rerun()
+                    else:
+                        if st.button(f"🔓 فتح", key=f"unlock_{session['upload_batch_id']}", use_container_width=True):
+                            unlock_session(session['upload_batch_id'])
+                            st.rerun()
+                
+                with btn_col2:
+                    if st.button(f"👁️ عرض", key=f"view_{session['upload_batch_id']}", use_container_width=True):
+                        st.session_state.view_session_id = session['upload_batch_id']
+                        st.rerun()
+        
+        st.markdown("---")
+    
+    # عرض جلسة محددة للعرض
+    if st.session_state.get('view_session_id'):
+        st.markdown(f'<div class="section-title">📄 عرض الجلسة: {st.session_state.view_session_id[:8]}...</div>', unsafe_allow_html=True)
+        
+        session_items = get_session_items(st.session_state.view_session_id)
+        if not session_items.empty:
+            st.dataframe(session_items[['order_number', 'sku', 'product_name', 'case_label', 'status']].head(20), use_container_width=True)
+        
+        if st.button("إغلاق العرض", use_container_width=True):
+            del st.session_state.view_session_id
+            st.rerun()
+
+    def fetch_active_items(pharmacy_name: str | None = None) -> pd.DataFrame:
+        conn = sqlite3.connect(DB_PATH)
+    
+        # الحصول على الجلسة النشطة
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT upload_batch_id, is_locked FROM uploads 
+            ORDER BY uploaded_at DESC LIMIT 1
+        """)
+        active_session = cur.fetchone()
+    
+        if not active_session:
+            conn.close()
+            return pd.DataFrame()
+    
+        active_batch_id, is_locked = active_session
+    
+        # إذا كانت الجلسة مقفلة، نعرض البيانات للقراءة فقط
+        query = """
+            SELECT order_number, invoice_number, sku, product_name, pharmacy_name, branch_number,
+                   salla_qty, abc_qty, difference, case_type, case_label, case_reason, status,
+                   performed_by, performed_at, customer_name, customer_phone, city, order_status,
+                   order_date, invoice_date, profile_type, receipt_classification, all_abc_pharmacies,
+                   other_branch_details, pharmacist_note, total_amount, salla_pharmacy_name, abc_pharmacy_name,
+                   first_seen_at, last_seen_at,
+                   ? as is_locked
+            FROM reconciliation_items
+            WHERE active = 1 AND upload_batch_id = ?
+        """
+        params = [1 if is_locked else 0, active_batch_id]
+    
+        if pharmacy_name:
+            query += " AND pharmacy_name = ?"
+            params.append(pharmacy_name)
+    
+        query += " ORDER BY case_type, order_number DESC, sku"
+    
+        try:
+            df = pd.read_sql_query(query, conn, params=params)
+            return df
+        finally:
+            conn.close()
 
     render_metrics(df)
     filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
@@ -1314,6 +1521,14 @@ def render_pharmacy_dashboard():
         st.info("لا توجد حالات نشطة لهذا الفرع حاليًا.")
         return
 
+    is_locked = df['is_locked'].iloc[0] == 1 if not df.empty else False
+    
+    if is_locked:
+        st.warning("🔒 هذه الجلسة مقفلة ولا يمكن إجراء تعديلات عليها. الرجاء التواصل مع المدير لفتحها.")
+        allow_actions = False
+    else:
+        allow_actions = True
+
     render_metrics(df)
 
     active_non_cancelled = ~df["order_status"].apply(is_cancelled_or_returned_status)
@@ -1330,22 +1545,22 @@ def render_pharmacy_dashboard():
     )
 
     with tab1:
-        render_case_cards(additions_df, True, pharmacist_name, pharmacy_name)
+        render_case_cards(additions_df, allow_actions, pharmacist_name, pharmacy_name)
 
     with tab2:
-        render_case_cards(returns_df, True, pharmacist_name, pharmacy_name)
+        render_case_cards(returns_df, allow_actions, pharmacist_name, pharmacy_name)
 
     with tab3:
-        render_case_cards(orphan_salla_df, True, pharmacist_name, pharmacy_name)
+        render_case_cards(orphan_salla_df, allow_actions, pharmacist_name, pharmacy_name)
 
     with tab4:
-        render_case_cards(orphan_abc_df, True, pharmacist_name, pharmacy_name)
+        render_case_cards(orphan_abc_df, allow_actions, pharmacist_name, pharmacy_name)
 
     with tab5:
-        render_case_cards(post_cutoff_df, False, pharmacist_name, pharmacy_name)
+        render_case_cards(post_cutoff_df, allow_actions, pharmacist_name, pharmacy_name)
 
     with tab6:
-        render_case_cards(cancelled_df if not cancelled_df.empty else review_df, False, pharmacist_name, pharmacy_name)
+        render_case_cards(cancelled_df if not cancelled_df.empty else review_df, allow_actions, pharmacist_name, pharmacy_name)
 
 
 ensure_database()
