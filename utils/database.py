@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import json
+import uuid
 from datetime import datetime
 import pandas as pd
 import streamlit as st
@@ -16,48 +17,25 @@ def pharmacy_names():
     return [f"Balsam Alula Pharmacy {i:02d}" for i in range(1, PHARMACY_COUNT + 1)]
 
 def init_database():
-    """تهيئة قاعدة البيانات مع دعم الترقية"""
+    """تهيئة قاعدة البيانات"""
     os.makedirs(DB_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    # التحقق من وجود جدول users وإضافة الأعمدة المفقودة
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-    table_exists = cur.fetchone()
-    
-    if not table_exists:
-        # إنشاء الجدول من الصفر
-        cur.execute("""
-            CREATE TABLE users (
-                username TEXT PRIMARY KEY,
-                password TEXT NOT NULL,
-                role TEXT NOT NULL,
-                pharmacist_name TEXT DEFAULT '',
-                last_login TEXT DEFAULT '',
-                can_view_dashboard INTEGER DEFAULT 1,
-                can_view_balances INTEGER DEFAULT 0,
-                can_view_monitoring INTEGER DEFAULT 0,
-                can_manage_users INTEGER DEFAULT 0
-            )
-        """)
-    else:
-        # إضافة الأعمدة المفقودة
-        cur.execute("PRAGMA table_info(users)")
-        existing_columns = [row[1] for row in cur.fetchall()]
-        
-        new_columns = {
-            "can_view_dashboard": "INTEGER DEFAULT 1",
-            "can_view_balances": "INTEGER DEFAULT 0",
-            "can_view_monitoring": "INTEGER DEFAULT 0",
-            "can_manage_users": "INTEGER DEFAULT 0"
-        }
-        
-        for col_name, col_type in new_columns.items():
-            if col_name not in existing_columns:
-                try:
-                    cur.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
-                except:
-                    pass
+    # Users table
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL,
+            pharmacist_name TEXT DEFAULT '',
+            last_login TEXT DEFAULT '',
+            can_view_dashboard INTEGER DEFAULT 1,
+            can_view_balances INTEGER DEFAULT 0,
+            can_view_monitoring INTEGER DEFAULT 0,
+            can_manage_users INTEGER DEFAULT 0
+        )
+    """)
 
     # Last access table
     cur.execute("""
@@ -137,7 +115,7 @@ def init_database():
         )
     """)
 
-    # Insert default admin if not exists
+    # Insert default admin
     cur.execute("SELECT * FROM users WHERE username = 'admin'")
     if not cur.fetchone():
         cur.execute("""
@@ -146,7 +124,7 @@ def init_database():
             VALUES ('admin', 'admin123', 'admin', 'مدير النظام', 1, 1, 1, 1)
         """)
 
-    # Insert default pharmacies if not exists
+    # Insert default pharmacies
     for index, name in enumerate(pharmacy_names(), start=1):
         cur.execute("SELECT * FROM users WHERE username = ?", (name,))
         if not cur.fetchone():
@@ -160,7 +138,6 @@ def init_database():
     conn.close()
 
 def get_user_permissions(username: str):
-    """الحصول على صلاحيات المستخدم"""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""
@@ -181,7 +158,6 @@ def get_user_permissions(username: str):
     return None
 
 def update_user_permissions(username: str, permissions: dict):
-    """تحديث صلاحيات المستخدم"""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""
@@ -200,7 +176,6 @@ def update_user_permissions(username: str, permissions: dict):
     conn.close()
 
 def add_user(username: str, password: str, role: str, pharmacist_name: str = ""):
-    """إضافة مستخدم جديد"""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     try:
@@ -217,7 +192,6 @@ def add_user(username: str, password: str, role: str, pharmacist_name: str = "")
         conn.close()
 
 def delete_user(username: str):
-    """حذف مستخدم"""
     if username == "admin":
         return False
     conn = sqlite3.connect(DB_PATH)
@@ -228,7 +202,6 @@ def delete_user(username: str):
     return True
 
 def get_all_users():
-    """الحصول على جميع المستخدمين"""
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("""
         SELECT username, role, pharmacist_name, last_login, 
@@ -315,6 +288,47 @@ def get_all_sessions() -> pd.DataFrame:
     finally:
         conn.close()
 
+def get_session_items(upload_batch_id: str) -> pd.DataFrame:
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        return pd.read_sql_query("""
+            SELECT order_number, sku, product_name, case_label, status, performed_by
+            FROM reconciliation_items
+            WHERE upload_batch_id = ?
+        """, conn, params=(upload_batch_id,))
+    finally:
+        conn.close()
+
+def lock_session(upload_batch_id: str, locked_by: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE uploads 
+        SET is_locked = 1, locked_by = ?, locked_at = ?
+        WHERE upload_batch_id = ?
+    """, (locked_by, now_str(), upload_batch_id))
+    conn.commit()
+    conn.close()
+
+def unlock_session(upload_batch_id: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE uploads 
+        SET is_locked = 0, locked_by = '', locked_at = ''
+        WHERE upload_batch_id = ?
+    """, (upload_batch_id,))
+    conn.commit()
+    conn.close()
+
+def activate_session(upload_batch_id: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("UPDATE uploads SET is_active = 0")
+    cur.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
+    conn.commit()
+    conn.close()
+
 def get_completed_items(pharmacy_name: str = None) -> pd.DataFrame:
     conn = sqlite3.connect(DB_PATH)
     query = """
@@ -351,18 +365,6 @@ def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) 
     
     active_batch_id = active_session[0]
     
-    # التحقق من وجود عمود is_locked
-    cur.execute("PRAGMA table_info(uploads)")
-    existing_columns = [row[1] for row in cur.fetchall()]
-    has_lock_column = "is_locked" in existing_columns
-    
-    if has_lock_column:
-        cur.execute("SELECT is_locked FROM uploads WHERE upload_batch_id = ?", (active_batch_id,))
-        lock_result = cur.fetchone()
-        is_locked = lock_result[0] if lock_result else 0
-    else:
-        is_locked = 0
-    
     query = """
         SELECT order_number, invoice_number, sku, product_name, pharmacy_name, branch_number,
                salla_qty, abc_qty, difference, case_type, case_label, case_reason, status,
@@ -371,11 +373,11 @@ def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) 
                profile_type, profile_type_from_abc, receipt_classification, 
                all_abc_pharmacies, other_branch_details, pharmacist_note, item_key,
                abc_pharmacy_name, abc_pharmacist_name,
-               ? as is_locked
+               0 as is_locked
         FROM reconciliation_items
         WHERE active = 1 AND upload_batch_id = ?
     """
-    params = [1 if is_locked else 0, active_batch_id]
+    params = [active_batch_id]
     
     if pharmacy_name:
         query += " AND pharmacy_name = ?"
@@ -445,79 +447,3 @@ def reopen_case(order_number: str, sku: str, pharmacy_name: str, case_type: str)
     """, (order_number, sku, pharmacy_name, case_type))
     conn.commit()
     conn.close()
-
-def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: str, uploaded_by: str):
-    import uuid
-    upload_batch_id = uuid.uuid4().hex
-    timestamp = now_str()
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-
-    cur.execute("BEGIN")
-
-    # إدراج بيانات الرفع
-    cur.execute("""
-        INSERT INTO uploads (
-            upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
-            total_additions, total_returns, total_orphan_salla, total_orphan_abc,
-            total_branch_mismatch, total_special_review, is_locked, is_active
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)
-    """, (
-        upload_batch_id, uploaded_file_name, uploaded_by, timestamp,
-        len(results),
-        int((results["case_type"] == "addition").sum()),
-        int((results["case_type"] == "return").sum()),
-        int((results["case_type"] == "orphan_salla").sum()),
-        int((results["case_type"].isin(["orphan_abc", "post_cutoff_abc"])).sum()),
-        int((results["case_type"] == "branch_mismatch").sum()),
-        int((results["case_type"] == "special_review").sum()),
-    ))
-
-    # إدراج العناصر
-    for _, row in results.iterrows():
-        cur.execute("""
-            INSERT OR REPLACE INTO reconciliation_items (
-                item_key, upload_batch_id, order_number, invoice_number, sku, product_name,
-                salla_product_name, abc_product_name, pharmacy_name, salla_pharmacy_name,
-                abc_pharmacy_name, abc_pharmacist_name, branch_number, salla_qty, abc_qty, difference,
-                case_type, case_label, case_reason, status, performed_by, performed_at,
-                customer_name, customer_phone, city, order_status, order_date,
-                invoice_date, profile_type, profile_type_from_abc, receipt_classification, 
-                all_abc_pharmacies, other_branch_details, pharmacist_note, total_amount, 
-                first_seen_at, last_seen_at, active, hidden_from_pharmacy
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
-        """, (
-            row["item_key"], upload_batch_id, str(row["order_number"]), str(row.get("invoice_number", "")),
-            str(row["sku"]), str(row["product_name"])[:200], str(row.get("salla_product_name", ""))[:200],
-            str(row.get("abc_product_name", ""))[:200], str(row["pharmacy_name"]),
-            str(row.get("salla_pharmacy_name", "")), str(row.get("abc_pharmacy_name", "")),
-            str(row.get("abc_pharmacist_name", "")), str(row.get("branch_number", "")),
-            float(row["salla_qty"]), float(row["abc_qty"]), float(row["difference"]),
-            str(row["case_type"]), str(row["case_label"]), str(row.get("case_reason", ""))[:500],
-            "قيد المتابعة", "", "", str(row.get("customer_name", ""))[:100], str(row.get("customer_phone", "")),
-            str(row.get("city", "")), str(row.get("order_status", "")), str(row.get("order_date", "")),
-            str(row.get("invoice_date", "")), str(row.get("profile_type", "")), str(row.get("profile_type_from_abc", "")),
-            str(row.get("receipt_classification", "")), str(row.get("all_abc_pharmacies", "")),
-            str(row.get("other_branch_details", "")), "", float(row.get("total_amount", 0)), timestamp, timestamp
-        ))
-
-    # تعطيل العناصر القديمة
-    cur.execute("""
-        UPDATE reconciliation_items
-        SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END
-    """, (upload_batch_id,))
-
-    # تعطيل الجلسات الأخرى وتفعيل الجلسة الحالية
-    cur.execute("UPDATE uploads SET is_active = 0")
-    cur.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
-    
-    # إنشاء اسم الجلسة
-    session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
-    cur.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
-
-    conn.commit()
-    conn.close()
-    
-    return upload_batch_id
