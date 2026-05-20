@@ -101,6 +101,12 @@ st.markdown(
         border-right-color: #d9534f;
     }
 
+    .action-card-payment {
+        background: #fff7e8;
+        border-color: #f3d08a;
+        border-right-color: #d48b00;
+    }
+
     .pill {
         display: inline-block;
         padding: 0.28rem 0.75rem;
@@ -115,6 +121,22 @@ st.markdown(
     .pill-blue { background: #dff1ff; color: #0f5488; }
     .pill-slate { background: #eef3f5; color: #445b66; }
     .pill-cancel { background: #ffd8d8; color: #8f1f1f; }
+    .pill-payment { background: #fff0c2; color: #8a5b00; }
+
+    .date-accent {
+        color: #0f5488;
+        font-weight: 700;
+    }
+
+    .diff-positive {
+        color: #0f7a3a;
+        font-weight: 800;
+    }
+
+    .diff-negative {
+        color: #a32929;
+        font-weight: 800;
+    }
 
     .metric-box {
         background: white;
@@ -338,6 +360,11 @@ def is_cancelled_or_returned_status(status_text: str) -> bool:
     return any(token in status for token in ["ملغي", "مسترجع"])
 
 
+def is_pending_payment_status(status_text: str) -> bool:
+    status = normalize_text(status_text)
+    return "بانتظار الدفع" in status
+
+
 def cancel_status_label(status_text: str) -> str:
     status = normalize_text(status_text)
     if "مسترجع" in status:
@@ -365,7 +392,7 @@ def normalize_sku(value) -> str:
     if not text:
         return ""
     text = text.replace(".0", "")
-    if re.fullmatch(r"\d+", text):
+    if re.fullmatch(r"\d+", text) and text not in {"0", "1", "200"}:
         return text
     return ""
 
@@ -515,7 +542,12 @@ def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
     df["order_date"] = df["تاريخ الطلب"].apply(normalize_text)
     df["total_amount"] = pd.to_numeric(df["إجمالي الطلب"], errors="coerce").fillna(0)
 
-    df = df[(df["order_number"] != "") & (df["sku"] != "") & (df["quantity"] != 0)].copy()
+    df = df[
+        (df["order_number"] != "")
+        & (df["sku"] != "")
+        & (df["quantity"] != 0)
+        & (df["order_status"] != "محذوف")
+    ].copy()
 
     branch_info = df.apply(lambda row: determine_branch(row["order_status"], row["city"]), axis=1)
     df["pharmacy_name"] = branch_info.apply(lambda value: value[0])
@@ -569,7 +601,11 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     else:
         df["receipt_classification"] = ""
 
-    df = df[(df["sku"] != "") & (df["order_number"] != "")].copy()
+    df = df[
+        (df["sku"] != "")
+        & (df["order_number"] != "")
+        & (~df["abc_product_name"].str.upper().eq("DELIVERY FEE"))
+    ].copy()
 
     grouped = (
         df.groupby(["order_number", "sku"], as_index=False)
@@ -1186,6 +1222,10 @@ def status_alert_pill(order_status: str) -> str:
     return f'<span class="pill pill-cancel">{label}</span>' if label else ""
 
 
+def payment_alert_pill(order_status: str) -> str:
+    return '<span class="pill pill-payment">بانتظار الدفع</span>' if is_pending_payment_status(order_status) else ""
+
+
 def render_metrics(df: pd.DataFrame):
     cols = st.columns(6)
     metrics = [
@@ -1218,11 +1258,25 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
         card_classes = "action-card"
         if is_cancelled_or_returned_status(row["order_status"]):
             card_classes += " action-card-alert"
+        elif is_pending_payment_status(row["order_status"]):
+            card_classes += " action-card-payment"
 
-        st.markdown(f'<div class="{card_classes}">', unsafe_allow_html=True)
+        diff_value = numeric_value(row["difference"])
+        diff_class = "diff-positive" if diff_value > 0 else ("diff-negative" if diff_value < 0 else "")
+        diff_html = f'<span class="{diff_class}">{diff_value}</span>' if diff_class else str(diff_value)
+        order_date_html = f'<span class="date-accent">{row["order_date"] or "غير متوفر"}</span>'
+        invoice_date_html = f'<span class="date-accent">{row["invoice_date"] or "غير متوفر"}</span>'
+
+        with st.container(border=True):
+            st.markdown(
+                f'<div class="{card_classes}" style="padding:0.8rem;border-radius:14px;"></div>',
+                unsafe_allow_html=True,
+            )
         badges = f"{case_pill(row['case_type'])}&nbsp; {status_pill(row['status'])}"
         if status_alert_pill(row["order_status"]):
             badges += f"&nbsp; {status_alert_pill(row['order_status'])}"
+        if payment_alert_pill(row["order_status"]):
+            badges += f"&nbsp; {payment_alert_pill(row['order_status'])}"
         st.markdown(
             f"""
             <div style="display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap;">
@@ -1241,10 +1295,10 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
             ("المنتج", row["product_name"][:70]),
             ("كمية سلة", int(row["salla_qty"]) if pd.notna(row["salla_qty"]) else 0),
             ("كمية ABC", int(row["abc_qty"]) if pd.notna(row["abc_qty"]) else 0),
-            ("الفرق", row["difference"]),
+            ("الفرق", diff_html),
             ("حالة الطلب", row["order_status"] or "غير متوفرة"),
-            ("تاريخ الطلب", row["order_date"] or "غير متوفر"),
-            ("تاريخ الفاتورة", row["invoice_date"] or "غير متوفر"),
+            ("تاريخ الطلب", order_date_html),
+            ("تاريخ الفاتورة", invoice_date_html),
             ("تاريخ التنفيذ", row["performed_at"] or "لم يُنفذ بعد"),
             ("نوع البروفايل", row.get("profile_type", "") or "غير متوفر"),
             ("تصنيف البيع", row.get("receipt_classification", "") or "غير متوفر"),
@@ -1253,7 +1307,7 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
         ]
         for item_index, (label, value) in enumerate(info_items):
             with info_cols[item_index % 4]:
-                st.markdown(f"**{label}**  \n{value}")
+                st.markdown(f"**{label}**  \n{value}", unsafe_allow_html=True)
 
         note_key = f"note_{row['case_type']}_{row['order_number']}_{row['sku']}_{idx}"
         note_value = st.text_area(
@@ -1262,6 +1316,25 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
             key=note_key,
             height=80,
         )
+
+        is_closed = row["status"] == STATUS_DONE
+        summary_cols = st.columns([2, 2, 2, 2, 1])
+        with summary_cols[0]:
+            st.caption(f"رقم الطلب: {row['order_number']}")
+        with summary_cols[1]:
+            st.caption(f"SKU: {row['sku']}")
+        with summary_cols[2]:
+            st.caption(f"الفرق: {diff_value}")
+        with summary_cols[3]:
+            st.caption(f"كمية سلة/ABC: {int(row['salla_qty']) if pd.notna(row['salla_qty']) else 0} / {int(row['abc_qty']) if pd.notna(row['abc_qty']) else 0}")
+        with summary_cols[4]:
+            toggle_label = "إخفاء التفاصيل" if st.session_state.get(f"show_{note_key}", not is_closed) else "إظهار البطاقة"
+            if st.button(toggle_label, key=f"toggle_{note_key}", use_container_width=True):
+                st.session_state[f"show_{note_key}"] = not st.session_state.get(f"show_{note_key}", not is_closed)
+                st.rerun()
+
+        if is_closed and not st.session_state.get(f"show_{note_key}", False):
+            continue
 
         action_cols = st.columns([1, 1, 6])
         with action_cols[0]:
@@ -1295,7 +1368,6 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
                     )
                     st.rerun()
 
-        st.markdown("</div>", unsafe_allow_html=True)
 
 
 def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -1616,6 +1688,8 @@ def render_admin_dashboard():
             order_status = row.get("حالة الطلب", "")
             if is_cancelled_or_returned_status(order_status):
                 color = "background-color: #ffe5e5"
+            elif is_pending_payment_status(order_status):
+                color = "background-color: #fff4d6"
             elif case_type == "إرجاع":
                 color = "background-color: #ffe0df"
             elif case_type == "إضافة":
@@ -1677,16 +1751,38 @@ def render_pharmacy_dashboard():
     render_metrics(df)
 
     active_non_cancelled = ~df["order_status"].apply(is_cancelled_or_returned_status)
-    additions_df = df[(df["case_type"] == "addition") & active_non_cancelled].copy()
-    returns_df = df[(df["case_type"] == "return") & active_non_cancelled].copy()
-    orphan_salla_df = df[(df["case_type"] == "orphan_salla") & active_non_cancelled].copy()
-    orphan_abc_df = df[(df["case_type"] == "orphan_abc") & active_non_cancelled].copy()
+    active_non_payment = ~df["order_status"].apply(is_pending_payment_status)
+    active_operational = active_non_cancelled & active_non_payment
+    additions_df = df[(df["case_type"] == "addition") & active_operational].copy()
+    returns_df = df[(df["case_type"] == "return") & active_operational].copy()
+    orphan_salla_df = df[(df["case_type"] == "orphan_salla") & active_operational].copy()
+    orphan_abc_df = df[(df["case_type"] == "orphan_abc") & active_operational].copy()
     post_cutoff_df = df[df["case_type"] == "post_cutoff_abc"].copy()
     cancelled_df = df[df["order_status"].apply(is_cancelled_or_returned_status)].copy()
-    review_df = df[(df["case_type"].isin(["branch_mismatch", "special_review"])) & active_non_cancelled].copy()
+    payment_pending_df = df[df["order_status"].apply(is_pending_payment_status)].copy()
+    review_df = df[(df["case_type"].isin(["branch_mismatch", "special_review"])) & active_operational].copy()
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
-        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", "فواتير بعد آخر طلب", "الملغي/المسترجع"]
+    pharmacy_export = export_tabs_to_excel(
+        {
+            "الإضافات": prepare_display_df(additions_df),
+            "الإرجاعات": prepare_display_df(returns_df),
+            "طلبات بدون فاتورة": prepare_display_df(orphan_salla_df),
+            "فواتير بدون طلب": prepare_display_df(orphan_abc_df),
+            "فواتير بعد آخر طلب": prepare_display_df(post_cutoff_df),
+            "بانتظار الدفع": prepare_display_df(payment_pending_df),
+            "الملغي_والمسترجع": prepare_display_df(cancelled_df if not cancelled_df.empty else review_df),
+        }
+    )
+    st.download_button(
+        "تصدير تبويبات الفرع إلى Excel",
+        data=pharmacy_export,
+        file_name=f"{pharmacy_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
+
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", "فواتير بعد آخر طلب", "بانتظار الدفع", "الملغي/المسترجع"]
     )
 
     with tab1:
@@ -1705,6 +1801,9 @@ def render_pharmacy_dashboard():
         render_case_cards(post_cutoff_df, False, pharmacist_name, pharmacy_name)
 
     with tab6:
+        render_case_cards(payment_pending_df, False, pharmacist_name, pharmacy_name)
+
+    with tab7:
         render_case_cards(cancelled_df if not cancelled_df.empty else review_df, False, pharmacist_name, pharmacy_name)
 
 
