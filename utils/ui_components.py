@@ -1,8 +1,20 @@
 import streamlit as st
 import pandas as pd
-from utils.helpers import status_pill, case_pill, status_alert_pill, payment_alert_pill, numeric_value
+from utils.helpers import status_pill, case_pill, status_alert_pill, payment_alert_pill, numeric_value, get_tab_label
 
 def render_metrics(df: pd.DataFrame):
+    if df.empty:
+        cols = st.columns(6)
+        for col in cols:
+            with col:
+                st.markdown("""
+                <div class="metric-box">
+                    <div style="font-size:0.88rem;color:#5a7380;">...</div>
+                    <div style="font-size:2rem;font-weight:800;color:#16425b;">0</div>
+                </div>
+                """, unsafe_allow_html=True)
+        return
+    
     cols = st.columns(6)
     total = len(df)
     additions = int((df["case_type"] == "addition").sum())
@@ -143,8 +155,7 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
             
             st.markdown("---")
 
-def render_completed_table(df: pd.DataFrame, is_admin: bool = False, total_count: int = 0):
-    """عرض جدول المكتملات مع إحصائية"""
+def render_completed_table(df: pd.DataFrame, is_admin: bool = False):
     if df.empty:
         st.info("لا توجد طلبات مكتملة بعد.")
         return
@@ -167,7 +178,3 @@ def render_completed_table(df: pd.DataFrame, is_admin: bool = False, total_count
         cols_to_show.insert(1, "الصيدلية")
     
     st.dataframe(display_df[cols_to_show], use_container_width=True)
-
-def get_tab_label(label: str, current: int, total: int) -> str:
-    """إنشاء اسم التبويب مع العدد"""
-    return f"{label} ({current}/{total})"
