@@ -1121,7 +1121,7 @@ def fetch_active_items(pharmacy_name: str | None = None) -> pd.DataFrame:
     try:
         df = pd.read_sql_query(query, conn, params=params)
         # إضافة الأعمدة المفقودة بقيم افتراضية
-        for col in ['profile_type', 'receipt_classification', 'all_abc_pharmacies', 'other_branch_details', 'pharmacist_note']:
+        for col in ['abc_pharmacy_name', 'profile_type', 'receipt_classification', 'all_abc_pharmacies', 'other_branch_details', 'pharmacist_note']:
             if col not in df.columns:
                 df[col] = ''
         return df
@@ -1246,10 +1246,10 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
             ("تاريخ الطلب", row["order_date"] or "غير متوفر"),
             ("تاريخ الفاتورة", row["invoice_date"] or "غير متوفر"),
             ("تاريخ التنفيذ", row["performed_at"] or "لم يُنفذ بعد"),
-            ("نوع البروفايل", row["profile_type"] or "غير متوفر"),
-            ("تصنيف البيع", row["receipt_classification"] or "غير متوفر"),
-            ("فروع ABC", row["all_abc_pharmacies"] or row["abc_pharmacy_name"] or "غير متوفر"),
-            ("التفصيل", row["case_reason"]),
+            ("نوع البروفايل", row.get("profile_type", "") or "غير متوفر"),
+            ("تصنيف البيع", row.get("receipt_classification", "") or "غير متوفر"),
+            ("فروع ABC", row.get("all_abc_pharmacies", "") or row.get("abc_pharmacy_name", "") or "غير متوفر"),
+            ("التفصيل", row.get("case_reason", "") or "غير متوفر"),
         ]
         for item_index, (label, value) in enumerate(info_items):
             with info_cols[item_index % 4]:
