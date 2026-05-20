@@ -445,3 +445,79 @@ def reopen_case(order_number: str, sku: str, pharmacy_name: str, case_type: str)
     """, (order_number, sku, pharmacy_name, case_type))
     conn.commit()
     conn.close()
+
+def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: str, uploaded_by: str):
+    import uuid
+    upload_batch_id = uuid.uuid4().hex
+    timestamp = now_str()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    cur.execute("BEGIN")
+
+    # إدراج بيانات الرفع
+    cur.execute("""
+        INSERT INTO uploads (
+            upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
+            total_additions, total_returns, total_orphan_salla, total_orphan_abc,
+            total_branch_mismatch, total_special_review, is_locked, is_active
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)
+    """, (
+        upload_batch_id, uploaded_file_name, uploaded_by, timestamp,
+        len(results),
+        int((results["case_type"] == "addition").sum()),
+        int((results["case_type"] == "return").sum()),
+        int((results["case_type"] == "orphan_salla").sum()),
+        int((results["case_type"].isin(["orphan_abc", "post_cutoff_abc"])).sum()),
+        int((results["case_type"] == "branch_mismatch").sum()),
+        int((results["case_type"] == "special_review").sum()),
+    ))
+
+    # إدراج العناصر
+    for _, row in results.iterrows():
+        cur.execute("""
+            INSERT OR REPLACE INTO reconciliation_items (
+                item_key, upload_batch_id, order_number, invoice_number, sku, product_name,
+                salla_product_name, abc_product_name, pharmacy_name, salla_pharmacy_name,
+                abc_pharmacy_name, abc_pharmacist_name, branch_number, salla_qty, abc_qty, difference,
+                case_type, case_label, case_reason, status, performed_by, performed_at,
+                customer_name, customer_phone, city, order_status, order_date,
+                invoice_date, profile_type, profile_type_from_abc, receipt_classification, 
+                all_abc_pharmacies, other_branch_details, pharmacist_note, total_amount, 
+                first_seen_at, last_seen_at, active, hidden_from_pharmacy
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+        """, (
+            row["item_key"], upload_batch_id, str(row["order_number"]), str(row.get("invoice_number", "")),
+            str(row["sku"]), str(row["product_name"])[:200], str(row.get("salla_product_name", ""))[:200],
+            str(row.get("abc_product_name", ""))[:200], str(row["pharmacy_name"]),
+            str(row.get("salla_pharmacy_name", "")), str(row.get("abc_pharmacy_name", "")),
+            str(row.get("abc_pharmacist_name", "")), str(row.get("branch_number", "")),
+            float(row["salla_qty"]), float(row["abc_qty"]), float(row["difference"]),
+            str(row["case_type"]), str(row["case_label"]), str(row.get("case_reason", ""))[:500],
+            "قيد المتابعة", "", "", str(row.get("customer_name", ""))[:100], str(row.get("customer_phone", "")),
+            str(row.get("city", "")), str(row.get("order_status", "")), str(row.get("order_date", "")),
+            str(row.get("invoice_date", "")), str(row.get("profile_type", "")), str(row.get("profile_type_from_abc", "")),
+            str(row.get("receipt_classification", "")), str(row.get("all_abc_pharmacies", "")),
+            str(row.get("other_branch_details", "")), "", float(row.get("total_amount", 0)), timestamp, timestamp
+        ))
+
+    # تعطيل العناصر القديمة
+    cur.execute("""
+        UPDATE reconciliation_items
+        SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END
+    """, (upload_batch_id,))
+
+    # تعطيل الجلسات الأخرى وتفعيل الجلسة الحالية
+    cur.execute("UPDATE uploads SET is_active = 0")
+    cur.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
+    
+    # إنشاء اسم الجلسة
+    session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
+    cur.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
+
+    conn.commit()
+    conn.close()
+    
+    return upload_batch_id
