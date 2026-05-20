@@ -1,10 +1,8 @@
 import os
 import sqlite3
-import json
 import uuid
 from datetime import datetime
 import pandas as pd
-import streamlit as st
 
 DB_DIR = "data"
 DB_PATH = os.path.join(DB_DIR, "pharmacy_reconciliation.db")
@@ -382,6 +380,8 @@ def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) 
     if pharmacy_name:
         query += " AND pharmacy_name = ?"
         params.append(pharmacy_name)
+        if not include_hidden:
+            query += " AND (hidden_from_pharmacy = 0 OR hidden_from_pharmacy IS NULL)"
     
     query += " ORDER BY case_type, order_number DESC, sku"
     
