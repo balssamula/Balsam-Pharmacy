@@ -616,10 +616,10 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     df["invoice_number"] = df["رقم الفاتورة"].apply(normalize_text)
     df["invoice_date"] = df["التاريخ"].apply(normalize_text)
     df["abc_pharmacy_name"] = df["رقم الصيدلية"].apply(normalize_text)
+    df["abc_pharmacist_name"] = df["الصيدلي"].apply(normalize_text) if "الصيدلي" in df.columns else ""
     df["all_abc_pharmacies"] = df["abc_pharmacy_name"]
     df["abc_branch_number"] = df["abc_pharmacy_name"].apply(get_branch_number)
     df["profile_type"] = df["نوع البروفايل"].apply(normalize_text) if "نوع البروفايل" in df.columns else ""
-    df["profile_type_from_abc"] = df["نوع البروفايل"].apply(normalize_text) if "نوع البروفايل" in df.columns else ""
     
     if "Receipt Classification" in df.columns:
         df["receipt_classification"] = df["Receipt Classification"].apply(normalize_text)
@@ -640,11 +640,9 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
                 "invoice_date": "first",
                 "abc_product_name": "first",
                 "abc_pharmacy_name": "first",
+                "abc_pharmacist_name": "first",  # إضافة اسم الصيدلي
                 "abc_branch_number": "first",
                 "profile_type": lambda values: " | ".join(
-                    sorted({normalize_text(value) for value in values if normalize_text(value)})
-                ),
-                "profile_type_from_abc": lambda values: " | ".join(
                     sorted({normalize_text(value) for value in values if normalize_text(value)})
                 ),
                 "receipt_classification": lambda values: " | ".join(
@@ -1302,7 +1300,7 @@ def fetch_active_items(pharmacy_name: str | None = None, include_hidden: bool = 
                order_date, invoice_date, total_amount, first_seen_at, last_seen_at,
                profile_type, profile_type_from_abc, receipt_classification, 
                all_abc_pharmacies, other_branch_details, pharmacist_note, item_key,
-               abc_pharmacy_name,
+               abc_pharmacy_name, abc_pharmacist_name,
                ? as is_locked
     """
     
