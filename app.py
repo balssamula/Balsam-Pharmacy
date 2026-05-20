@@ -156,7 +156,55 @@ def pharmacy_names():
     return [f"Balsam Alula Pharmacy {i:02d}" for i in range(1, PHARMACY_COUNT + 1)]
 
 
+def upgrade_database():
+    """ترقية قاعدة البيانات إلى أحدث إصدار"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    # التحقق من وجود أعمدة جديدة وإضافتها
+    cur.execute("PRAGMA table_info(uploads)")
+    existing_columns = [row[1] for row in cur.fetchall()]
+    
+    new_columns = {
+        "session_name": "TEXT DEFAULT ''",
+        "is_locked": "INTEGER DEFAULT 0",
+        "locked_by": "TEXT DEFAULT ''",
+        "locked_at": "TEXT DEFAULT ''",
+        "is_active": "INTEGER DEFAULT 0"
+    }
+    
+    for col_name, col_type in new_columns.items():
+        if col_name not in existing_columns:
+            try:
+                cur.execute(f"ALTER TABLE uploads ADD COLUMN {col_name} {col_type}")
+            except:
+                pass
+    
+    # التحقق من أعمدة reconciliation_items
+    cur.execute("PRAGMA table_info(reconciliation_items)")
+    existing_cols_items = [row[1] for row in cur.fetchall()]
+    
+    new_items_columns = {
+        "profile_type": "TEXT DEFAULT ''",
+        "receipt_classification": "TEXT DEFAULT ''",
+        "all_abc_pharmacies": "TEXT DEFAULT ''",
+        "other_branch_details": "TEXT DEFAULT ''",
+        "pharmacist_note": "TEXT DEFAULT ''"
+    }
+    
+    for col_name, col_type in new_items_columns.items():
+        if col_name not in existing_cols_items:
+            try:
+                cur.execute(f"ALTER TABLE reconciliation_items ADD COLUMN {col_name} {col_type}")
+            except:
+                pass
+    
+    conn.commit()
+    conn.close()
+
+
 def ensure_database():
+    """تهيئة قاعدة البيانات مع دعم الترقية"""
     os.makedirs(DB_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -185,12 +233,11 @@ def ensure_database():
         """
     )
 
-    # Uploads table with session management
+    # Uploads table with session management (with IF NOT EXISTS)
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS uploads (
             upload_batch_id TEXT PRIMARY KEY,
-            session_name TEXT DEFAULT '',
             file_name TEXT,
             uploaded_by TEXT,
             uploaded_at TEXT,
@@ -200,11 +247,7 @@ def ensure_database():
             total_orphan_salla INTEGER DEFAULT 0,
             total_orphan_abc INTEGER DEFAULT 0,
             total_branch_mismatch INTEGER DEFAULT 0,
-            total_special_review INTEGER DEFAULT 0,
-            is_locked INTEGER DEFAULT 0,
-            locked_by TEXT DEFAULT '',
-            locked_at TEXT DEFAULT '',
-            is_active INTEGER DEFAULT 0
+            total_special_review INTEGER DEFAULT 0
         )
         """
     )
@@ -240,11 +283,6 @@ def ensure_database():
             order_status TEXT DEFAULT '',
             order_date TEXT DEFAULT '',
             invoice_date TEXT DEFAULT '',
-            profile_type TEXT DEFAULT '',
-            receipt_classification TEXT DEFAULT '',
-            all_abc_pharmacies TEXT DEFAULT '',
-            other_branch_details TEXT DEFAULT '',
-            pharmacist_note TEXT DEFAULT '',
             total_amount REAL DEFAULT 0,
             first_seen_at TEXT,
             last_seen_at TEXT,
@@ -273,7 +311,9 @@ def ensure_database():
 
     conn.commit()
     conn.close()
-
+    
+    # ترقية قاعدة البيانات بعد الإنشاء
+    upgrade_database()
 
 def normalize_text(value) -> str:
     if pd.isna(value):
@@ -410,21 +450,42 @@ def get_all_last_logins() -> pd.DataFrame:
 def get_latest_upload_summary():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
-               total_additions, total_returns, total_orphan_salla, total_orphan_abc,
-               total_branch_mismatch, total_special_review, is_locked, session_name
+    
+    # التحقق من وجود الأعمدة الجديدة
+    cur.execute("PRAGMA table_info(uploads)")
+    existing_columns = [row[1] for row in cur.fetchall()]
+    
+    # بناء الاستعلام ديناميكياً
+    select_cols = ["upload_batch_id", "file_name", "uploaded_by", "uploaded_at", 
+                   "total_cases", "total_additions", "total_returns", 
+                   "total_orphan_salla", "total_orphan_abc", 
+                   "total_branch_mismatch", "total_special_review"]
+    
+    if "is_locked" in existing_columns:
+        select_cols.append("is_locked")
+    else:
+        select_cols.append("0 as is_locked")
+        
+    if "session_name" in existing_columns:
+        select_cols.append("session_name")
+    else:
+        select_cols.append("'' as session_name")
+    
+    query = f"""
+        SELECT {', '.join(select_cols)}
         FROM uploads
-        WHERE is_active = 1
         ORDER BY uploaded_at DESC
         LIMIT 1
-        """
-    )
-    row = cur.fetchone()
-    conn.close()
-    return row
-
+    """
+    
+    try:
+        cur.execute(query)
+        row = cur.fetchone()
+        conn.close()
+        return row
+    except Exception as e:
+        conn.close()
+        return None
 
 def build_item_key(row: pd.Series) -> str:
     parts = [
@@ -748,6 +809,7 @@ def get_all_sessions() -> pd.DataFrame:
         select_cols = ["upload_batch_id", "file_name", "uploaded_by", "uploaded_at", 
                        "total_cases", "total_additions", "total_returns"]
         
+        # إضافة الأعمدة الجديدة إذا كانت موجودة
         if "session_name" in existing_columns:
             select_cols.append("session_name")
         else:
@@ -779,10 +841,21 @@ def get_all_sessions() -> pd.DataFrame:
             ORDER BY uploaded_at DESC
         """
         
-        return pd.read_sql_query(query, conn)
+        df = pd.read_sql_query(query, conn)
+        
+        # التأكد من أن جميع الأعمدة موجودة
+        required_cols = ['upload_batch_id', 'file_name', 'uploaded_by', 'uploaded_at', 
+                         'total_cases', 'total_additions', 'total_returns']
+        for col in required_cols:
+            if col not in df.columns:
+                df[col] = ''
+        
+        return df
+    except Exception as e:
+        st.warning(f"خطأ في تحميل الجلسات: {str(e)[:100]}")
+        return pd.DataFrame()
     finally:
         conn.close()
-
 
 def get_session_items(upload_batch_id: str) -> pd.DataFrame:
     """الحصول على عناصر جلسة محددة"""
@@ -1000,8 +1073,7 @@ def fetch_active_items(pharmacy_name: str | None = None) -> pd.DataFrame:
     # الحصول على الجلسة النشطة
     cur = conn.cursor()
     cur.execute("""
-        SELECT upload_batch_id, is_locked FROM uploads 
-        WHERE is_active = 1
+        SELECT upload_batch_id FROM uploads 
         ORDER BY uploaded_at DESC LIMIT 1
     """)
     active_session = cur.fetchone()
@@ -1010,15 +1082,25 @@ def fetch_active_items(pharmacy_name: str | None = None) -> pd.DataFrame:
         conn.close()
         return pd.DataFrame()
     
-    active_batch_id, is_locked = active_session
+    active_batch_id = active_session[0]
+    
+    # التحقق من وجود عمود is_locked
+    cur.execute("PRAGMA table_info(uploads)")
+    existing_columns = [row[1] for row in cur.fetchall()]
+    has_lock_column = "is_locked" in existing_columns
+    
+    if has_lock_column:
+        cur.execute("SELECT is_locked FROM uploads WHERE upload_batch_id = ?", (active_batch_id,))
+        lock_result = cur.fetchone()
+        is_locked = lock_result[0] if lock_result else 0
+    else:
+        is_locked = 0
     
     query = """
         SELECT order_number, invoice_number, sku, product_name, pharmacy_name, branch_number,
                salla_qty, abc_qty, difference, case_type, case_label, case_reason, status,
                performed_by, performed_at, customer_name, customer_phone, city, order_status,
-               order_date, invoice_date, profile_type, receipt_classification, all_abc_pharmacies,
-               other_branch_details, pharmacist_note, total_amount, salla_pharmacy_name, abc_pharmacy_name,
-               first_seen_at, last_seen_at,
+               order_date, invoice_date, total_amount, first_seen_at, last_seen_at,
                ? as is_locked
         FROM reconciliation_items
         WHERE active = 1 AND upload_batch_id = ?
@@ -1033,7 +1115,14 @@ def fetch_active_items(pharmacy_name: str | None = None) -> pd.DataFrame:
     
     try:
         df = pd.read_sql_query(query, conn, params=params)
+        # إضافة الأعمدة المفقودة بقيم افتراضية
+        for col in ['profile_type', 'receipt_classification', 'all_abc_pharmacies', 'other_branch_details', 'pharmacist_note']:
+            if col not in df.columns:
+                df[col] = ''
         return df
+    except Exception as e:
+        st.warning(f"خطأ في جلب البيانات: {str(e)[:100]}")
+        return pd.DataFrame()
     finally:
         conn.close()
 
