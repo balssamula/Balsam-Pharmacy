@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime
 
 import pandas as pd
+import numpy as np
 import streamlit as st
 
 try:
@@ -403,6 +404,7 @@ def normalize_sku(value) -> str:
     if not text:
         return ""
     text = text.replace(".0", "")
+    # استبعاد SKU غير الصالحة (0, 1, 200)
     invalid_skus = {"0", "1", "200"}
     if text in invalid_skus:
         return ""
@@ -556,6 +558,7 @@ def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
     df["order_date"] = df["تاريخ الطلب"].apply(normalize_text)
     df["total_amount"] = pd.to_numeric(df["إجمالي الطلب"], errors="coerce").fillna(0)
 
+    # استبعاد الصفوف ذات SKU غير صالح
     df = df[
         (df["order_number"] != "")
         & (df["sku"] != "")
@@ -598,11 +601,17 @@ def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
 def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     df = df_abc.copy()
     
+    # استبعاد FREE GIFTS
     if "نوع البروفايل" in df.columns:
         df = df[df["نوع البروفايل"].astype(str).str.strip() != EXCLUDED_PROFILE].copy()
     
+    # استبعاد DELIVERY FEE
     if "اسم الصنف" in df.columns:
         df = df[~df["اسم الصنف"].astype(str).str.upper().str.contains("DELIVERY FEE", na=False)].copy()
+    
+    # استبعاد SKU 16133
+    if "رقم الصنف" in df.columns:
+        df = df[df["رقم الصنف"].astype(str).str.strip() != "16133"].copy()
 
     df["order_number"] = df["رقم الطلب"].apply(normalize_order_number)
     df["sku"] = df["رقم الصنف"].apply(normalize_sku)
@@ -1024,6 +1033,69 @@ def get_completed_items(pharmacy_name: str = None) -> pd.DataFrame:
         conn.close()
 
 
+# ========== تحديث الأرصدة ==========
+def update_balances(abc_file, salla_file):
+    """تحديث أرصدة الفروع بناءً على ملف ABC"""
+    try:
+        # قراءة الملفات
+        df_abc = pd.read_excel(abc_file, skiprows=4)
+        df_salla = pd.read_excel(salla_file)
+        
+        def get_abc_col(branch_num):
+            return pd.to_numeric(df_abc.iloc[:, branch_num + 1], errors='coerce').fillna(0)
+        
+        item_key = df_abc.iloc[:, 0]  # رقم الصنف
+        
+        # حساب الحالات الخاصة
+        tabuk_calc = np.floor(((get_abc_col(8) + get_abc_col(10) + get_abc_col(11) + get_abc_col(12) +
+                               get_abc_col(14) + get_abc_col(15) + get_abc_col(16) + get_abc_col(17)) / 2) + get_abc_col(13))
+        
+        f9_calc = np.floor(((get_abc_col(1) + get_abc_col(3)) / 2) + get_abc_col(9))
+        
+        def create_map(values):
+            return dict(zip(item_key, values.astype(int)))
+        
+        maps = {
+            'tabuk': create_map(tabuk_calc),
+            'f9': create_map(f9_calc),
+            'f1': create_map(get_abc_col(1)), 'f2': create_map(get_abc_col(2)),
+            'f3': create_map(get_abc_col(3)), 'f4': create_map(get_abc_col(4)),
+            'f5': create_map(get_abc_col(5)), 'f6': create_map(get_abc_col(6)),
+            'f7': create_map(get_abc_col(7)), 'f8': create_map(get_abc_col(8)),
+            'f10': create_map(get_abc_col(10)), 'f11': create_map(get_abc_col(11)),
+            'f12': create_map(get_abc_col(12)), 'f14': create_map(get_abc_col(14)),
+            'f15': create_map(get_abc_col(15)), 'f16': create_map(get_abc_col(16)),
+            'f17': create_map(get_abc_col(17))
+        }
+        
+        # تحديث ملف salla
+        df_updated = df_salla.copy()
+        salla_id_col = 3  # العمود D رقم الصنف
+        
+        col_mapping = {
+            5: 'tabuk', 7: 'f8', 9: 'f9', 11: 'f11', 13: 'f15', 15: 'f16',
+            17: 'f10', 21: 'f12', 23: 'f14', 25: 'f1', 27: 'f2', 29: 'f3',
+            31: 'f4', 33: 'f5', 35: 'f6', 37: 'f7', 39: 'f17'
+        }
+        
+        for col_idx, map_name in col_mapping.items():
+            df_updated.iloc[:, col_idx] = df_updated.iloc[:, salla_id_col].map(maps[map_name]).fillna(0).astype(int)
+        
+        # المقارنة والفلترة
+        cols_to_check = list(col_mapping.keys())
+        old_data = df_salla.iloc[:, cols_to_check].apply(pd.to_numeric, errors='coerce').fillna(0).astype(int)
+        new_data = df_updated.iloc[:, cols_to_check]
+        
+        is_different = (new_data.values != old_data.values).any(axis=1)
+        has_balance = new_data.sum(axis=1) > 0
+        
+        df_final = df_updated[is_different & has_balance]
+        
+        return df_final, len(df_final)
+    except Exception as e:
+        return None, str(e)
+
+
 def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: str, uploaded_by: str):
     upload_batch_id = uuid.uuid4().hex
     timestamp = now_str()
@@ -1223,6 +1295,7 @@ def fetch_active_items(pharmacy_name: str | None = None, include_hidden: bool = 
                order_date, invoice_date, total_amount, first_seen_at, last_seen_at,
                profile_type, profile_type_from_abc, receipt_classification, 
                all_abc_pharmacies, other_branch_details, pharmacist_note, item_key,
+               abc_pharmacy_name,
                ? as is_locked
     """
     
@@ -1347,7 +1420,6 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
 
     for idx, row in df.iterrows():
         with st.container():
-            # استخدام أعمدة منظمة بدلاً من كارد مفتوح
             col1, col2 = st.columns([4, 1])
             
             with col1:
@@ -1356,13 +1428,18 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
                     st.markdown(f"**📋 رقم الطلب:** {row['order_number']}")
                     st.markdown(f"**🏷️ SKU:** {row['sku']}")
                     diff_value = numeric_value(row['difference'])
-                    diff_class = "positive" if diff_value > 0 else "negative"
                     st.markdown(f"**📊 الفرق:** {'+' if diff_value > 0 else ''}{diff_value}")
                 with subcol2:
                     st.markdown(f"**📦 المنتج:** {row['product_name'][:40]}...")
                     st.markdown(f"**🏥 الفرع:** {row['pharmacy_name'] or 'غير محدد'}")
                 with subcol3:
-                    st.markdown(f"**🧾 رقم الفاتورة:** {row['invoice_number'] or 'غير متوفر'}")
+                    # عرض رقم الفاتورة مع الصيدلي
+                    invoice_display = row['invoice_number'] or 'غير متوفر'
+                    abc_pharmacy = row.get('abc_pharmacy_name', '')
+                    if abc_pharmacy:
+                        st.markdown(f"**🧾 رقم الفاتورة/الصيدلي:** {invoice_display}/{abc_pharmacy.split()[-1] if abc_pharmacy else '?'}")
+                    else:
+                        st.markdown(f"**🧾 رقم الفاتورة:** {invoice_display}")
                     st.markdown(f"**📅 تاريخ الطلب:** {row['order_date'][:16] if row['order_date'] else 'غير متوفر'}")
                 with subcol4:
                     st.markdown(f"**✅ الحالة:** {status_pill(row['status'])}", unsafe_allow_html=True)
@@ -1378,7 +1455,6 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
                         hide_item_from_pharmacy(row['item_key'], st.session_state.username)
                         st.rerun()
             
-            # التفاصيل الإضافية
             with st.expander("📋 تفاصيل إضافية"):
                 detail_cols = st.columns(3)
                 with detail_cols[0]:
@@ -1392,7 +1468,6 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
                     st.markdown(f"**فروع ABC:** {row.get('all_abc_pharmacies', '') or row.get('abc_pharmacy_name', '') or 'غير متوفر'}")
                 st.markdown(f"**التفصيل:** {row.get('case_reason', '')}")
             
-            # ملحوظة الصيدلي
             note_key = f"note_{row['case_type']}_{row['order_number']}_{row['sku']}_{idx}"
             note_value = st.text_area(
                 "📝 ملحوظة الصيدلي",
@@ -1401,7 +1476,6 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
                 height=60,
             )
             
-            # أزرار الإجراءات
             btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 4])
             with btn_col1:
                 if st.button("💾 حفظ", key=f"save_{note_key}", use_container_width=True):
@@ -1466,36 +1540,18 @@ def render_completed_table(df: pd.DataFrame, is_admin: bool = False):
         "status": "الحالة"
     })
     
-    cols_to_show = ["رقم الطلب", "رقم الفاتورة", "SKU", "المنتج", "نوع الإجراء", "تم بواسطة", "تاريخ الإكمال"]
-    
     if is_admin:
-        cols_to_show.append("إعادة فتح")
-        # عرض الجدول مع أزرار إعادة فتح
+        cols_to_show = ["رقم الطلب", "رقم الفاتورة", "SKU", "المنتج", "نوع الإجراء", "تم بواسطة", "تاريخ الإكمال"]
+        st.dataframe(display_df[cols_to_show], use_container_width=True)
+        
+        # إضافة أزرار إعادة فتح لكل صف
         for idx, row in display_df.iterrows():
-            col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1, 1, 0.8, 2, 0.8, 1, 1.5, 0.8])
-            with col1:
-                st.write(row["رقم الطلب"])
-            with col2:
-                st.write(row["رقم الفاتورة"])
-            with col3:
-                st.write(row["SKU"])
-            with col4:
-                st.write(row["المنتج"][:40])
-            with col5:
-                st.write(row["نوع الإجراء"])
-            with col6:
-                st.write(row["تم بواسطة"])
-            with col7:
-                st.write(row["تاريخ الإكمال"])
-            with col8:
-                if st.button("🔓 فتح", key=f"reopen_completed_{idx}"):
-                    if 'item_key' in row:
-                        reopen_case_by_item_key(row['item_key'])
-                    else:
-                        st.warning("لا يمكن إعادة فتح هذا العنصر")
+            if st.button(f"🔓 إعادة فتح الطلب {row['رقم الطلب']}", key=f"reopen_completed_{idx}"):
+                if 'item_key' in df.iloc[idx]:
+                    reopen_case_by_item_key(df.iloc[idx]['item_key'])
                     st.rerun()
-            st.divider()
     else:
+        cols_to_show = ["رقم الطلب", "رقم الفاتورة", "SKU", "المنتج", "نوع الإجراء", "تم بواسطة", "تاريخ الإكمال"]
         st.dataframe(display_df[cols_to_show], use_container_width=True)
 
 
@@ -1622,8 +1678,41 @@ def render_admin_dashboard():
     with info_col:
         st.caption("يعرض آخر الإجراءات المنفذة وآخر دخول للصيادلة والحالات المحدثة بعد الرفع.")
 
+    # تبويب تحديث الأرصدة
+    with st.expander("🔄 تحديث أرصدة الفروع", expanded=False):
+        st.markdown("#### رفع ملفات ABC و Salla لتحديث الأرصدة")
+        col1, col2 = st.columns(2)
+        with col1:
+            abc_file = st.file_uploader("رفع ملف ABC (يبدأ من الصف 5)", type=["xlsx"], key="abc_balances")
+        with col2:
+            salla_file = st.file_uploader("رفع ملف Salla", type=["xlsx"], key="salla_balances")
+        
+        if abc_file and salla_file:
+            if st.button("🔄 تنفيذ تحديث الأرصدة", use_container_width=True):
+                with st.spinner("جاري تحديث الأرصدة..."):
+                    result_df, result = update_balances(abc_file, salla_file)
+                    if result_df is not None:
+                        st.success(f"✅ تم التحديث بنجاح! عدد الأصناف المحدثة: {result}")
+                        st.dataframe(result_df.head(20), use_container_width=True)
+                        
+                        # زر تحميل الملف المحدث
+                        output = BytesIO()
+                        result_df.to_excel(output, index=False)
+                        output.seek(0)
+                        st.download_button(
+                            "📥 تحميل ملف Salla المحدث",
+                            data=output,
+                            file_name=f"salla_updated_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                        )
+                    else:
+                        st.error(f"❌ خطأ في التحديث: {result}")
+
+    st.markdown("---")
+
     with st.expander("رفع ملف الطلبات والفواتير", expanded=True):
-        uploaded_file = st.file_uploader("اختر ملف Excel", type=["xlsx"])
+        uploaded_file = st.file_uploader("اختر ملف Excel", type=["xlsx"], key="reconciliation")
         if uploaded_file and st.button("معالجة الملف و ترحيل الحالات", use_container_width=True):
             with st.spinner("جاري قراءة الملف وتصنيف الحالات بدقة..."):
                 results, upload_batch_id = process_excel(uploaded_file, st.session_state.username)
@@ -1789,6 +1878,7 @@ def render_admin_dashboard():
             "فواتير بعد آخر طلب": post_cutoff_admin,
             "بانتظار الدفع": payment_pending_admin,
             "الملغي_والمسترجع": cancelled_admin,
+            "✅ تم الانتهاء": prepare_display_df(get_completed_items()),
         }
     )
     st.download_button(
@@ -1800,7 +1890,8 @@ def render_admin_dashboard():
     )
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
-        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", "فواتير بعد آخر طلب", "بانتظار الدفع", "الملغي/المسترجع", "✅ تم الانتهاء"]
+        ["الإضافات", "الإرجاعات", "طلبات بدون فاتورة", "فواتير بدون طلب", 
+         "فواتير بعد آخر طلب", "بانتظار الدفع", "الملغي/المسترجع", "✅ تم الانتهاء"]
     )
 
     def styled_frame(input_df):
@@ -1859,10 +1950,13 @@ def render_pharmacy_dashboard():
         unsafe_allow_html=True,
     )
 
-    # عدم ظهور أي شيء إذا لم يدخل الصيدلي اسمه
     if not pharmacist_name:
         st.warning("⚠️ الرجاء إدخال اسم الصيدلي من القائمة الجانبية أولاً")
         return
+
+    # زر تحديث
+    if st.button("🔄 تحديث الصفحة", use_container_width=True):
+        st.rerun()
 
     df = fetch_active_items(pharmacy_name, include_hidden=False)
     
@@ -1907,6 +2001,7 @@ def render_pharmacy_dashboard():
             "فواتير بعد آخر طلب": prepare_display_df(post_cutoff_df),
             "بانتظار الدفع": prepare_display_df(payment_pending_df),
             "الملغي_والمسترجع": prepare_display_df(cancelled_df if not cancelled_df.empty else review_df),
+            "✅ تم الانتهاء": prepare_display_df(get_completed_items(pharmacy_name)),
         }
     )
     st.download_button(
@@ -1979,7 +2074,6 @@ with st.sidebar:
     else:
         st.success(st.session_state.username)
         
-        # إذا كان المستخدم صيدلي وليس لديه اسم، أظهر حقل الإدخال
         if st.session_state.user_role == "pharmacy" and not st.session_state.pharmacist_name:
             st.markdown("---")
             pharmacist_input = st.text_input("👤 اسم الصيدلي", key="pharmacist_name_input")
