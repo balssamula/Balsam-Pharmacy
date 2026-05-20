@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from utils.database import get_all_users, add_user, delete_user, update_user_permissions, get_user_permissions
+from utils.database import get_all_users, add_user, delete_user, update_user_permissions
 
 def show():
     st.markdown(
@@ -40,7 +40,7 @@ def show():
     if not users_df.empty:
         for idx, row in users_df.iterrows():
             with st.container():
-                col1, col2, col3, col4, col5 = st.columns([1.5, 1.5, 2, 2, 1])
+                col1, col2, col3, col4 = st.columns([1.5, 2, 2, 1])
                 
                 with col1:
                     st.markdown(f"**👤 {row['username']}**")
@@ -51,15 +51,6 @@ def show():
                     st.caption(f"آخر دخول: {row['last_login'][:16] if row['last_login'] else 'لم يدخل'}")
                 
                 with col3:
-                    st.markdown("**الصلاحيات:**")
-                    can_dash = "✅" if row['can_view_dashboard'] else "❌"
-                    can_bal = "✅" if row['can_view_balances'] else "❌"
-                    can_mon = "✅" if row['can_view_monitoring'] else "❌"
-                    can_users = "✅" if row['can_manage_users'] else "❌"
-                    st.caption(f"لوحة التحكم: {can_dash} | تحديث الأرصدة: {can_bal}")
-                    st.caption(f"مراقبة التعديلات: {can_mon} | إدارة المستخدمين: {can_users}")
-                
-                with col4:
                     if row['username'] != "admin":
                         new_pharm_name = st.text_input("اسم الصيدلي", value=row['pharmacist_name'] or "", key=f"name_{idx}")
                         perms = {
@@ -69,19 +60,17 @@ def show():
                             "can_manage_users": st.checkbox("إدارة المستخدمين", value=bool(row['can_manage_users']), key=f"users_{idx}"),
                             "pharmacist_name": new_pharm_name
                         }
-                        if st.button("💾 حفظ التعديلات", key=f"save_{idx}", use_container_width=True):
+                        if st.button("💾 حفظ", key=f"save_{idx}"):
                             update_user_permissions(row['username'], perms)
                             st.success(f"✅ تم تحديث صلاحيات {row['username']}")
                             st.rerun()
                 
-                with col5:
+                with col4:
                     if row['username'] != "admin":
-                        if st.button("🗑️ حذف", key=f"delete_{idx}", use_container_width=True):
+                        if st.button("🗑️ حذف", key=f"delete_{idx}"):
                             if delete_user(row['username']):
                                 st.success(f"✅ تم حذف المستخدم {row['username']}")
                                 st.rerun()
-                            else:
-                                st.error("لا يمكن حذف المستخدم admin")
                 
                 st.divider()
     else:
