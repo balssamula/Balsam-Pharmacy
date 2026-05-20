@@ -23,7 +23,7 @@ def show():
             new_role = st.selectbox("نوع المستخدم", ["pharmacy", "admin"])
             new_pharmacist_name = st.text_input("اسم الصيدلي (للفروع فقط)")
         
-        if st.button("إضافة مستخدم", use_container_width=True):
+        if st.button("➕ إضافة مستخدم", use_container_width=True):
             if new_username and new_password:
                 if add_user(new_username, new_password, new_role, new_pharmacist_name):
                     st.success(f"✅ تم إضافة المستخدم {new_username}")
@@ -54,16 +54,18 @@ def show():
                     if row['username'] != "admin":
                         new_pharm_name = st.text_input("اسم الصيدلي", value=row['pharmacist_name'] or "", key=f"name_{idx}")
                         perms = {
-                            "can_view_dashboard": st.checkbox("لوحة التحكم", value=bool(row['can_view_dashboard']), key=f"dash_{idx}"),
+                            "can_view_dashboard": st.checkbox("لوحة التحكم الرئيسية", value=bool(row['can_view_dashboard']), key=f"dash_{idx}"),
                             "can_view_balances": st.checkbox("تحديث الأرصدة", value=bool(row['can_view_balances']), key=f"bal_{idx}"),
                             "can_view_monitoring": st.checkbox("مراقبة التعديلات", value=bool(row['can_view_monitoring']), key=f"mon_{idx}"),
                             "can_manage_users": st.checkbox("إدارة المستخدمين", value=bool(row['can_manage_users']), key=f"users_{idx}"),
                             "pharmacist_name": new_pharm_name
                         }
-                        if st.button("💾 حفظ", key=f"save_{idx}"):
+                        if st.button("💾 حفظ التعديلات", key=f"save_{idx}"):
                             update_user_permissions(row['username'], perms)
                             st.success(f"✅ تم تحديث صلاحيات {row['username']}")
                             st.rerun()
+                    else:
+                        st.info("المستخدم admin لديه جميع الصلاحيات")
                 
                 with col4:
                     if row['username'] != "admin":
