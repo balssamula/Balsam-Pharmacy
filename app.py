@@ -1332,12 +1332,31 @@ def export_tabs_to_excel(dataframes_by_sheet: dict[str, pd.DataFrame]) -> bytes:
     from io import BytesIO
 
     output = BytesIO()
+    wrote_any_sheet = False
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         for sheet_name, sheet_df in dataframes_by_sheet.items():
-            export_df = sheet_df.copy()
-            if isinstance(export_df, pd.io.formats.style.Styler):
-                export_df = export_df.data
-            export_df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+            if sheet_df is None:
+                continue
+
+            if isinstance(sheet_df, pd.io.formats.style.Styler):
+                export_df = sheet_df.data.copy()
+            elif isinstance(sheet_df, pd.Series):
+                export_df = sheet_df.to_frame()
+            elif isinstance(sheet_df, pd.DataFrame):
+                export_df = sheet_df.copy()
+            else:
+                export_df = pd.DataFrame(sheet_df)
+
+            safe_sheet_name = (str(sheet_name).strip() or "Sheet")[:31]
+            export_df.to_excel(writer, sheet_name=safe_sheet_name, index=False)
+            wrote_any_sheet = True
+
+        if not wrote_any_sheet:
+            pd.DataFrame([{"ملاحظة": "لا توجد بيانات مطابقة للتصدير حسب الفلاتر الحالية."}]).to_excel(
+                writer,
+                sheet_name="ملخص",
+                index=False,
+            )
     output.seek(0)
     return output.getvalue()
 
