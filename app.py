@@ -7,6 +7,11 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
+try:
+    from pandas.io.formats.style import Styler as PandasStyler
+except Exception:
+    PandasStyler = None
+
 
 st.set_page_config(
     page_title="نظام بلسم العلا - مطابقة الطلبات والفواتير",
@@ -1347,7 +1352,7 @@ def export_tabs_to_excel(dataframes_by_sheet: dict[str, pd.DataFrame]) -> bytes:
         if sheet_df is None:
             continue
 
-        if isinstance(sheet_df, pd.io.formats.style.Styler):
+        if PandasStyler is not None and isinstance(sheet_df, PandasStyler):
             export_df = sheet_df.data.copy()
         elif isinstance(sheet_df, pd.Series):
             export_df = sheet_df.to_frame()
