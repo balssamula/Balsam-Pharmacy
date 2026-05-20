@@ -16,25 +16,48 @@ def pharmacy_names():
     return [f"Balsam Alula Pharmacy {i:02d}" for i in range(1, PHARMACY_COUNT + 1)]
 
 def init_database():
-    """تهيئة قاعدة البيانات"""
+    """تهيئة قاعدة البيانات مع دعم الترقية"""
     os.makedirs(DB_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    # Users table with permissions
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
-            password TEXT NOT NULL,
-            role TEXT NOT NULL,
-            pharmacist_name TEXT DEFAULT '',
-            last_login TEXT DEFAULT '',
-            can_view_dashboard INTEGER DEFAULT 1,
-            can_view_balances INTEGER DEFAULT 0,
-            can_view_monitoring INTEGER DEFAULT 0,
-            can_manage_users INTEGER DEFAULT 0
-        )
-    """)
+    # التحقق من وجود جدول users وإضافة الأعمدة المفقودة
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+    table_exists = cur.fetchone()
+    
+    if not table_exists:
+        # إنشاء الجدول من الصفر
+        cur.execute("""
+            CREATE TABLE users (
+                username TEXT PRIMARY KEY,
+                password TEXT NOT NULL,
+                role TEXT NOT NULL,
+                pharmacist_name TEXT DEFAULT '',
+                last_login TEXT DEFAULT '',
+                can_view_dashboard INTEGER DEFAULT 1,
+                can_view_balances INTEGER DEFAULT 0,
+                can_view_monitoring INTEGER DEFAULT 0,
+                can_manage_users INTEGER DEFAULT 0
+            )
+        """)
+    else:
+        # إضافة الأعمدة المفقودة
+        cur.execute("PRAGMA table_info(users)")
+        existing_columns = [row[1] for row in cur.fetchall()]
+        
+        new_columns = {
+            "can_view_dashboard": "INTEGER DEFAULT 1",
+            "can_view_balances": "INTEGER DEFAULT 0",
+            "can_view_monitoring": "INTEGER DEFAULT 0",
+            "can_manage_users": "INTEGER DEFAULT 0"
+        }
+        
+        for col_name, col_type in new_columns.items():
+            if col_name not in existing_columns:
+                try:
+                    cur.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
+                except:
+                    pass
 
     # Last access table
     cur.execute("""
@@ -114,20 +137,24 @@ def init_database():
         )
     """)
 
-    # Insert default admin
-    cur.execute("""
-        INSERT OR IGNORE INTO users 
-        (username, password, role, pharmacist_name, can_view_dashboard, can_view_balances, can_view_monitoring, can_manage_users)
-        VALUES ('admin', 'admin123', 'admin', 'مدير النظام', 1, 1, 1, 1)
-    """)
-
-    # Insert default pharmacies
-    for index, name in enumerate(pharmacy_names(), start=1):
+    # Insert default admin if not exists
+    cur.execute("SELECT * FROM users WHERE username = 'admin'")
+    if not cur.fetchone():
         cur.execute("""
-            INSERT OR IGNORE INTO users 
+            INSERT INTO users 
             (username, password, role, pharmacist_name, can_view_dashboard, can_view_balances, can_view_monitoring, can_manage_users)
-            VALUES (?, ?, 'pharmacy', '', 1, 0, 0, 0)
-        """, (name, f"balsam{index}"))
+            VALUES ('admin', 'admin123', 'admin', 'مدير النظام', 1, 1, 1, 1)
+        """)
+
+    # Insert default pharmacies if not exists
+    for index, name in enumerate(pharmacy_names(), start=1):
+        cur.execute("SELECT * FROM users WHERE username = ?", (name,))
+        if not cur.fetchone():
+            cur.execute("""
+                INSERT INTO users 
+                (username, password, role, pharmacist_name, can_view_dashboard, can_view_balances, can_view_monitoring, can_manage_users)
+                VALUES (?, ?, 'pharmacy', '', 1, 0, 0, 0)
+            """, (name, f"balsam{index}"))
 
     conn.commit()
     conn.close()
@@ -306,3 +333,115 @@ def get_completed_items(pharmacy_name: str = None) -> pd.DataFrame:
         return pd.read_sql_query(query, conn, params=params if params else None)
     finally:
         conn.close()
+
+def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) -> pd.DataFrame:
+    conn = sqlite3.connect(DB_PATH)
+    
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT upload_batch_id FROM uploads 
+        WHERE is_active = 1
+        ORDER BY uploaded_at DESC LIMIT 1
+    """)
+    active_session = cur.fetchone()
+    
+    if not active_session:
+        conn.close()
+        return pd.DataFrame()
+    
+    active_batch_id = active_session[0]
+    
+    # التحقق من وجود عمود is_locked
+    cur.execute("PRAGMA table_info(uploads)")
+    existing_columns = [row[1] for row in cur.fetchall()]
+    has_lock_column = "is_locked" in existing_columns
+    
+    if has_lock_column:
+        cur.execute("SELECT is_locked FROM uploads WHERE upload_batch_id = ?", (active_batch_id,))
+        lock_result = cur.fetchone()
+        is_locked = lock_result[0] if lock_result else 0
+    else:
+        is_locked = 0
+    
+    query = """
+        SELECT order_number, invoice_number, sku, product_name, pharmacy_name, branch_number,
+               salla_qty, abc_qty, difference, case_type, case_label, case_reason, status,
+               performed_by, performed_at, customer_name, customer_phone, city, order_status,
+               order_date, invoice_date, total_amount, first_seen_at, last_seen_at,
+               profile_type, profile_type_from_abc, receipt_classification, 
+               all_abc_pharmacies, other_branch_details, pharmacist_note, item_key,
+               abc_pharmacy_name, abc_pharmacist_name,
+               ? as is_locked
+        FROM reconciliation_items
+        WHERE active = 1 AND upload_batch_id = ?
+    """
+    params = [1 if is_locked else 0, active_batch_id]
+    
+    if pharmacy_name:
+        query += " AND pharmacy_name = ?"
+        params.append(pharmacy_name)
+    
+    query += " ORDER BY case_type, order_number DESC, sku"
+    
+    try:
+        df = pd.read_sql_query(query, conn, params=params)
+        return df
+    except Exception as e:
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+def hide_item_from_pharmacy(item_key: str, hidden_by: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE reconciliation_items 
+        SET hidden_from_pharmacy = 1, hidden_by = ?, hidden_at = ?
+        WHERE item_key = ?
+    """, (hidden_by, now_str(), item_key))
+    conn.commit()
+    conn.close()
+
+def unhide_item_from_pharmacy(item_key: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE reconciliation_items 
+        SET hidden_from_pharmacy = 0, hidden_by = '', hidden_at = ''
+        WHERE item_key = ?
+    """, (item_key,))
+    conn.commit()
+    conn.close()
+
+def save_case_note(order_number: str, sku: str, pharmacy_name: str, case_type: str, note: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE reconciliation_items
+        SET pharmacist_note = ?
+        WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
+    """, (note, order_number, sku, pharmacy_name, case_type))
+    conn.commit()
+    conn.close()
+
+def mark_case_done(order_number: str, sku: str, pharmacy_name: str, case_type: str, performed_by: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE reconciliation_items
+        SET status = 'تم', performed_by = ?, performed_at = ?
+        WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
+    """, (performed_by, now_str(), order_number, sku, pharmacy_name, case_type))
+    conn.commit()
+    conn.close()
+
+def reopen_case(order_number: str, sku: str, pharmacy_name: str, case_type: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE reconciliation_items
+        SET status = 'قيد المتابعة', performed_by = '', performed_at = ''
+        WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
+    """, (order_number, sku, pharmacy_name, case_type))
+    conn.commit()
+    conn.close()
