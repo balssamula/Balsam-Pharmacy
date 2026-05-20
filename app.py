@@ -1442,10 +1442,22 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
                 with subcol3:
                     invoice_display = row['invoice_number'] or 'غير متوفر'
                     abc_pharmacy = row.get('abc_pharmacy_name', '')
-                    if abc_pharmacy:
-                        st.markdown(f"**🧾 رقم الفاتورة/الصيدلي:** {invoice_display}/{abc_pharmacy.split()[-1] if abc_pharmacy else '?'}")
-                    else:
-                        st.markdown(f"**🧾 رقم الفاتورة:** {invoice_display}")
+                    # استخراج اسم الصيدلي بدلاً من رقم الصيدلية
+                    pharmacist_display = row.get('profile_type_from_abc', '') or row.get('profile_type', '') or abc_pharmacy
+                    if pharmacist_display and '|' in pharmacist_display:
+                        pharmacist_display = pharmacist_display.split('|')[0]
+                    # تنظيف الاسم (إزالة كلمات زائدة)
+                    if pharmacist_display:
+                        # محاولة استخراج اسم الصيدلي من النص
+                        if 'PHARMACIST' in pharmacist_display.upper():
+                            parts = pharmacist_display.split()
+                            for part in parts:
+                                if len(part) > 2 and not part.isdigit():
+                                    pharmacist_display = part
+                                    break
+                        elif len(pharmacist_display) > 20:
+                            pharmacist_display = pharmacist_display[:20]
+                    st.markdown(f"**🧾 رقم الفاتورة/الصيدلي:** {invoice_display}/{pharmacist_display if pharmacist_display else '?'}")
                     st.markdown(f"**📅 تاريخ الطلب:** {row['order_date'][:16] if row['order_date'] else 'غير متوفر'}")
                 with subcol4:
                     st.markdown(f"**✅ الحالة:** {status_pill(row['status'])}", unsafe_allow_html=True)
@@ -1526,7 +1538,6 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
                         st.rerun()
             
             st.markdown("---")
-
 
 def render_completed_table(df: pd.DataFrame, is_admin: bool = False):
     """عرض جدول المكتملات"""
