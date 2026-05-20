@@ -3,6 +3,7 @@ import re
 import sqlite3
 import uuid
 from datetime import datetime
+from io import BytesIO
 
 import pandas as pd
 import numpy as np
@@ -404,7 +405,6 @@ def normalize_sku(value) -> str:
     if not text:
         return ""
     text = text.replace(".0", "")
-    # استبعاد SKU غير الصالحة (0, 1, 200)
     invalid_skus = {"0", "1", "200"}
     if text in invalid_skus:
         return ""
@@ -558,7 +558,6 @@ def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
     df["order_date"] = df["تاريخ الطلب"].apply(normalize_text)
     df["total_amount"] = pd.to_numeric(df["إجمالي الطلب"], errors="coerce").fillna(0)
 
-    # استبعاد الصفوف ذات SKU غير صالح
     df = df[
         (df["order_number"] != "")
         & (df["sku"] != "")
@@ -601,15 +600,12 @@ def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
 def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     df = df_abc.copy()
     
-    # استبعاد FREE GIFTS
     if "نوع البروفايل" in df.columns:
         df = df[df["نوع البروفايل"].astype(str).str.strip() != EXCLUDED_PROFILE].copy()
     
-    # استبعاد DELIVERY FEE
     if "اسم الصنف" in df.columns:
         df = df[~df["اسم الصنف"].astype(str).str.upper().str.contains("DELIVERY FEE", na=False)].copy()
     
-    # استبعاد SKU 16133
     if "رقم الصنف" in df.columns:
         df = df[df["رقم الصنف"].astype(str).str.strip() != "16133"].copy()
 
@@ -1016,7 +1012,7 @@ def get_completed_items(pharmacy_name: str = None) -> pd.DataFrame:
     conn = sqlite3.connect(DB_PATH)
     query = """
         SELECT order_number, invoice_number, sku, product_name, case_type, case_label,
-               performed_by, performed_at, status, item_key
+               performed_by, performed_at, status, item_key, pharmacy_name
         FROM reconciliation_items
         WHERE active = 1 AND status = 'تم'
     """
@@ -1033,20 +1029,33 @@ def get_completed_items(pharmacy_name: str = None) -> pd.DataFrame:
         conn.close()
 
 
+def get_all_pharmacy_pharmacists():
+    """الحصول على جميع الصيادلة المسجلين"""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        df = pd.read_sql_query("""
+            SELECT username, pharmacist_name, last_login
+            FROM users
+            WHERE role = 'pharmacy' AND pharmacist_name != ''
+            ORDER BY last_login DESC
+        """, conn)
+        return df
+    finally:
+        conn.close()
+
+
 # ========== تحديث الأرصدة ==========
 def update_balances(abc_file, salla_file):
     """تحديث أرصدة الفروع بناءً على ملف ABC"""
     try:
-        # قراءة الملفات
         df_abc = pd.read_excel(abc_file, skiprows=4)
         df_salla = pd.read_excel(salla_file)
         
         def get_abc_col(branch_num):
             return pd.to_numeric(df_abc.iloc[:, branch_num + 1], errors='coerce').fillna(0)
         
-        item_key = df_abc.iloc[:, 0]  # رقم الصنف
+        item_key = df_abc.iloc[:, 0]
         
-        # حساب الحالات الخاصة
         tabuk_calc = np.floor(((get_abc_col(8) + get_abc_col(10) + get_abc_col(11) + get_abc_col(12) +
                                get_abc_col(14) + get_abc_col(15) + get_abc_col(16) + get_abc_col(17)) / 2) + get_abc_col(13))
         
@@ -1068,9 +1077,8 @@ def update_balances(abc_file, salla_file):
             'f17': create_map(get_abc_col(17))
         }
         
-        # تحديث ملف salla
         df_updated = df_salla.copy()
-        salla_id_col = 3  # العمود D رقم الصنف
+        salla_id_col = 3
         
         col_mapping = {
             5: 'tabuk', 7: 'f8', 9: 'f9', 11: 'f11', 13: 'f15', 15: 'f16',
@@ -1081,7 +1089,6 @@ def update_balances(abc_file, salla_file):
         for col_idx, map_name in col_mapping.items():
             df_updated.iloc[:, col_idx] = df_updated.iloc[:, salla_id_col].map(maps[map_name]).fillna(0).astype(int)
         
-        # المقارنة والفلترة
         cols_to_check = list(col_mapping.keys())
         old_data = df_salla.iloc[:, cols_to_check].apply(pd.to_numeric, errors='coerce').fillna(0).astype(int)
         new_data = df_updated.iloc[:, cols_to_check]
@@ -1433,7 +1440,6 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
                     st.markdown(f"**📦 المنتج:** {row['product_name'][:40]}...")
                     st.markdown(f"**🏥 الفرع:** {row['pharmacy_name'] or 'غير محدد'}")
                 with subcol3:
-                    # عرض رقم الفاتورة مع الصيدلي
                     invoice_display = row['invoice_number'] or 'غير متوفر'
                     abc_pharmacy = row.get('abc_pharmacy_name', '')
                     if abc_pharmacy:
@@ -1537,21 +1543,22 @@ def render_completed_table(df: pd.DataFrame, is_admin: bool = False):
         "case_label": "نوع الإجراء",
         "performed_by": "تم بواسطة",
         "performed_at": "تاريخ الإكمال",
-        "status": "الحالة"
+        "status": "الحالة",
+        "pharmacy_name": "الصيدلية"
     })
     
+    cols_to_show = ["رقم الطلب", "رقم الفاتورة", "SKU", "المنتج", "نوع الإجراء", "تم بواسطة", "تاريخ الإكمال"]
+    
     if is_admin:
-        cols_to_show = ["رقم الطلب", "رقم الفاتورة", "SKU", "المنتج", "نوع الإجراء", "تم بواسطة", "تاريخ الإكمال"]
+        cols_to_show.insert(1, "الصيدلية")
         st.dataframe(display_df[cols_to_show], use_container_width=True)
         
-        # إضافة أزرار إعادة فتح لكل صف
         for idx, row in display_df.iterrows():
             if st.button(f"🔓 إعادة فتح الطلب {row['رقم الطلب']}", key=f"reopen_completed_{idx}"):
                 if 'item_key' in df.iloc[idx]:
                     reopen_case_by_item_key(df.iloc[idx]['item_key'])
                     st.rerun()
     else:
-        cols_to_show = ["رقم الطلب", "رقم الفاتورة", "SKU", "المنتج", "نوع الإجراء", "تم بواسطة", "تاريخ الإكمال"]
         st.dataframe(display_df[cols_to_show], use_container_width=True)
 
 
@@ -1591,7 +1598,6 @@ def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def export_tabs_to_excel(dataframes_by_sheet: dict[str, pd.DataFrame]) -> bytes:
-    from io import BytesIO
     from openpyxl import Workbook
     from openpyxl.utils.dataframe import dataframe_to_rows
 
@@ -1643,6 +1649,113 @@ def export_tabs_to_excel(dataframes_by_sheet: dict[str, pd.DataFrame]) -> bytes:
     return output.getvalue()
 
 
+def render_balances_updater():
+    """صفحة تحديث الأرصدة"""
+    st.markdown(
+        """
+        <div class="hero">
+            <h1>🔄 تحديث أرصدة الفروع</h1>
+            <p>رفع ملفات ABC و Salla لتحديث الأرصدة بناءً على المعادلات المحددة</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        abc_file = st.file_uploader("📊 رفع ملف ABC (يبدأ من الصف 5)", type=["xlsx"], key="abc_balances")
+    with col2:
+        salla_file = st.file_uploader("📋 رفع ملف Salla", type=["xlsx"], key="salla_balances")
+    
+    if abc_file and salla_file:
+        if st.button("🔄 تنفيذ تحديث الأرصدة", use_container_width=True):
+            with st.spinner("جاري تحديث الأرصدة..."):
+                result_df, result = update_balances(abc_file, salla_file)
+                if result_df is not None:
+                    st.success(f"✅ تم التحديث بنجاح! عدد الأصناف المحدثة: {result}")
+                    st.dataframe(result_df.head(20), use_container_width=True)
+                    
+                    output = BytesIO()
+                    result_df.to_excel(output, index=False)
+                    output.seek(0)
+                    st.download_button(
+                        "📥 تحميل ملف Salla المحدث",
+                        data=output,
+                        file_name=f"salla_updated_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                    )
+                else:
+                    st.error(f"❌ خطأ في التحديث: {result}")
+
+
+def render_pharmacy_monitoring():
+    """صفحة مراقبة تعديلات الصيدليات"""
+    st.markdown(
+        """
+        <div class="hero">
+            <h1>👥 مراقبة تعديلات الصيدليات</h1>
+            <p>متابعة إنجازات الصيادلة وتعديلاتهم على الطلبات</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    
+    # عرض الصيادلة المسجلين
+    st.markdown('<div class="section-title">👤 الصيادلة المسجلون</div>', unsafe_allow_html=True)
+    pharmacists_df = get_all_pharmacy_pharmacists()
+    if not pharmacists_df.empty:
+        st.dataframe(pharmacists_df, use_container_width=True)
+    else:
+        st.info("لا يوجد صيادلة مسجلون بعد")
+    
+    st.markdown("---")
+    
+    # عرض التعديلات
+    st.markdown('<div class="section-title">📋 سجل التعديلات</div>', unsafe_allow_html=True)
+    
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        adjustments_df = pd.read_sql_query("""
+            SELECT order_number, sku, product_name, pharmacy_name, case_type, 
+                   status, performed_by, performed_at, pharmacist_note
+            FROM reconciliation_items
+            WHERE performed_by != '' AND status = 'تم'
+            ORDER BY performed_at DESC
+            LIMIT 100
+        """, conn)
+        
+        if not adjustments_df.empty:
+            adjustments_df = adjustments_df.rename(columns={
+                "order_number": "رقم الطلب",
+                "sku": "SKU",
+                "product_name": "المنتج",
+                "pharmacy_name": "الصيدلية",
+                "case_type": "نوع الإجراء",
+                "status": "الحالة",
+                "performed_by": "تم بواسطة",
+                "performed_at": "تاريخ التنفيذ",
+                "pharmacist_note": "ملحوظة"
+            })
+            st.dataframe(adjustments_df, use_container_width=True)
+            
+            # زر تصدير
+            output = BytesIO()
+            adjustments_df.to_excel(output, index=False)
+            output.seek(0)
+            st.download_button(
+                "📥 تصدير سجل التعديلات إلى Excel",
+                data=output,
+                file_name=f"pharmacy_adjustments_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+        else:
+            st.info("لا توجد تعديلات مسجلة بعد")
+    finally:
+        conn.close()
+
+
 def render_admin_dashboard():
     st.markdown(
         """
@@ -1677,39 +1790,6 @@ def render_admin_dashboard():
             st.rerun()
     with info_col:
         st.caption("يعرض آخر الإجراءات المنفذة وآخر دخول للصيادلة والحالات المحدثة بعد الرفع.")
-
-    # تبويب تحديث الأرصدة
-    with st.expander("🔄 تحديث أرصدة الفروع", expanded=False):
-        st.markdown("#### رفع ملفات ABC و Salla لتحديث الأرصدة")
-        col1, col2 = st.columns(2)
-        with col1:
-            abc_file = st.file_uploader("رفع ملف ABC (يبدأ من الصف 5)", type=["xlsx"], key="abc_balances")
-        with col2:
-            salla_file = st.file_uploader("رفع ملف Salla", type=["xlsx"], key="salla_balances")
-        
-        if abc_file and salla_file:
-            if st.button("🔄 تنفيذ تحديث الأرصدة", use_container_width=True):
-                with st.spinner("جاري تحديث الأرصدة..."):
-                    result_df, result = update_balances(abc_file, salla_file)
-                    if result_df is not None:
-                        st.success(f"✅ تم التحديث بنجاح! عدد الأصناف المحدثة: {result}")
-                        st.dataframe(result_df.head(20), use_container_width=True)
-                        
-                        # زر تحميل الملف المحدث
-                        output = BytesIO()
-                        result_df.to_excel(output, index=False)
-                        output.seek(0)
-                        st.download_button(
-                            "📥 تحميل ملف Salla المحدث",
-                            data=output,
-                            file_name=f"salla_updated_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True,
-                        )
-                    else:
-                        st.error(f"❌ خطأ في التحديث: {result}")
-
-    st.markdown("---")
 
     with st.expander("رفع ملف الطلبات والفواتير", expanded=True):
         uploaded_file = st.file_uploader("اختر ملف Excel", type=["xlsx"], key="reconciliation")
@@ -1811,16 +1891,18 @@ def render_admin_dashboard():
         return
 
     render_metrics(df)
-    filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
-    with filter_col1:
+    
+    # فلتر الصيدلية في تبويب تم الانتهاء
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
         branch_options = ["الكل"] + sorted(df["pharmacy_name"].dropna().astype(str).unique().tolist())
         selected_branch = st.selectbox("فلتر الفرع", branch_options)
-    with filter_col2:
+    with col2:
         performer_values = sorted({value for value in df["performed_by"].fillna("").astype(str).tolist() if value.strip()})
         selected_performer = st.selectbox("فلتر المنفذ", ["الكل"] + performer_values)
-    with filter_col3:
+    with col3:
         date_from = st.date_input("من تاريخ", value=None)
-    with filter_col4:
+    with col4:
         date_to = st.date_input("إلى تاريخ", value=None)
 
     filtered_df = df.copy()
@@ -1868,6 +1950,11 @@ def render_admin_dashboard():
     post_cutoff_admin = admin_df[filtered_df["case_type"] == "post_cutoff_abc"]
     payment_pending_admin = admin_df[filtered_df["order_status"].apply(is_pending_payment_status)]
     cancelled_admin = prepare_display_df(filtered_df[filtered_df["order_status"].apply(is_cancelled_or_returned_status)])
+    
+    # تبويب تم الانتهاء مع فلتر الصيدلية
+    completed_df = get_completed_items()
+    if selected_branch != "الكل":
+        completed_df = completed_df[completed_df["pharmacy_name"] == selected_branch]
 
     export_bytes = export_tabs_to_excel(
         {
@@ -1878,7 +1965,7 @@ def render_admin_dashboard():
             "فواتير بعد آخر طلب": post_cutoff_admin,
             "بانتظار الدفع": payment_pending_admin,
             "الملغي_والمسترجع": cancelled_admin,
-            "✅ تم الانتهاء": prepare_display_df(get_completed_items()),
+            "✅ تم الانتهاء": prepare_display_df(completed_df),
         }
     )
     st.download_button(
@@ -1931,7 +2018,6 @@ def render_admin_dashboard():
     with tab7:
         st.dataframe(styled_frame(cancelled_admin), use_container_width=True)
     with tab8:
-        completed_df = get_completed_items()
         render_completed_table(completed_df, is_admin=True)
 
 
@@ -1954,7 +2040,6 @@ def render_pharmacy_dashboard():
         st.warning("⚠️ الرجاء إدخال اسم الصيدلي من القائمة الجانبية أولاً")
         return
 
-    # زر تحديث
     if st.button("🔄 تحديث الصفحة", use_container_width=True):
         st.rerun()
 
@@ -2072,7 +2157,7 @@ with st.sidebar:
             else:
                 st.error("بيانات الدخول غير صحيحة.")
     else:
-        st.success(st.session_state.username)
+        st.success(f"مرحباً {st.session_state.username}")
         
         if st.session_state.user_role == "pharmacy" and not st.session_state.pharmacist_name:
             st.markdown("---")
@@ -2084,9 +2169,28 @@ with st.sidebar:
                     st.success("✅ تم حفظ الاسم")
                     st.rerun()
         
+        if st.session_state.user_role == "admin":
+            st.markdown("---")
+            st.markdown("### 📂 أدوات المدير")
+            
+            # تبويب تحديث الأرصدة في القائمة الجانبية
+            if st.button("🔄 تحديث الأرصدة", use_container_width=True):
+                st.session_state.page = "balances"
+                st.rerun()
+            
+            # تبويب مراقبة تعديلات الصيدليات
+            if st.button("👥 مراقبة التعديلات", use_container_width=True):
+                st.session_state.page = "monitoring"
+                st.rerun()
+            
+            # العودة إلى لوحة التحكم الرئيسية
+            if st.button("📊 لوحة التحكم", use_container_width=True):
+                st.session_state.page = "dashboard"
+                st.rerun()
+        
         st.markdown("---")
         if st.button("🚪 تسجيل خروج", use_container_width=True):
-            for key in ["logged_in", "username", "user_role", "pharmacist_name", "last_processed_preview", "view_session_id"]:
+            for key in ["logged_in", "username", "user_role", "pharmacist_name", "last_processed_preview", "view_session_id", "page"]:
                 st.session_state[key] = False if key == "logged_in" else None
             st.rerun()
 
@@ -2118,8 +2222,16 @@ elif st.session_state.user_role == "pharmacy":
         st.info("👈 الرجاء إدخال اسم الصيدلي من القائمة الجانبية")
     else:
         render_pharmacy_dashboard()
-else:
-    render_admin_dashboard()
+else:  # admin
+    # التحكم في الصفحة المختارة
+    if not hasattr(st.session_state, 'page') or st.session_state.page == "dashboard":
+        render_admin_dashboard()
+    elif st.session_state.page == "balances":
+        render_balances_updater()
+    elif st.session_state.page == "monitoring":
+        render_pharmacy_monitoring()
+    else:
+        render_admin_dashboard()
 
 
 st.markdown("---")
