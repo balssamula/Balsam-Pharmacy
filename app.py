@@ -1153,7 +1153,7 @@ def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: st
             INSERT INTO reconciliation_items (
                 item_key, upload_batch_id, order_number, invoice_number, sku, product_name,
                 salla_product_name, abc_product_name, pharmacy_name, salla_pharmacy_name,
-                abc_pharmacy_name, branch_number, salla_qty, abc_qty, difference,
+                abc_pharmacy_name, abc_pharmacist_name, branch_number, salla_qty, abc_qty, difference,
                 case_type, case_label, case_reason, status, performed_by, performed_at,
                 customer_name, customer_phone, city, order_status, order_date,
                 invoice_date, profile_type, profile_type_from_abc, receipt_classification, 
@@ -1335,7 +1335,9 @@ def fetch_active_items(pharmacy_name: str | None = None, include_hidden: bool = 
         return pd.DataFrame()
     finally:
         conn.close()
-
+    for col in ['abc_pharmacy_name', 'abc_pharmacist_name', 'profile_type', 'profile_type_from_abc', 'receipt_classification', 'all_abc_pharmacies', 'other_branch_details', 'pharmacist_note', 'item_key']:
+        if col not in df.columns:
+            df[col] = ''
 
 def mark_case_done(order_number: str, sku: str, pharmacy_name: str, case_type: str, performed_by: str):
     conn = sqlite3.connect(DB_PATH)
@@ -1439,23 +1441,13 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
                     st.markdown(f"**🏥 الفرع:** {row['pharmacy_name'] or 'غير محدد'}")
                 with subcol3:
                     invoice_display = row['invoice_number'] or 'غير متوفر'
-                    abc_pharmacy = row.get('abc_pharmacy_name', '')
-                    # استخراج اسم الصيدلي بدلاً من رقم الصيدلية
-                    pharmacist_display = row.get('profile_type_from_abc', '') or row.get('profile_type', '') or abc_pharmacy
+                    # استخدام اسم الصيدلي من عمود abc_pharmacist_name
+                    pharmacist_display = row.get('abc_pharmacist_name', '') or row.get('profile_type_from_abc', '') or ''
                     if pharmacist_display and '|' in pharmacist_display:
                         pharmacist_display = pharmacist_display.split('|')[0]
-                    # تنظيف الاسم (إزالة كلمات زائدة)
-                    if pharmacist_display:
-                        # محاولة استخراج اسم الصيدلي من النص
-                        if 'PHARMACIST' in pharmacist_display.upper():
-                            parts = pharmacist_display.split()
-                            for part in parts:
-                                if len(part) > 2 and not part.isdigit():
-                                    pharmacist_display = part
-                                    break
-                        elif len(pharmacist_display) > 20:
-                            pharmacist_display = pharmacist_display[:20]
-                    st.markdown(f"**🧾 رقم الفاتورة/الصيدلي:** {invoice_display}/{pharmacist_display if pharmacist_display else '?'}")
+                    if not pharmacist_display or pharmacist_display == '':
+                        pharmacist_display = 'غير معروف'
+                    st.markdown(f"**🧾 رقم الفاتورة/الصيدلي:** {invoice_display}/{pharmacist_display}")
                     st.markdown(f"**📅 تاريخ الطلب:** {row['order_date'][:16] if row['order_date'] else 'غير متوفر'}")
                 with subcol4:
                     st.markdown(f"**✅ الحالة:** {status_pill(row['status'])}", unsafe_allow_html=True)
