@@ -1443,7 +1443,7 @@ def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: st
                     invoice_display = row['invoice_number'] or 'غير متوفر'
                     abc_pharmacy = row.get('abc_pharmacy_name', '')
                     # استخراج اسم الصيدلي بدلاً من رقم الصيدلية
-                    pharmacist_display = row.get('pharmacy_name_from_abc', '') or row.get('pharmacy_name', '') or abc_pharmacy
+                    pharmacist_display = row.get('PHARMACIST_from_abc', '') or row.get('PHARMACIST', '') or abc_pharmacy
                     if pharmacist_display and '|' in pharmacist_display:
                         pharmacist_display = pharmacist_display.split('|')[0]
                     # تنظيف الاسم (إزالة كلمات زائدة)
