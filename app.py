@@ -1330,33 +1330,53 @@ def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
 
 def export_tabs_to_excel(dataframes_by_sheet: dict[str, pd.DataFrame]) -> bytes:
     from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.utils.dataframe import dataframe_to_rows
 
     output = BytesIO()
+    workbook = Workbook()
+    default_sheet = workbook.active
+    default_sheet.title = "ملخص"
+    default_sheet.append(["ملاحظة"])
+    default_sheet.append(["لا توجد بيانات مطابقة للتصدير حسب الفلاتر الحالية."])
+
     wrote_any_sheet = False
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        for sheet_name, sheet_df in dataframes_by_sheet.items():
-            if sheet_df is None:
-                continue
+    seen_sheet_names = set()
 
-            if isinstance(sheet_df, pd.io.formats.style.Styler):
-                export_df = sheet_df.data.copy()
-            elif isinstance(sheet_df, pd.Series):
-                export_df = sheet_df.to_frame()
-            elif isinstance(sheet_df, pd.DataFrame):
-                export_df = sheet_df.copy()
-            else:
-                export_df = pd.DataFrame(sheet_df)
+    for sheet_name, sheet_df in dataframes_by_sheet.items():
+        if sheet_df is None:
+            continue
 
-            safe_sheet_name = (str(sheet_name).strip() or "Sheet")[:31]
-            export_df.to_excel(writer, sheet_name=safe_sheet_name, index=False)
-            wrote_any_sheet = True
+        if isinstance(sheet_df, pd.io.formats.style.Styler):
+            export_df = sheet_df.data.copy()
+        elif isinstance(sheet_df, pd.Series):
+            export_df = sheet_df.to_frame()
+        elif isinstance(sheet_df, pd.DataFrame):
+            export_df = sheet_df.copy()
+        else:
+            export_df = pd.DataFrame(sheet_df)
 
-        if not wrote_any_sheet:
-            pd.DataFrame([{"ملاحظة": "لا توجد بيانات مطابقة للتصدير حسب الفلاتر الحالية."}]).to_excel(
-                writer,
-                sheet_name="ملخص",
-                index=False,
-            )
+        safe_sheet_name = (str(sheet_name).strip() or "Sheet")[:31]
+        if safe_sheet_name in seen_sheet_names:
+            suffix = 2
+            base_name = safe_sheet_name[:28]
+            while f"{base_name}_{suffix}" in seen_sheet_names:
+                suffix += 1
+            safe_sheet_name = f"{base_name}_{suffix}"
+        seen_sheet_names.add(safe_sheet_name)
+
+        worksheet = workbook.create_sheet(title=safe_sheet_name)
+        if export_df.empty:
+            worksheet.append(["لا توجد بيانات"])
+        else:
+            for row in dataframe_to_rows(export_df, index=False, header=True):
+                worksheet.append(row)
+        wrote_any_sheet = True
+
+    if wrote_any_sheet and "ملخص" in workbook.sheetnames and len(workbook.sheetnames) > 1:
+        workbook.remove(workbook["ملخص"])
+
+    workbook.save(output)
     output.seek(0)
     return output.getvalue()
 
