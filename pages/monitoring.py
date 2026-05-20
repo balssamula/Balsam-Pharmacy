@@ -77,5 +77,25 @@ def show():
             )
         else:
             st.info("لا توجد تعديلات مسجلة بعد")
+            
+        # عرض إحصائيات سريعة
+        st.markdown("---")
+        st.markdown('<div class="section-title">📊 إحصائيات سريعة</div>', unsafe_allow_html=True)
+        
+        stats_df = pd.read_sql_query("""
+            SELECT pharmacy_name, COUNT(*) as total_adjustments
+            FROM reconciliation_items
+            WHERE performed_by != '' AND status = 'تم'
+            GROUP BY pharmacy_name
+            ORDER BY total_adjustments DESC
+            LIMIT 10
+        """, conn)
+        
+        if not stats_df.empty:
+            st.dataframe(stats_df.rename(columns={
+                "pharmacy_name": "الصيدلية",
+                "total_adjustments": "عدد التعديلات"
+            }), use_container_width=True)
+            
     finally:
         conn.close()
