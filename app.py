@@ -694,7 +694,7 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         how="outer",
         indicator=True,
     )
-
+    merged["abc_pharmacist_name"] = merged.get("abc_pharmacist_name", "")
     for column in [
         "salla_qty",
         "abc_qty",
@@ -811,6 +811,7 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         "pharmacy_name",
         "salla_pharmacy_name",
         "abc_pharmacy_name",
+        "abc_pharmacist_name",
         "branch_number",
         "salla_qty",
         "abc_qty",
@@ -1126,6 +1127,32 @@ def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: st
 
     cur.execute("BEGIN")
 
+    # أولاً: التحقق من وجود الأعمدة المطلوبة وإضافتها إذا لزم الأمر
+    cur.execute("PRAGMA table_info(reconciliation_items)")
+    existing_columns = [row[1] for row in cur.fetchall()]
+    
+    # الأعمدة المطلوبة
+    required_columns = {
+        "profile_type": "TEXT DEFAULT ''",
+        "profile_type_from_abc": "TEXT DEFAULT ''",
+        "receipt_classification": "TEXT DEFAULT ''",
+        "all_abc_pharmacies": "TEXT DEFAULT ''",
+        "other_branch_details": "TEXT DEFAULT ''",
+        "pharmacist_note": "TEXT DEFAULT ''",
+        "hidden_from_pharmacy": "INTEGER DEFAULT 0",
+        "hidden_by": "TEXT DEFAULT ''",
+        "hidden_at": "TEXT DEFAULT ''",
+        "abc_pharmacist_name": "TEXT DEFAULT ''"
+    }
+    
+    for col_name, col_type in required_columns.items():
+        if col_name not in existing_columns:
+            try:
+                cur.execute(f"ALTER TABLE reconciliation_items ADD COLUMN {col_name} {col_type}")
+            except:
+                pass
+    
+    # إدراج بيانات الرفع
     cur.execute(
         """
         INSERT INTO uploads (
@@ -1150,110 +1177,84 @@ def persist_reconciliation_results(results: pd.DataFrame, uploaded_file_name: st
         ),
     )
 
+    # الحصول على الحالات السابقة
     existing_map = {}
-    existing_rows = cur.execute(
-        "SELECT item_key, status, performed_by, performed_at, first_seen_at, pharmacist_note FROM reconciliation_items"
-    ).fetchall()
-    for item_key, status, performed_by, performed_at, first_seen_at, pharmacist_note in existing_rows:
-        existing_map[item_key] = {
-            "status": status,
-            "performed_by": performed_by,
-            "performed_at": performed_at,
-            "first_seen_at": first_seen_at or timestamp,
-            "pharmacist_note": pharmacist_note or "",
-        }
+    try:
+        existing_rows = cur.execute(
+            "SELECT item_key, status, performed_by, performed_at, first_seen_at, pharmacist_note FROM reconciliation_items"
+        ).fetchall()
+        for item_key, status, performed_by, performed_at, first_seen_at, pharmacist_note in existing_rows:
+            existing_map[item_key] = {
+                "status": status,
+                "performed_by": performed_by,
+                "performed_at": performed_at,
+                "first_seen_at": first_seen_at or timestamp,
+                "pharmacist_note": pharmacist_note or "",
+            }
+    except:
+        pass
 
+    # إدراج العناصر
     for _, row in results.iterrows():
         previous = existing_map.get(row["item_key"], {})
+        
+        # إعداد القيم مع التحقق من وجود الأعمدة
         cur.execute(
             """
-            INSERT INTO reconciliation_items (
+            INSERT OR REPLACE INTO reconciliation_items (
                 item_key, upload_batch_id, order_number, invoice_number, sku, product_name,
                 salla_product_name, abc_product_name, pharmacy_name, salla_pharmacy_name,
-                abc_pharmacy_name, abc_pharmacist_name, branch_number, salla_qty, abc_qty, difference,
+                abc_pharmacy_name, branch_number, salla_qty, abc_qty, difference,
                 case_type, case_label, case_reason, status, performed_by, performed_at,
                 customer_name, customer_phone, city, order_status, order_date,
                 invoice_date, profile_type, profile_type_from_abc, receipt_classification, 
                 all_abc_pharmacies, other_branch_details, pharmacist_note, total_amount, 
-                first_seen_at, last_seen_at, active, hidden_from_pharmacy
+                first_seen_at, last_seen_at, active, hidden_from_pharmacy, abc_pharmacist_name
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
-            ON CONFLICT(item_key) DO UPDATE SET
-                upload_batch_id = excluded.upload_batch_id,
-                order_number = excluded.order_number,
-                invoice_number = excluded.invoice_number,
-                sku = excluded.sku,
-                product_name = excluded.product_name,
-                salla_product_name = excluded.salla_product_name,
-                abc_product_name = excluded.abc_product_name,
-                pharmacy_name = excluded.pharmacy_name,
-                salla_pharmacy_name = excluded.salla_pharmacy_name,
-                abc_pharmacy_name = excluded.abc_pharmacy_name,
-                branch_number = excluded.branch_number,
-                salla_qty = excluded.salla_qty,
-                abc_qty = excluded.abc_qty,
-                difference = excluded.difference,
-                case_type = excluded.case_type,
-                case_label = excluded.case_label,
-                case_reason = excluded.case_reason,
-                customer_name = excluded.customer_name,
-                customer_phone = excluded.customer_phone,
-                city = excluded.city,
-                order_status = excluded.order_status,
-                order_date = excluded.order_date,
-                invoice_date = excluded.invoice_date,
-                profile_type = excluded.profile_type,
-                profile_type_from_abc = excluded.profile_type_from_abc,
-                receipt_classification = excluded.receipt_classification,
-                all_abc_pharmacies = excluded.all_abc_pharmacies,
-                other_branch_details = excluded.other_branch_details,
-                pharmacist_note = reconciliation_items.pharmacist_note,
-                total_amount = excluded.total_amount,
-                first_seen_at = reconciliation_items.first_seen_at,
-                last_seen_at = excluded.last_seen_at,
-                active = 1,
-                hidden_from_pharmacy = reconciliation_items.hidden_from_pharmacy
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?)
             """,
             (
                 row["item_key"],
                 upload_batch_id,
-                row["order_number"],
-                row["invoice_number"],
-                row["sku"],
-                row["product_name"],
-                row["salla_product_name"],
-                row["abc_product_name"],
-                row["pharmacy_name"],
-                row["salla_pharmacy_name"],
-                row["abc_pharmacy_name"],
-                row["branch_number"],
-                numeric_value(row["salla_qty"]),
-                numeric_value(row["abc_qty"]),
-                numeric_value(row["difference"]),
-                row["case_type"],
-                row["case_label"],
-                row["case_reason"],
+                str(row["order_number"]),
+                str(row.get("invoice_number", "")),
+                str(row["sku"]),
+                str(row["product_name"])[:200],
+                str(row.get("salla_product_name", ""))[:200],
+                str(row.get("abc_product_name", ""))[:200],
+                str(row["pharmacy_name"]),
+                str(row.get("salla_pharmacy_name", "")),
+                str(row.get("abc_pharmacy_name", "")),
+                str(row.get("branch_number", "")),
+                float(row["salla_qty"]),
+                float(row["abc_qty"]),
+                float(row["difference"]),
+                str(row["case_type"]),
+                str(row["case_label"]),
+                str(row.get("case_reason", ""))[:500],
                 previous.get("status", STATUS_PENDING),
                 previous.get("performed_by", ""),
                 previous.get("performed_at", ""),
-                row["customer_name"],
-                row["customer_phone"],
-                row["city"],
-                row["order_status"],
-                row["order_date"],
-                row["invoice_date"],
-                row.get("profile_type", ""),
-                row.get("profile_type_from_abc", ""),
-                row.get("receipt_classification", ""),
-                row.get("all_abc_pharmacies", ""),
-                row.get("other_branch_details", ""),
+                str(row.get("customer_name", ""))[:100],
+                str(row.get("customer_phone", "")),
+                str(row.get("city", "")),
+                str(row.get("order_status", "")),
+                str(row.get("order_date", "")),
+                str(row.get("invoice_date", "")),
+                str(row.get("profile_type", "")),
+                str(row.get("profile_type_from_abc", "")),
+                str(row.get("receipt_classification", "")),
+                str(row.get("all_abc_pharmacies", "")),
+                str(row.get("other_branch_details", "")),
                 previous.get("pharmacist_note", ""),
-                numeric_value(row["total_amount"]),
+                float(row.get("total_amount", 0)),
                 previous.get("first_seen_at", timestamp),
                 timestamp,
+                str(row.get("abc_pharmacist_name", ""))
             ),
         )
 
+    # تعطيل العناصر القديمة
     cur.execute(
         """
         UPDATE reconciliation_items
