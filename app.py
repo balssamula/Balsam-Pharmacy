@@ -1333,13 +1333,14 @@ def fetch_active_items(pharmacy_name: str | None = None, include_hidden: bool = 
     except Exception as e:
         st.warning(f"خطأ في جلب البيانات: {str(e)[:100]}")
         return pd.DataFrame()
-    for col in ['abc_pharmacy_name', 'abc_pharmacist_name', 'profile_type', 'profile_type_from_abc', 'receipt_classification', 'all_abc_pharmacies', 'other_branch_details', 'pharmacist_note', 'item_key']:
-        if col not in df.columns:
-            df[col] = ''
             
     finally:
         conn.close()
 
+    for col in ['abc_pharmacy_name', 'abc_pharmacist_name', 'profile_type', 'profile_type_from_abc', 'receipt_classification', 'all_abc_pharmacies', 'other_branch_details', 'pharmacist_note', 'item_key']:
+        if col not in df.columns:
+            df[col] = ''
+            
 def mark_case_done(order_number: str, sku: str, pharmacy_name: str, case_type: str, performed_by: str):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
