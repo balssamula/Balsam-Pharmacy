@@ -184,3 +184,12 @@ def update_balances(abc_file, salla_file):
         return df_final, len(df_final)
     except Exception as e:
         return None, str(e)
+
+def process_excel(uploaded_file, uploaded_by: str):
+    from utils.database import persist_reconciliation_results
+    
+    df_salla = pd.read_excel(uploaded_file, sheet_name="سلة")
+    df_abc = pd.read_excel(uploaded_file, sheet_name="abc")
+    results = classify_cases(df_salla, df_abc)
+    upload_batch_id = persist_reconciliation_results(results, uploaded_file.name, uploaded_by)
+    return results, upload_batch_id
