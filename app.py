@@ -5,6 +5,24 @@ from utils.helpers import get_branch_number
 # تهيئة قاعدة البيانات
 init_database()
 
+def fix_admin_permissions():
+    import sqlite3
+    conn = sqlite3.connect('data/pharmacy_reconciliation.db')
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE users 
+        SET can_view_dashboard = 1, 
+            can_view_balances = 1, 
+            can_view_monitoring = 1, 
+            can_manage_users = 1 
+        WHERE username = 'admin'
+    """)
+    conn.commit()
+    conn.close()
+    print("✅ تم تحديث صلاحيات المدير")
+
+fix_admin_permissions()
+
 st.set_page_config(
     page_title="نظام بلسم العلا - مطابقة الطلبات والفواتير",
     layout="wide",
