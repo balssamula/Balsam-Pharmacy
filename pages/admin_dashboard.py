@@ -11,6 +11,9 @@ from utils.helpers import is_cancelled_or_returned_status, is_pending_payment_st
 from utils.ui_components import render_metrics, render_completed_table, get_tab_label
 from utils.excel_processor import process_excel
 
+if 'page' not in st.session_state:
+    st.session_state.page = "dashboard"
+
 def show():
     st.markdown(
         """
@@ -220,3 +223,8 @@ def show():
         st.dataframe(cancelled, use_container_width=True)
     with tab8:
         render_completed_table(completed_df, is_admin=True, total_count=completed_count)
+
+    pass
+
+if __name__ == "__main__":
+    show()
