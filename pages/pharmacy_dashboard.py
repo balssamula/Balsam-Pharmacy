@@ -83,7 +83,9 @@ def render_case_cards_pharmacy(df: pd.DataFrame, allow_actions: bool, pharmacist
         return
 
     for idx, row in df.iterrows():
-        diff_value = numeric_value(row['difference'])
+        salla_numeric = int(row['salla_qty']) if pd.notna(row['salla_qty']) else 0
+        abc_numeric = int(row['abc_qty']) if pd.notna(row['abc_qty']) else 0
+        diff_value = salla_numeric - abc_numeric
         
         if diff_value > 0:
             required_action = "إضافة"
