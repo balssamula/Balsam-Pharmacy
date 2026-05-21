@@ -1,6 +1,5 @@
 import re
 import pandas as pd
-import streamlit as st
 
 def normalize_text(value) -> str:
     if pd.isna(value):
@@ -22,9 +21,8 @@ def is_pending_payment_status(status_text: str) -> bool:
     return "بانتظار الدفع" in status
 
 def is_gift_or_promotion(customer_name: str) -> bool:
-    """استبعاد عملاء الهدية أو الدعاية"""
     name = normalize_text(customer_name)
-    gift_keywords = ["هدية", "دعاية", "gift", "promotion", "free", "sample"]
+    gift_keywords = ["هدية", "دعاية", "gift", "promotion", "free", "sample", "اختبار", "test"]
     for keyword in gift_keywords:
         if keyword in name.lower():
             return True
@@ -63,7 +61,10 @@ def normalize_sku(value) -> str:
     return ""
 
 def numeric_value(value) -> float:
-    return float(pd.to_numeric(pd.Series([value]), errors="coerce").fillna(0).iloc[0])
+    try:
+        return float(pd.to_numeric(value, errors="coerce").fillna(0))
+    except:
+        return 0.0
 
 def extract_branch_from_status(status_text):
     if not status_text or pd.isna(status_text):
@@ -93,8 +94,8 @@ def get_branch_number(pharmacy_name: str) -> str:
 
 def status_pill(status: str) -> str:
     if status == "تم":
-        return '<span class="pill pill-completed">مغلق</span>'
-    return '<span class="pill pill-amber">قيد المتابعة</span>'
+        return '<span class="pill pill-completed">✅ مغلق</span>'
+    return '<span class="pill pill-amber">⏳ قيد المتابعة</span>'
 
 def case_pill(case_type: str) -> str:
     CASE_LABELS = {
@@ -102,6 +103,7 @@ def case_pill(case_type: str) -> str:
         "return": "إرجاع",
         "orphan_salla": "طلب بدون فاتورة",
         "orphan_abc": "فاتورة بدون طلب",
+        "post_cutoff_abc": "فاتورة بعد آخر طلب",
         "branch_mismatch": "اختلاف فرع",
         "special_review": "مراجعة رقم طلب خاص",
     }
@@ -110,6 +112,7 @@ def case_pill(case_type: str) -> str:
         "return": "pill-red",
         "orphan_salla": "pill-amber",
         "orphan_abc": "pill-slate",
+        "post_cutoff_abc": "pill-slate",
         "branch_mismatch": "pill-red",
         "special_review": "pill-slate",
     }
@@ -121,4 +124,9 @@ def status_alert_pill(order_status: str) -> str:
     return f'<span class="pill pill-cancel">{label}</span>' if label else ""
 
 def payment_alert_pill(order_status: str) -> str:
-    return '<span class="pill pill-payment">بانتظار الدفع</span>' if is_pending_payment_status(order_status) else ""
+    return '<span class="pill pill-payment">💰 بانتظار الدفع</span>' if is_pending_payment_status(order_status) else ""
+
+def get_tab_label(label: str, current: int, total: int) -> str:
+    if total > 0:
+        return f"{label} ({current}/{total})"
+    return label
