@@ -110,7 +110,25 @@ def show():
         st.info("📂 لا توجد بيانات فعالة بعد. ارفع ملف Excel من الأعلى لبدء التحليل.")
         return
     
-    render_metrics(df)
+    # إحصائيات سريعة - استبعاد الملغي والمسترجع
+    active_mask = ~df["order_status"].apply(is_cancelled_or_returned_status)
+    active_df = df[active_mask]
+    
+    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+    with col1:
+        st.metric("📊 إجمالي الحالات", len(active_df))
+    with col2:
+        st.metric("➕ إضافات", len(active_df[active_df["case_type"] == "addition"]))
+    with col3:
+        st.metric("➖ إرجاعات", len(active_df[active_df["case_type"] == "return"]))
+    with col4:
+        st.metric("📦 طلبات بدون فاتورة", len(active_df[active_df["case_type"] == "orphan_salla"]))
+    with col5:
+        st.metric("🧾 فواتير بدون طلب", len(active_df[active_df["case_type"] == "orphan_abc"]))
+    with col6:
+        st.metric("⏰ فواتير بعد آخر طلب", len(active_df[active_df["case_type"] == "post_cutoff_abc"]))
+    with col7:
+        st.metric("✅ تم إنجازها", len(df[df["status"] == "تم"]))
     
     # فلاتر
     col1, col2, col3 = st.columns(3)
@@ -134,16 +152,16 @@ def show():
         else:
             filtered_df = filtered_df[filtered_df["order_status"] == selected_order_status]
     
-    # فصل البيانات
-    active_mask = ~filtered_df["order_status"].apply(is_cancelled_or_returned_status)
+    # فصل البيانات - استبعاد الملغي والمسترجع من التبويبات الرئيسية
+    active_mask_filtered = ~filtered_df["order_status"].apply(is_cancelled_or_returned_status)
     payment_mask = filtered_df["order_status"].apply(is_pending_payment_status)
     cancelled_mask = filtered_df["order_status"].apply(is_cancelled_or_returned_status)
     
-    additions_df = filtered_df[(filtered_df["case_type"] == "addition") & active_mask]
-    returns_df = filtered_df[(filtered_df["case_type"] == "return") & active_mask]
-    orphan_salla_df = filtered_df[(filtered_df["case_type"] == "orphan_salla") & active_mask]
-    orphan_abc_df = filtered_df[(filtered_df["case_type"] == "orphan_abc") & active_mask]
-    post_cutoff_df = filtered_df[filtered_df["case_type"] == "post_cutoff_abc"]
+    additions_df = filtered_df[(filtered_df["case_type"] == "addition") & active_mask_filtered]
+    returns_df = filtered_df[(filtered_df["case_type"] == "return") & active_mask_filtered]
+    orphan_salla_df = filtered_df[(filtered_df["case_type"] == "orphan_salla") & active_mask_filtered]
+    orphan_abc_df = filtered_df[(filtered_df["case_type"] == "orphan_abc") & active_mask_filtered]
+    post_cutoff_df = filtered_df[(filtered_df["case_type"] == "post_cutoff_abc") & active_mask_filtered]
     payment_df = filtered_df[payment_mask]
     cancelled_df = filtered_df[cancelled_mask]
     
@@ -232,7 +250,7 @@ def show():
                 with col4:
                     st.write(f"تم بواسطة: {row['performed_by']}")
                 with col5:
-                    if st.button(f"🔓 إعادة فتح", key=f"reopen_{idx}"):
+                    if st.button(f"🔓 إعادة فتح", key=f"reopen_completed_{idx}"):
                         if 'item_key' in row:
                             reopen_case_by_item_key(row['item_key'])
                             st.rerun()
