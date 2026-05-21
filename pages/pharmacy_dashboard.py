@@ -1,8 +1,10 @@
 import streamlit as st
 from utils.database import fetch_active_items, get_completed_items
-from utils.helpers import is_cancelled_or_returned_status, is_pending_payment_status, get_branch_number
-from utils.ui_components import render_metrics, render_case_cards, render_completed_table, get_tab_label
-from utils.excel_processor import process_excel
+from utils.helpers import (
+    is_cancelled_or_returned_status, is_pending_payment_status, 
+    get_branch_number, get_tab_label
+)
+from utils.ui_components import render_metrics, render_case_cards, render_completed_table
 
 def show():
     pharmacy_name = st.session_state.username
@@ -12,16 +14,12 @@ def show():
     st.markdown(
         f"""
         <div class="hero">
-            <h1>{pharmacy_name}</h1>
+            <h1>🏥 {pharmacy_name}</h1>
             <p>فرع رقم {branch_number} | الصيدلي: {pharmacist_name}</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-    if not pharmacist_name:
-        st.warning("⚠️ الرجاء إدخال اسم الصيدلي من القائمة الجانبية أولاً")
-        return
 
     if st.button("🔄 تحديث الصفحة", use_container_width=True):
         st.rerun()
@@ -29,7 +27,7 @@ def show():
     df = fetch_active_items(pharmacy_name, include_hidden=False)
     
     if df.empty:
-        st.info("لا توجد حالات نشطة لهذا الفرع حاليًا.")
+        st.info("📭 لا توجد حالات نشطة لهذا الفرع حاليًا.")
         completed_df = get_completed_items(pharmacy_name)
         if not completed_df.empty:
             st.markdown("---")
@@ -64,13 +62,13 @@ def show():
     total_items = len(additions_df) + len(returns_df) + len(orphan_salla_df) + len(orphan_abc_df)
     
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-        get_tab_label("الإضافات", len(additions_df), total_items),
-        get_tab_label("الإرجاعات", len(returns_df), total_items),
-        get_tab_label("طلبات بدون فاتورة", len(orphan_salla_df), total_items),
-        get_tab_label("فواتير بدون طلب", len(orphan_abc_df), total_items),
-        get_tab_label("فواتير بعد آخر طلب", len(post_cutoff_df), total_items),
-        get_tab_label("بانتظار الدفع", len(payment_pending_df), total_items),
-        get_tab_label("الملغي/المسترجع", len(cancelled_df), total_items),
+        get_tab_label("📈 الإضافات", len(additions_df), total_items),
+        get_tab_label("📉 الإرجاعات", len(returns_df), total_items),
+        get_tab_label("📦 طلبات بدون فاتورة", len(orphan_salla_df), total_items),
+        get_tab_label("🧾 فواتير بدون طلب", len(orphan_abc_df), total_items),
+        get_tab_label("⏰ فواتير بعد آخر طلب", len(post_cutoff_df), total_items),
+        get_tab_label("💰 بانتظار الدفع", len(payment_pending_df), total_items),
+        get_tab_label("⚠️ ملغي/مسترجع", len(cancelled_df), total_items),
         get_tab_label("✅ تم الانتهاء", len(completed_df), len(completed_df))
     ])
 
@@ -89,4 +87,4 @@ def show():
     with tab7:
         render_case_cards(cancelled_df, False, pharmacist_name, pharmacy_name, is_admin=False)
     with tab8:
-        render_completed_table(completed_df, is_admin=False, total_count=len(completed_df))
+        render_completed_table(completed_df, is_admin=False)
