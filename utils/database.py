@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import uuid
 import pandas as pd
 from datetime import datetime, timedelta
 
@@ -20,6 +21,7 @@ def init_database():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
+    # Users table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY,
@@ -36,6 +38,7 @@ def init_database():
         )
     """)
 
+    # Last access table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS last_access (
             pharmacy_name TEXT PRIMARY KEY,
@@ -44,6 +47,7 @@ def init_database():
         )
     """)
 
+    # Uploads table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS uploads (
             upload_batch_id TEXT PRIMARY KEY,
@@ -56,7 +60,6 @@ def init_database():
             total_returns INTEGER DEFAULT 0,
             total_orphan_salla INTEGER DEFAULT 0,
             total_orphan_abc INTEGER DEFAULT 0,
-            total_post_cutoff INTEGER DEFAULT 0,
             is_locked INTEGER DEFAULT 0,
             locked_by TEXT DEFAULT '',
             locked_at TEXT DEFAULT '',
@@ -64,6 +67,7 @@ def init_database():
         )
     """)
 
+    # Reconciliation items table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS reconciliation_items (
             item_key TEXT PRIMARY KEY,
@@ -116,6 +120,7 @@ def init_database():
             VALUES ('admin', 'admin123', 'admin', 'مدير النظام', 1, 1, 1, 1, 1, 1)
         """)
 
+    # Insert default manager
     cur.execute("SELECT * FROM users WHERE username = 'manager'")
     if not cur.fetchone():
         cur.execute("""
@@ -124,6 +129,7 @@ def init_database():
             VALUES ('manager', 'manager123', 'manager', 'مدير عام', 1, 1, 1, 0, 1, 1)
         """)
 
+    # Insert default pharmacies
     for index, name in enumerate(pharmacy_names(), start=1):
         cur.execute("SELECT * FROM users WHERE username = ?", (name,))
         if not cur.fetchone():
@@ -395,6 +401,8 @@ def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) 
     query += " ORDER BY case_type, order_number DESC, sku"
     try:
         df = pd.read_sql_query(query, conn, params=params)
+        if 'difference' in df.columns:
+            df['difference'] = df['difference'].fillna(0)
         return df
     except:
         return pd.DataFrame()
