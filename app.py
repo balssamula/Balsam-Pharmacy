@@ -5,21 +5,42 @@ from utils.helpers import get_branch_number
 # تهيئة قاعدة البيانات
 init_database()
 
+# تحديث صلاحيات المدير
 def fix_admin_permissions():
     import sqlite3
-    conn = sqlite3.connect('data/pharmacy_reconciliation.db')
-    cur = conn.cursor()
-    cur.execute("""
-        UPDATE users 
-        SET can_view_dashboard = 1, 
-            can_view_balances = 1, 
-            can_view_monitoring = 1, 
-            can_manage_users = 1 
-        WHERE username = 'admin'
-    """)
-    conn.commit()
-    conn.close()
-    print("✅ تم تحديث صلاحيات المدير")
+    import os
+    db_path = 'data/pharmacy_reconciliation.db'
+    if os.path.exists(db_path):
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        try:
+            # تحديث صلاحيات admin
+            cur.execute("""
+                UPDATE users 
+                SET can_view_dashboard = 1, 
+                    can_view_balances = 1, 
+                    can_view_monitoring = 1, 
+                    can_manage_users = 1 
+                WHERE username = 'admin'
+            """)
+            conn.commit()
+            
+            # إضافة الأعمدة إذا لم تكن موجودة
+            cur.execute("PRAGMA table_info(users)")
+            existing_columns = [row[1] for row in cur.fetchall()]
+            
+            if "can_view_balances" not in existing_columns:
+                cur.execute("ALTER TABLE users ADD COLUMN can_view_balances INTEGER DEFAULT 0")
+            if "can_view_monitoring" not in existing_columns:
+                cur.execute("ALTER TABLE users ADD COLUMN can_view_monitoring INTEGER DEFAULT 0")
+            if "can_manage_users" not in existing_columns:
+                cur.execute("ALTER TABLE users ADD COLUMN can_manage_users INTEGER DEFAULT 0")
+            
+            conn.commit()
+        except Exception as e:
+            print(f"خطأ: {e}")
+        finally:
+            conn.close()
 
 fix_admin_permissions()
 
@@ -49,19 +70,22 @@ st.markdown("""
         text-align: center;
         margin: 0.5rem;
     }
-    .pill {
-        display: inline-block;
-        padding: 0.28rem 0.75rem;
-        border-radius: 999px;
-        font-size: 0.78rem;
-        font-weight: 700;
-    }
-    .pill-green { background: #dff7e8; color: #0f7a3a; }
-    .pill-amber { background: #fff0c2; color: #8a5b00; }
-    .pill-red { background: #ffe0df; color: #a32929; }
-    .pill-blue { background: #dff1ff; color: #0f5488; }
-    .pill-completed { background: #28a745; color: white; }
     .stButton button { width: 100%; border-radius: 10px; }
+    .note-card {
+        background: linear-gradient(135deg, #f4fbfc 0%, #ffffff 100%);
+        border: 1px solid #d7ebef;
+        border-radius: 16px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
+    .section-title {
+        font-size: 1.15rem;
+        font-weight: 800;
+        color: #16425b;
+        border-right: 5px solid #1f7a8c;
+        padding-right: 0.65rem;
+        margin: 1rem 0 0.8rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -113,11 +137,23 @@ with st.sidebar:
             st.markdown("---")
             st.markdown("### 📂 أدوات المدير")
             
-            if st.button("📊 لوحة التحكم", use_container_width=True):
+            # زر لوحة التحكم الرئيسية
+            if st.button("📊 لوحة التحكم الرئيسية", use_container_width=True):
                 st.session_state.page = "dashboard"
                 st.rerun()
             
-            if st.button("👥 المستخدمين والصلاحيات", use_container_width=True):
+            # زر تحديث الأرصدة
+            if st.button("🔄 تحديث الأرصدة", use_container_width=True):
+                st.session_state.page = "balances"
+                st.rerun()
+            
+            # زر مراقبة تعديلات الصيدليات
+            if st.button("👥 مراقبة تعديلات الصيدليات", use_container_width=True):
+                st.session_state.page = "monitoring"
+                st.rerun()
+            
+            # زر إدارة المستخدمين
+            if st.button("👥 إدارة المستخدمين والصلاحيات", use_container_width=True):
                 st.session_state.page = "users"
                 st.rerun()
         
@@ -135,21 +171,66 @@ if not st.session_state.logged_in:
         <p>نظام متكامل لمطابقة طلبات سلة والفواتير</p>
     </div>
     """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown("""
+        <div class="metric-box">
+            <div style="font-size:1.5rem;font-weight:800;">17</div>
+            <div>فرع</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col2:
+        st.markdown("""
+        <div class="metric-box">
+            <div style="font-size:1.5rem;font-weight:800;">1000+</div>
+            <div>طلب شهرياً</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col3:
+        st.markdown("""
+        <div class="metric-box">
+            <div style="font-size:1.5rem;font-weight:800;">99%</div>
+            <div>دقة المطابقة</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
 elif st.session_state.user_role == "pharmacy":
     if not st.session_state.pharmacist_name:
         st.info("👈 الرجاء إدخال اسم الصيدلي من القائمة الجانبية")
     else:
-        from pages import pharmacy_dashboard
-        pharmacy_dashboard.show()
+        try:
+            from pages import pharmacy_dashboard
+            pharmacy_dashboard.show()
+        except ImportError:
+            st.error("❌ صفحة الصيدلية غير متوفرة")
 else:  # admin
     page = st.session_state.get("page", "dashboard")
     
     if page == "users":
-        from pages import users_management
-        users_management.show()
+        try:
+            from pages import users_management
+            users_management.show()
+        except ImportError:
+            st.error("❌ صفحة إدارة المستخدمين غير متوفرة")
+    elif page == "balances":
+        try:
+            from pages import balances_updater
+            balances_updater.show()
+        except ImportError:
+            st.error("❌ صفحة تحديث الأرصدة غير متوفرة")
+    elif page == "monitoring":
+        try:
+            from pages import monitoring
+            monitoring.show()
+        except ImportError:
+            st.error("❌ صفحة مراقبة التعديلات غير متوفرة")
     else:
-        from pages import admin_dashboard
-        admin_dashboard.show()
+        try:
+            from pages import admin_dashboard
+            admin_dashboard.show()
+        except ImportError:
+            st.error("❌ صفحة لوحة التحكم غير متوفرة")
 
 st.markdown("---")
 st.markdown(
