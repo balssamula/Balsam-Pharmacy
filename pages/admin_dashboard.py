@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 from utils.database import (
     get_latest_upload_summary, get_all_sessions, get_session_items, 
     lock_session, unlock_session, activate_session, delete_session,
@@ -57,16 +56,13 @@ def styled_frame(input_df):
     return display_df.style.apply(row_style, axis=1)
 
 def show():
-    st.markdown(
-        """
-        <div class="hero">
-            <h1>👑 لوحة التحكم الإدارية</h1>
-            <p>إدارة الطلبات والفواتير - متابعة الإضافات والإرجاعات - إدارة الجلسات</p>
-            <p>🕐 آخر تحديث: {}</p>
-        </div>
-        """.format(get_saudi_time()),
-        unsafe_allow_html=True,
-    )
+    st.markdown(f"""
+    <div class="hero">
+        <h1>👑 لوحة التحكم الإدارية</h1>
+        <p>إدارة الطلبات والفواتير - متابعة الإضافات والإرجاعات - إدارة الجلسات</p>
+        <p>🕐 آخر تحديث: {get_saudi_time()}</p>
+    </div>
+    """, unsafe_allow_html=True)
     
     col1, col2 = st.columns([1, 6])
     with col1:
@@ -75,22 +71,20 @@ def show():
     
     # رفع ملف الطلبات والفواتير
     with st.expander("📂 رفع ملف الطلبات والفواتير", expanded=True):
-        uploaded_file = st.file_uploader("اختر ملف Excel (يحتوي على شيتين: 'سلة' و 'abc')", type=["xlsx"], key="reconciliation_upload")
-        
+        uploaded_file = st.file_uploader("اختر ملف Excel (يحتوي على شيتين: 'سلة' و 'abc')", type=["xlsx"])
         if uploaded_file:
-            if st.button("🔄 معالجة الملف وترحيل الحالات", use_container_width=True, type="primary"):
-                with st.spinner("جاري قراءة الملف وتصنيف الحالات..."):
+            if st.button("🔄 معالجة الملف", use_container_width=True, type="primary"):
+                with st.spinner("جاري معالجة الملف..."):
                     results, upload_batch_id = process_excel(uploaded_file, st.session_state.username)
                 if results is not None:
                     st.success(f"✅ تمت المعالجة بنجاح! عدد الحالات: {len(results)}")
                     st.balloons()
-                    st.session_state.processed_data = results
                     st.rerun()
     
     # عرض آخر جلسة نشطة
     latest = get_latest_upload_summary()
     if latest:
-        batch_id, file_name, uploaded_by, uploaded_at, total_cases, additions, returns, orphan_salla, orphan_abc, post_cutoff, branch_mismatch, special_review, is_locked, session_name = latest
+        batch_id, file_name, uploaded_by, uploaded_at, total_cases, additions, returns, orphan_salla, orphan_abc, is_locked, session_name = latest
         lock_status = "🔒 مقفلة" if is_locked else "🔓 مفتوحة"
         st.markdown(f"""
         <div class="note-card">
@@ -187,27 +181,21 @@ def show():
             del st.session_state.view_session_id
             st.rerun()
     
-    # جلب البيانات النشطة
     df = fetch_active_items(include_hidden=True)
     if df.empty:
         st.info("📂 لا توجد بيانات فعالة بعد. ارفع ملف Excel من الأعلى لبدء التحليل.")
         return
     
-    # تصحيح قيمة الفرق
     df['difference'] = df.apply(lambda row: numeric_value(row['salla_qty']) - numeric_value(row['abc_qty']), axis=1)
-    
     render_metrics(df)
     
     # فلاتر
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
         branch_options = ["الكل"] + sorted(df["pharmacy_name"].dropna().astype(str).unique().tolist())
         selected_branch = st.selectbox("🏥 فلتر الفرع", branch_options)
     with col2:
         status_filter = st.selectbox("📌 فلتر الحالة", ["الكل", "قيد المتابعة", "تم"])
-    with col3:
-        case_filter = st.selectbox("📋 فلتر نوع الحالة", 
-                                   ["الكل", "إضافة", "إرجاع", "طلب بدون فاتورة", "فاتورة بدون طلب", "فاتورة بعد آخر طلب"])
     
     filtered_df = df.copy()
     if selected_branch != "الكل":
@@ -215,32 +203,23 @@ def show():
     if status_filter != "الكل":
         filtered_df = filtered_df[filtered_df["status"] == ("تم" if status_filter == "تم" else "قيد المتابعة")]
     
-    # إعداد التبويبات
+    tab_completed = get_tab_completed_counts()
+    
     additions_count = len(filtered_df[filtered_df["case_type"] == "addition"])
     returns_count = len(filtered_df[filtered_df["case_type"] == "return"])
     orphan_salla_count = len(filtered_df[filtered_df["case_type"] == "orphan_salla"])
     orphan_abc_count = len(filtered_df[filtered_df["case_type"] == "orphan_abc"])
-    post_cutoff_count = len(filtered_df[filtered_df["case_type"] == "post_cutoff_abc"])
-    payment_pending_count = len(filtered_df[filtered_df["order_status"].apply(is_pending_payment_status)])
-    cancelled_count = len(filtered_df[filtered_df["order_status"].apply(is_cancelled_or_returned_status)])
-    
-    # الحصول على أعداد المنجزات
-    tab_completed = get_tab_completed_counts()
     
     completed_df = get_completed_items()
     if selected_branch != "الكل":
         completed_df = completed_df[completed_df["pharmacy_name"] == selected_branch]
-    completed_count = len(completed_df)
     
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         get_tab_label("📈 الإضافات", tab_completed.get("addition", 0), additions_count + tab_completed.get("addition", 0)),
         get_tab_label("📉 الإرجاعات", tab_completed.get("return", 0), returns_count + tab_completed.get("return", 0)),
         get_tab_label("📦 طلبات بدون فاتورة", tab_completed.get("orphan_salla", 0), orphan_salla_count + tab_completed.get("orphan_salla", 0)),
         get_tab_label("🧾 فواتير بدون طلب", tab_completed.get("orphan_abc", 0), orphan_abc_count + tab_completed.get("orphan_abc", 0)),
-        get_tab_label("⏰ فواتير بعد آخر طلب", tab_completed.get("post_cutoff_abc", 0), post_cutoff_count + tab_completed.get("post_cutoff_abc", 0)),
-        get_tab_label("💰 بانتظار الدفع", 0, payment_pending_count),
-        get_tab_label("⚠️ ملغي/مسترجع", 0, cancelled_count),
-        get_tab_label("✅ تم الانتهاء", completed_count, completed_count)
+        get_tab_label("✅ تم الانتهاء", len(completed_df), len(completed_df))
     ])
     
     with tab1:
@@ -256,18 +235,8 @@ def show():
         orphan_abc = filtered_df[filtered_df["case_type"] == "orphan_abc"]
         st.dataframe(styled_frame(orphan_abc), use_container_width=True)
     with tab5:
-        post_cutoff = filtered_df[filtered_df["case_type"] == "post_cutoff_abc"]
-        st.dataframe(styled_frame(post_cutoff), use_container_width=True)
-    with tab6:
-        payment_pending = filtered_df[filtered_df["order_status"].apply(is_pending_payment_status)]
-        st.dataframe(styled_frame(payment_pending), use_container_width=True)
-    with tab7:
-        cancelled = filtered_df[filtered_df["order_status"].apply(is_cancelled_or_returned_status)]
-        st.dataframe(styled_frame(cancelled), use_container_width=True)
-    with tab8:
         if not completed_df.empty:
             st.dataframe(styled_frame(completed_df), use_container_width=True)
-            st.markdown("#### 🔓 إعادة فتح الطلبات المكتملة")
             for idx, row in completed_df.iterrows():
                 col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 1])
                 with col1:
@@ -282,26 +251,21 @@ def show():
                     if st.button(f"🔓 إعادة فتح", key=f"reopen_{idx}"):
                         if 'item_key' in row:
                             reopen_case_by_item_key(row['item_key'])
-                            st.success("✅ تم إعادة فتح الطلب")
                             st.rerun()
                 st.divider()
         else:
             st.info("لا توجد طلبات مكتملة")
     
-    # آخر دخول للصيدليات
     st.markdown('<div class="section-title">👥 آخر دخول للصيدليات</div>', unsafe_allow_html=True)
     last_logins = get_all_last_logins()
     if not last_logins.empty:
         cols = st.columns(4)
         for idx, (_, row) in enumerate(last_logins.head(8).iterrows()):
             with cols[idx % 4]:
-                st.markdown(
-                    f"""
-                    <div class="note-card">
-                        <strong>🏥 {row['pharmacy_name'][-10:]}</strong><br>
-                        <span>👤 {row['pharmacist_name'] or 'غير مسجل'}</span><br>
-                        <span>📅 {row['last_login'][:16] if row['last_login'] else 'لم يدخل'}</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+                st.markdown(f"""
+                <div class="note-card">
+                    <strong>🏥 {row['pharmacy_name'][-10:]}</strong><br>
+                    <span>👤 {row['pharmacist_name'] or 'غير مسجل'}</span><br>
+                    <span>📅 {row['last_login'][:16] if row['last_login'] else 'لم يدخل'}</span>
+                </div>
+                """, unsafe_allow_html=True)
