@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+from io import BytesIO
+from datetime import datetime
 from utils.database import (
     get_latest_upload_summary, get_all_sessions, get_session_items, 
     lock_session, unlock_session, activate_session, delete_session,
@@ -13,6 +15,18 @@ from utils.helpers import (
 from utils.ui_components import render_metrics
 from utils.excel_processor import process_excel
 
+def export_to_excel(dataframes_dict: dict) -> bytes:
+    """تصدير البيانات إلى ملف Excel"""
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        for sheet_name, df in dataframes_dict.items():
+            if df is not None and not df.empty:
+                df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+            else:
+                pd.DataFrame({"ملاحظة": ["لا توجد بيانات"]}).to_excel(writer, sheet_name=sheet_name[:31], index=False)
+    output.seek(0)
+    return output.getvalue()
+
 def show():
     st.markdown("""
     <div class="hero">
@@ -21,10 +35,14 @@ def show():
     </div>
     """, unsafe_allow_html=True)
     
-    col1, col2 = st.columns([1, 6])
+    col1, col2, col3 = st.columns([1, 1, 5])
     with col1:
         if st.button("🔄 تحديث الصفحة", use_container_width=True):
             st.rerun()
+    with col2:
+        # زر تصدير Excel
+        if st.button("📥 تصدير إلى Excel", use_container_width=True):
+            st.session_state.show_export = True
     
     with st.expander("📂 رفع ملف الطلبات والفواتير", expanded=True):
         uploaded_file = st.file_uploader("اختر ملف Excel (يحتوي على شيتين: 'سلة' و 'abc')", type=["xlsx"])
@@ -152,7 +170,7 @@ def show():
         else:
             filtered_df = filtered_df[filtered_df["order_status"] == selected_order_status]
     
-    # فصل البيانات - استبعاد الملغي والمسترجع من التبويبات الرئيسية
+    # فصل البيانات
     active_mask_filtered = ~filtered_df["order_status"].apply(is_cancelled_or_returned_status)
     payment_mask = filtered_df["order_status"].apply(is_pending_payment_status)
     cancelled_mask = filtered_df["order_status"].apply(is_cancelled_or_returned_status)
@@ -168,6 +186,28 @@ def show():
     completed_df = get_completed_items()
     if selected_branch != "الكل":
         completed_df = completed_df[completed_df["pharmacy_name"] == selected_branch]
+    
+    # تصدير Excel
+    if st.session_state.get('show_export', False):
+        export_data = {
+            "الإضافات": additions_df,
+            "الإرجاعات": returns_df,
+            "طلبات_بدون_فاتورة": orphan_salla_df,
+            "فواتير_بدون_طلب": orphan_abc_df,
+            "فواتير_بعد_آخر_طلب": post_cutoff_df,
+            "بانتظار_الدفع": payment_df,
+            "ملغي_ومسترجع": cancelled_df,
+            "تم_الانتهاء": completed_df
+        }
+        excel_data = export_to_excel(export_data)
+        st.download_button(
+            "📥 تحميل التقرير",
+            data=excel_data,
+            file_name=f"balsam_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+        st.session_state.show_export = False
     
     # التبويبات
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
