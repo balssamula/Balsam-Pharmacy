@@ -4,9 +4,9 @@ from utils.database import fetch_active_items, get_completed_items, get_tab_comp
 from utils.helpers import (
     is_cancelled_or_returned_status, is_pending_payment_status, 
     get_branch_number, get_branch_location, get_tab_label, numeric_value,
-    get_saudi_time, status_pill, case_pill
+    get_saudi_time
 )
-from utils.ui_components import render_metrics
+from utils.ui_components import render_metrics, render_completed_table
 
 def render_case_cards_pharmacy(df: pd.DataFrame, allow_actions: bool, pharmacist_name: str, pharmacy_name: str):
     if df.empty:
@@ -15,14 +15,18 @@ def render_case_cards_pharmacy(df: pd.DataFrame, allow_actions: bool, pharmacist
 
     for idx, row in df.iterrows():
         diff_value = numeric_value(row['difference'])
-        required_action = "إضافة" if diff_value > 0 else "إرجاع"
+        required_action = "إضافة" if diff_value > 0 else "إرجاع" if diff_value < 0 else "مطابق"
+        order_status = row.get('order_status', 'غير متوفرة')
+        
+        # تحديد لون الخلفية حسب حالة الطلب
+        status_color = "#fff3cd" if "بانتظار الدفع" in order_status else "#f8f9fa"
         
         with st.container():
             st.markdown(f"""
-            <div style="background:white;border-radius:16px;padding:1rem;margin-bottom:1rem;border-right:4px solid #1f7a8c;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+            <div style="background:{status_color};border-radius:16px;padding:1rem;margin-bottom:1rem;border-right:4px solid #1f7a8c;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
                 <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;">
-                    <span style="background:#dff1ff;color:#0f5488;padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;">{case_pill(row['case_type'])}</span>
-                    <span style="color:#6c757d;font-size:0.8rem;">{row['order_date'][:16] if row['order_date'] else ''}</span>
+                    <span style="background:#dff1ff;color:#0f5488;padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;">{row['case_label']}</span>
+                    <span style="color:#6c757d;font-size:0.8rem;">📅 {row['order_date'][:16] if row['order_date'] else ''}</span>
                 </div>
                 <div style="display:flex;flex-wrap:wrap;gap:1rem;">
                     <div style="flex:2;">
@@ -32,13 +36,15 @@ def render_case_cards_pharmacy(df: pd.DataFrame, allow_actions: bool, pharmacist
                     </div>
                     <div style="flex:1;">
                         <strong>📊 الكميات:</strong><br>
-                        سلة: {int(row['salla_qty']) if pd.notna(row['salla_qty']) else 0} | ABC: {int(row['abc_qty']) if pd.notna(row['abc_qty']) else 0}<br>
-                        <strong>📊 الفرق:</strong> <span style="color:{'#28a745' if diff_value > 0 else '#dc3545'};font-weight:bold;">{'+' if diff_value > 0 else ''}{diff_value}</span><br>
-                        <strong>🎯 المطلوب:</strong> <span style="color:{'#28a745' if diff_value > 0 else '#dc3545'};">{required_action}</span>
+                        🛒 سلة: {int(row['salla_qty']) if pd.notna(row['salla_qty']) else 0}<br>
+                        📄 ABC: {int(row['abc_qty']) if pd.notna(row['abc_qty']) else 0}<br>
+                        <strong>📊 الفرق:</strong> <span style="color:{'#28a745' if diff_value > 0 else '#dc3545' if diff_value < 0 else '#6c757d'};font-weight:bold;">{'+' if diff_value > 0 else ''}{diff_value}</span>
                     </div>
                     <div style="flex:1.5;">
                         <strong>🧾 الفاتورة/الصيدلي:</strong><br>
-                        {row['invoice_number']}/{row.get('abc_pharmacist_name', 'غير معروف')}
+                        {row['invoice_number']}/{row.get('abc_pharmacist_name', 'غير معروف')}<br>
+                        <strong>📌 حالة الطلب:</strong> <span style="color:#d9534f;">{order_status}</span><br>
+                        <strong>🎯 المطلوب:</strong> <span style="color:{'#28a745' if diff_value > 0 else '#dc3545' if diff_value < 0 else '#6c757d'};">{required_action}</span>
                     </div>
                 </div>
             </div>
@@ -89,11 +95,13 @@ def show():
         if not completed_df.empty:
             st.markdown("---")
             st.markdown('<div class="section-title">✅ الطلبات المكتملة</div>', unsafe_allow_html=True)
-            from utils.ui_components import render_completed_table
             render_completed_table(completed_df, is_admin=False)
         return
 
-    is_locked = df['is_locked'].iloc[0] == 1 if not df.empty else False
+    # التحقق من القفل
+    is_locked = False
+    if 'is_locked' in df.columns and not df.empty:
+        is_locked = df['is_locked'].iloc[0] == 1
     allow_actions = not is_locked
 
     # إحصائيات سريعة
@@ -121,43 +129,35 @@ def show():
     with col7:
         st.metric("✅ تم إنجازها", completed)
 
-    active_non_cancelled = ~df["order_status"].apply(is_cancelled_or_returned_status)
-    active_non_payment = ~df["order_status"].apply(is_pending_payment_status)
-    active_operational = active_non_cancelled & active_non_payment
-    
-    additions_df = df[(df["case_type"] == "addition") & active_operational].copy()
-    returns_df = df[(df["case_type"] == "return") & active_operational].copy()
-    orphan_salla_df = df[(df["case_type"] == "orphan_salla") & active_operational].copy()
-    orphan_abc_df = df[(df["case_type"] == "orphan_abc") & active_operational].copy()
+    # فصل البيانات حسب النوع
+    additions_df = df[df["case_type"] == "addition"].copy()
+    returns_df = df[df["case_type"] == "return"].copy()
+    orphan_salla_df = df[df["case_type"] == "orphan_salla"].copy()
+    orphan_abc_df = df[df["case_type"] == "orphan_abc"].copy()
     post_cutoff_df = df[df["case_type"] == "post_cutoff_abc"].copy()
+    payment_df = df[df["order_status"].apply(is_pending_payment_status)].copy()
     cancelled_df = df[df["order_status"].apply(is_cancelled_or_returned_status)].copy()
-    payment_pending_df = df[df["order_status"].apply(is_pending_payment_status)].copy()
     
     completed_df = get_completed_items(pharmacy_name)
     tab_completed = get_tab_completed_counts(pharmacy_name)
     
-    tab1_total = len(additions_df) + len(df[df["case_type"] == "addition"])
+    # أعداد التبويبات
     tab1_completed = tab_completed.get("addition", 0)
-    tab2_total = len(returns_df) + len(df[df["case_type"] == "return"])
     tab2_completed = tab_completed.get("return", 0)
-    tab3_total = len(orphan_salla_df) + len(df[df["case_type"] == "orphan_salla"])
     tab3_completed = tab_completed.get("orphan_salla", 0)
-    tab4_total = len(orphan_abc_df) + len(df[df["case_type"] == "orphan_abc"])
     tab4_completed = tab_completed.get("orphan_abc", 0)
-    tab5_total = len(post_cutoff_df) + len(df[df["case_type"] == "post_cutoff_abc"])
     tab5_completed = tab_completed.get("post_cutoff_abc", 0)
-    tab8_total = len(completed_df)
-    tab8_completed = tab8_total
     
+    # عرض التبويبات
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-        get_tab_label("📈 الإضافات", tab1_completed, tab1_total),
-        get_tab_label("📉 الإرجاعات", tab2_completed, tab2_total),
-        get_tab_label("📦 طلبات بدون فاتورة", tab3_completed, tab3_total),
-        get_tab_label("🧾 فواتير بدون طلب", tab4_completed, tab4_total),
-        get_tab_label("⏰ فواتير بعد آخر طلب", tab5_completed, tab5_total),
-        get_tab_label("💰 بانتظار الدفع", 0, len(payment_pending_df)),
+        get_tab_label("📈 الإضافات", tab1_completed, len(additions_df) + tab1_completed),
+        get_tab_label("📉 الإرجاعات", tab2_completed, len(returns_df) + tab2_completed),
+        get_tab_label("📦 طلبات بدون فاتورة", tab3_completed, len(orphan_salla_df) + tab3_completed),
+        get_tab_label("🧾 فواتير بدون طلب", tab4_completed, len(orphan_abc_df) + tab4_completed),
+        get_tab_label("⏰ فواتير بعد آخر طلب", tab5_completed, len(post_cutoff_df) + tab5_completed),
+        get_tab_label("💰 بانتظار الدفع", 0, len(payment_df)),
         get_tab_label("⚠️ ملغي/مسترجع", 0, len(cancelled_df)),
-        get_tab_label("✅ تم الانتهاء", tab8_completed, tab8_total)
+        get_tab_label("✅ تم الانتهاء", len(completed_df), len(completed_df))
     ])
 
     with tab1:
@@ -171,9 +171,8 @@ def show():
     with tab5:
         render_case_cards_pharmacy(post_cutoff_df, False, pharmacist_name, pharmacy_name)
     with tab6:
-        render_case_cards_pharmacy(payment_pending_df, False, pharmacist_name, pharmacy_name)
+        render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name)
     with tab7:
         render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name)
     with tab8:
-        from utils.ui_components import render_completed_table
         render_completed_table(completed_df, is_admin=False)
