@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 from datetime import datetime
+from openpyxl import load_workbook
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 from utils.database import (
     get_latest_upload_summary, get_all_sessions, get_session_items, 
     lock_session, unlock_session, activate_session, delete_session,
@@ -15,15 +18,74 @@ from utils.helpers import (
 from utils.ui_components import render_metrics
 from utils.excel_processor import process_excel
 
-def export_to_excel(dataframes_dict: dict) -> bytes:
-    """تصدير البيانات إلى ملف Excel"""
+def export_to_excel(dataframes_dict: dict, pharmacy_name: str = None) -> bytes:
+    """تصدير البيانات إلى ملف Excel مع تنسيق احترافي"""
     output = BytesIO()
+    
+    # الألوان لكل تبويب
+    tab_colors = {
+        "الإضافات": "4472C4",      # أزرق
+        "الإرجاعات": "ED7D31",      # برتقالي
+        "طلبات_بدون_فاتورة": "70AD47",  # أخضر
+        "فواتير_بدون_طلب": "FFC000",    # ذهبي
+        "فواتير_بعد_آخر_طلب": "9B59B6",  # بنفسجي
+        "بانتظار_الدفع": "3498DB",   # أزرق فاتح
+        "ملغي_ومسترجع": "E74C3C",    # أحمر
+        "تم_الانتهاء": "27AE60"      # أخضر داكن
+    }
+    
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         for sheet_name, df in dataframes_dict.items():
             if df is not None and not df.empty:
                 df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+                
+                # تنسيق الورقة
+                worksheet = writer.sheets[sheet_name[:31]]
+                
+                # لون الخلفية للعنوان
+                header_fill = PatternFill(start_color=tab_colors.get(sheet_name, "2A5298"), 
+                                         end_color=tab_colors.get(sheet_name, "2A5298"), 
+                                         fill_type="solid")
+                header_font = Font(color="FFFFFF", bold=True, size=12)
+                
+                # تنسيق صف العناوين
+                for col in range(1, len(df.columns) + 1):
+                    cell = worksheet.cell(row=1, column=col)
+                    cell.fill = header_fill
+                    cell.font = header_font
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+                
+                # تنسيق عرض الأعمدة تلقائياً
+                for col in range(1, len(df.columns) + 1):
+                    column_letter = get_column_letter(col)
+                    max_length = 0
+                    for row in range(1, len(df) + 2):
+                        cell_value = worksheet.cell(row=row, column=col).value
+                        if cell_value:
+                            max_length = max(max_length, len(str(cell_value)))
+                    worksheet.column_dimensions[column_letter].width = min(max_length + 2, 40)
+                
+                # تلوين الصفوف بالتناوب
+                for row in range(2, len(df) + 2):
+                    for col in range(1, len(df.columns) + 1):
+                        cell = worksheet.cell(row=row, column=col)
+                        if row % 2 == 0:
+                            cell.fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+                        cell.alignment = Alignment(horizontal="center", vertical="center")
+                        
+                        # تلوين الفرق حسب القيمة
+                        if worksheet.cell(row=1, column=col).value == "الفرق":
+                            diff_value = cell.value
+                            if diff_value:
+                                if diff_value > 0:
+                                    cell.font = Font(color="008000", bold=True)
+                                elif diff_value < 0:
+                                    cell.font = Font(color="FF0000", bold=True)
             else:
-                pd.DataFrame({"ملاحظة": ["لا توجد بيانات"]}).to_excel(writer, sheet_name=sheet_name[:31], index=False)
+                # ورقة فارغة مع رسالة
+                empty_df = pd.DataFrame({"ملاحظة": ["لا توجد بيانات في هذا التبويب"]})
+                empty_df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+    
     output.seek(0)
     return output.getvalue()
 
@@ -40,7 +102,6 @@ def show():
         if st.button("🔄 تحديث الصفحة", use_container_width=True):
             st.rerun()
     with col2:
-        # زر تصدير Excel
         if st.button("📥 تصدير إلى Excel", use_container_width=True):
             st.session_state.show_export = True
     
@@ -128,7 +189,7 @@ def show():
         st.info("📂 لا توجد بيانات فعالة بعد. ارفع ملف Excel من الأعلى لبدء التحليل.")
         return
     
-    # إحصائيات سريعة - استبعاد الملغي والمسترجع
+    # إحصائيات سريعة
     active_mask = ~df["order_status"].apply(is_cancelled_or_returned_status)
     active_df = df[active_mask]
     
@@ -209,7 +270,18 @@ def show():
         )
         st.session_state.show_export = False
     
-    # التبويبات
+    # التبويبات مع تلوين مختلف
+    st.markdown("""
+    <style>
+    button[data-baseweb="tab"]:nth-child(1) { background-color: #4472C4; color: white; border-radius: 10px 10px 0 0; }
+    button[data-baseweb="tab"]:nth-child(2) { background-color: #ED7D31; color: white; border-radius: 10px 10px 0 0; }
+    button[data-baseweb="tab"]:nth-child(3) { background-color: #70AD47; color: white; border-radius: 10px 10px 0 0; }
+    button[data-baseweb="tab"]:nth-child(4) { background-color: #FFC000; color: white; border-radius: 10px 10px 0 0; }
+    button[data-baseweb="tab"][aria-selected="true"] { opacity: 1; }
+    button[data-baseweb="tab"][aria-selected="false"] { opacity: 0.8; }
+    </style>
+    """, unsafe_allow_html=True)
+    
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         get_tab_label("📈 الإضافات", len(additions_df[additions_df["status"] == "تم"]), len(additions_df)),
         get_tab_label("📉 الإرجاعات", len(returns_df[returns_df["status"] == "تم"]), len(returns_df)),
@@ -221,7 +293,7 @@ def show():
         get_tab_label("✅ تم الانتهاء", len(completed_df), len(completed_df))
     ])
     
-    def styled_frame(input_df, title=""):
+    def styled_frame(input_df, bg_color="#e8f4f8"):
         if input_df.empty:
             return input_df
         def row_style(row):
@@ -254,21 +326,13 @@ def show():
         return display_df.style.apply(row_style, axis=1)
     
     with tab1:
-        st.markdown('<div style="background-color:#e8f4f8; padding:10px; border-radius:10px;">', unsafe_allow_html=True)
         st.dataframe(styled_frame(additions_df), use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
     with tab2:
-        st.markdown('<div style="background-color:#e8f4f8; padding:10px; border-radius:10px;">', unsafe_allow_html=True)
         st.dataframe(styled_frame(returns_df), use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
     with tab3:
-        st.markdown('<div style="background-color:#e8f4f8; padding:10px; border-radius:10px;">', unsafe_allow_html=True)
         st.dataframe(styled_frame(orphan_salla_df), use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
     with tab4:
-        st.markdown('<div style="background-color:#e8f4f8; padding:10px; border-radius:10px;">', unsafe_allow_html=True)
         st.dataframe(styled_frame(orphan_abc_df), use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
     with tab5:
         st.dataframe(styled_frame(post_cutoff_df), use_container_width=True)
     with tab6:
