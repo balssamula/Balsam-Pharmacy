@@ -5,36 +5,77 @@ from utils.database import (
     get_latest_upload_summary, get_all_sessions, get_session_items, 
     lock_session, unlock_session, activate_session, delete_session,
     fetch_active_items, get_all_last_logins, get_completed_items,
-    reopen_case_by_item_key
+    reopen_case_by_item_key, get_tab_completed_counts
 )
 from utils.helpers import (
     is_cancelled_or_returned_status, is_pending_payment_status,
-    get_tab_label, status_pill, case_pill
+    get_tab_label, get_saudi_time, numeric_value
 )
 from utils.ui_components import render_metrics
 from utils.excel_processor import process_excel
+
+def styled_frame(input_df):
+    if input_df.empty:
+        return input_df
+    def row_style(row):
+        case_type = row.get("نوع الحالة", "")
+        order_status = row.get("حالة الطلب", "")
+        status = row.get("الحالة", "")
+        
+        if status == "تم":
+            color = "background-color: #d4edda"
+        elif is_cancelled_or_returned_status(order_status):
+            color = "background-color: #ffe5e5"
+        elif is_pending_payment_status(order_status):
+            color = "background-color: #fff4d6"
+        elif case_type == "إرجاع":
+            color = "background-color: #ffe0df"
+        elif case_type == "إضافة":
+            color = "background-color: #dff1ff"
+        else:
+            color = "background-color: #ffe9cc"
+        return [color] * len(row)
+    
+    display_df = input_df.copy()
+    display_df = display_df.rename(columns={
+        "order_number": "رقم الطلب",
+        "invoice_number": "رقم الفاتورة",
+        "sku": "SKU",
+        "product_name": "المنتج",
+        "pharmacy_name": "الفرع",
+        "salla_qty": "كمية سلة",
+        "abc_qty": "كمية ABC",
+        "difference": "الفرق",
+        "case_label": "نوع الحالة",
+        "status": "الحالة",
+        "performed_by": "تم بواسطة",
+        "performed_at": "تاريخ التنفيذ",
+        "order_status": "حالة الطلب",
+        "city": "المدينة",
+        "profile_type": "نوع البروفايل"
+    })
+    return display_df.style.apply(row_style, axis=1)
 
 def show():
     st.markdown(
         """
         <div class="hero">
             <h1>👑 لوحة التحكم الإدارية</h1>
-            <p>إدارة الطلبات والفواتير - متابعة الإضافات والإرجاعات - إدارة الجلسات - تحديث الأرصدة</p>
+            <p>إدارة الطلبات والفواتير - متابعة الإضافات والإرجاعات - إدارة الجلسات</p>
+            <p>🕐 آخر تحديث: {}</p>
         </div>
-        """,
+        """.format(get_saudi_time()),
         unsafe_allow_html=True,
     )
     
-    # زر تحديث الصفحة
-    col1, col2, col3 = st.columns([1, 1, 6])
+    col1, col2 = st.columns([1, 6])
     with col1:
-        if st.button("🔄 تحديث ", use_container_width=True):
+        if st.button("🔄 تحديث", use_container_width=True):
             st.rerun()
     
     # رفع ملف الطلبات والفواتير
     with st.expander("📂 رفع ملف الطلبات والفواتير", expanded=True):
-        st.markdown("#### قم برفع ملف Excel يحتوي على شيتين: 'سلة' و 'abc'")
-        uploaded_file = st.file_uploader("اختر ملف Excel", type=["xlsx"], key="reconciliation_upload")
+        uploaded_file = st.file_uploader("اختر ملف Excel (يحتوي على شيتين: 'سلة' و 'abc')", type=["xlsx"], key="reconciliation_upload")
         
         if uploaded_file:
             if st.button("🔄 معالجة الملف وترحيل الحالات", use_container_width=True, type="primary"):
@@ -137,7 +178,6 @@ def show():
         
         st.markdown("---")
     
-    # عرض جلسة محددة
     if st.session_state.get('view_session_id'):
         st.markdown(f'<div class="section-title">📄 عرض الجلسة المحددة</div>', unsafe_allow_html=True)
         session_items = get_session_items(st.session_state.view_session_id)
@@ -153,7 +193,9 @@ def show():
         st.info("📂 لا توجد بيانات فعالة بعد. ارفع ملف Excel من الأعلى لبدء التحليل.")
         return
     
-    # إحصائيات سريعة
+    # تصحيح قيمة الفرق
+    df['difference'] = df.apply(lambda row: numeric_value(row['salla_qty']) - numeric_value(row['abc_qty']), axis=1)
+    
     render_metrics(df)
     
     # فلاتر
@@ -167,7 +209,6 @@ def show():
         case_filter = st.selectbox("📋 فلتر نوع الحالة", 
                                    ["الكل", "إضافة", "إرجاع", "طلب بدون فاتورة", "فاتورة بدون طلب", "فاتورة بعد آخر طلب"])
     
-    # تطبيق الفلاتر
     filtered_df = df.copy()
     if selected_branch != "الكل":
         filtered_df = filtered_df[filtered_df["pharmacy_name"] == selected_branch]
@@ -175,7 +216,6 @@ def show():
         filtered_df = filtered_df[filtered_df["status"] == ("تم" if status_filter == "تم" else "قيد المتابعة")]
     
     # إعداد التبويبات
-    total_active = len(filtered_df)
     additions_count = len(filtered_df[filtered_df["case_type"] == "addition"])
     returns_count = len(filtered_df[filtered_df["case_type"] == "return"])
     orphan_salla_count = len(filtered_df[filtered_df["case_type"] == "orphan_salla"])
@@ -184,100 +224,49 @@ def show():
     payment_pending_count = len(filtered_df[filtered_df["order_status"].apply(is_pending_payment_status)])
     cancelled_count = len(filtered_df[filtered_df["order_status"].apply(is_cancelled_or_returned_status)])
     
-    # تبويب تم الانتهاء مع فلتر
+    # الحصول على أعداد المنجزات
+    tab_completed = get_tab_completed_counts()
+    
     completed_df = get_completed_items()
     if selected_branch != "الكل":
         completed_df = completed_df[completed_df["pharmacy_name"] == selected_branch]
     completed_count = len(completed_df)
     
-    # عرض التبويبات
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-        get_tab_label("📈 الإضافات", additions_count, total_active),
-        get_tab_label("📉 الإرجاعات", returns_count, total_active),
-        get_tab_label("📦 طلبات بدون فاتورة", orphan_salla_count, total_active),
-        get_tab_label("🧾 فواتير بدون طلب", orphan_abc_count, total_active),
-        get_tab_label("⏰ فواتير بعد آخر طلب", post_cutoff_count, total_active),
-        get_tab_label("💰 بانتظار الدفع", payment_pending_count, total_active),
-        get_tab_label("⚠️ ملغي/مسترجع", cancelled_count, total_active),
+        get_tab_label("📈 الإضافات", tab_completed.get("addition", 0), additions_count + tab_completed.get("addition", 0)),
+        get_tab_label("📉 الإرجاعات", tab_completed.get("return", 0), returns_count + tab_completed.get("return", 0)),
+        get_tab_label("📦 طلبات بدون فاتورة", tab_completed.get("orphan_salla", 0), orphan_salla_count + tab_completed.get("orphan_salla", 0)),
+        get_tab_label("🧾 فواتير بدون طلب", tab_completed.get("orphan_abc", 0), orphan_abc_count + tab_completed.get("orphan_abc", 0)),
+        get_tab_label("⏰ فواتير بعد آخر طلب", tab_completed.get("post_cutoff_abc", 0), post_cutoff_count + tab_completed.get("post_cutoff_abc", 0)),
+        get_tab_label("💰 بانتظار الدفع", 0, payment_pending_count),
+        get_tab_label("⚠️ ملغي/مسترجع", 0, cancelled_count),
         get_tab_label("✅ تم الانتهاء", completed_count, completed_count)
     ])
-    
-    def styled_frame(input_df, case_type_filter=None):
-        if input_df.empty:
-            return input_df
-        def row_style(row):
-            case_type = row.get("نوع الحالة", "")
-            order_status = row.get("حالة الطلب", "")
-            status = row.get("الحالة", "")
-            
-            if status == "تم":
-                color = "background-color: #d4edda"
-            elif is_cancelled_or_returned_status(order_status):
-                color = "background-color: #ffe5e5"
-            elif is_pending_payment_status(order_status):
-                color = "background-color: #fff4d6"
-            elif case_type == "إرجاع":
-                color = "background-color: #ffe0df"
-            elif case_type == "إضافة":
-                color = "background-color: #dff1ff"
-            else:
-                color = "background-color: #ffe9cc"
-            return [color] * len(row)
-        
-        display_df = input_df.copy()
-        display_df = display_df.rename(columns={
-            "order_number": "رقم الطلب",
-            "invoice_number": "رقم الفاتورة",
-            "sku": "SKU",
-            "product_name": "المنتج",
-            "pharmacy_name": "الفرع",
-            "salla_qty": "كمية سلة",
-            "abc_qty": "كمية ABC",
-            "difference": "الفرق",
-            "case_label": "نوع الحالة",
-            "status": "الحالة",
-            "performed_by": "تم بواسطة",
-            "performed_at": "تاريخ التنفيذ",
-            "order_status": "حالة الطلب",
-            "city": "المدينة",
-            "profile_type": "نوع البروفايل"
-        })
-        return display_df.style.apply(row_style, axis=1)
     
     with tab1:
         additions = filtered_df[filtered_df["case_type"] == "addition"]
         st.dataframe(styled_frame(additions), use_container_width=True)
-    
     with tab2:
         returns = filtered_df[filtered_df["case_type"] == "return"]
         st.dataframe(styled_frame(returns), use_container_width=True)
-    
     with tab3:
         orphan_salla = filtered_df[filtered_df["case_type"] == "orphan_salla"]
         st.dataframe(styled_frame(orphan_salla), use_container_width=True)
-    
     with tab4:
         orphan_abc = filtered_df[filtered_df["case_type"] == "orphan_abc"]
         st.dataframe(styled_frame(orphan_abc), use_container_width=True)
-    
     with tab5:
         post_cutoff = filtered_df[filtered_df["case_type"] == "post_cutoff_abc"]
         st.dataframe(styled_frame(post_cutoff), use_container_width=True)
-    
     with tab6:
         payment_pending = filtered_df[filtered_df["order_status"].apply(is_pending_payment_status)]
         st.dataframe(styled_frame(payment_pending), use_container_width=True)
-    
     with tab7:
         cancelled = filtered_df[filtered_df["order_status"].apply(is_cancelled_or_returned_status)]
         st.dataframe(styled_frame(cancelled), use_container_width=True)
-    
     with tab8:
-        # عرض جدول المكتملات مع أزرار إعادة الفتح
         if not completed_df.empty:
             st.dataframe(styled_frame(completed_df), use_container_width=True)
-            
-            # إضافة أزرار إعادة فتح لكل صف
             st.markdown("#### 🔓 إعادة فتح الطلبات المكتملة")
             for idx, row in completed_df.iterrows():
                 col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 1])
