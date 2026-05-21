@@ -139,7 +139,7 @@ def init_database():
             cur.execute("""
                 INSERT INTO users (username, password, role, pharmacist_name, can_view_dashboard, 
                  can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
-                VALUES (?, ?, 'pharmacy', '', 1, 0, 0, 0, 0, 1)
+                VALUES (?, ?, 'pharmacy', '', 0, 0, 0, 0, 0, 1)
             """, (name, f"balsam{index}"))
 
     conn.commit()
