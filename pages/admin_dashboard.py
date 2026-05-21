@@ -1,6 +1,16 @@
 import streamlit as st
 import pandas as pd
-from utils.database import get_all_users, get_latest_upload_summary, fetch_active_items
+from datetime import datetime
+from utils.database import (
+    get_latest_upload_summary, get_all_sessions, get_session_items, 
+    lock_session, unlock_session, activate_session, delete_session,
+    fetch_active_items, get_all_last_logins, get_completed_items,
+    reopen_case_by_item_key
+)
+from utils.helpers import (
+    is_cancelled_or_returned_status, is_pending_payment_status,
+    get_tab_label, status_pill, case_pill
+)
 from utils.ui_components import render_metrics
 from utils.excel_processor import process_excel
 
@@ -9,11 +19,17 @@ def show():
         """
         <div class="hero">
             <h1>👑 لوحة التحكم الإدارية</h1>
-            <p>مرحباً بك في لوحة التحكم الرئيسية - إدارة الطلبات والفواتير</p>
+            <p>إدارة الطلبات والفواتير - متابعة الإضافات والإرجاعات - إدارة الجلسات - تحديث الأرصدة</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    
+    # زر تحديث الصفحة
+    col1, col2, col3 = st.columns([1, 1, 6])
+    with col1:
+        if st.button("🔄 تحديث ", use_container_width=True):
+            st.rerun()
     
     # رفع ملف الطلبات والفواتير
     with st.expander("📂 رفع ملف الطلبات والفواتير", expanded=True):
@@ -21,7 +37,7 @@ def show():
         uploaded_file = st.file_uploader("اختر ملف Excel", type=["xlsx"], key="reconciliation_upload")
         
         if uploaded_file:
-            if st.button("🔄 معالجة الملف وترحيل الحالات", use_container_width=True):
+            if st.button("🔄 معالجة الملف وترحيل الحالات", use_container_width=True, type="primary"):
                 with st.spinner("جاري قراءة الملف وتصنيف الحالات..."):
                     results, upload_batch_id = process_excel(uploaded_file, st.session_state.username)
                 if results is not None:
@@ -30,56 +46,273 @@ def show():
                     st.session_state.processed_data = results
                     st.rerun()
     
-    # عرض آخر ملف تم رفعه
+    # عرض آخر جلسة نشطة
     latest = get_latest_upload_summary()
     if latest:
+        batch_id, file_name, uploaded_by, uploaded_at, total_cases, additions, returns, orphan_salla, orphan_abc, post_cutoff, branch_mismatch, special_review, is_locked, session_name = latest
+        lock_status = "🔒 مقفلة" if is_locked else "🔓 مفتوحة"
         st.markdown(f"""
         <div class="note-card">
-            <strong>📋 آخر جلسة نشطة:</strong><br>
-            الملف: {latest[1]}<br>
-            بواسطة: {latest[2]}<br>
-            التاريخ: {latest[3]}<br>
-            الحالات: {latest[4]} (إضافات: {latest[5]}, إرجاعات: {latest[6]})
+            <strong>📋 الجلسة النشطة:</strong> {session_name or 'غير مسماة'} &nbsp; | &nbsp;
+            <strong>الملف:</strong> {file_name} &nbsp; | &nbsp;
+            <strong>بواسطة:</strong> {uploaded_by} &nbsp; | &nbsp;
+            <strong>التاريخ:</strong> {uploaded_at[:16] if uploaded_at else ''} &nbsp; | &nbsp;
+            <strong>الحالة:</strong> {lock_status}
         </div>
         """, unsafe_allow_html=True)
     
-    # عرض البيانات إذا كانت موجودة
-    if st.session_state.get('processed_data') is not None and len(st.session_state.processed_data) > 0:
-        df = st.session_state.processed_data
-        
-        st.markdown("### 📊 البيانات المعالجة")
-        
-        # إحصائيات سريعة
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("إجمالي الحالات", len(df))
-        with col2:
-            st.metric("إضافات", len(df[df['case_type'] == 'addition']))
-        with col3:
-            st.metric("إرجاعات", len(df[df['case_type'] == 'return']))
-        
-        # عرض الجدول
-        st.dataframe(df[['order_number', 'sku', 'product_name', 'pharmacy_name', 
-                         'case_type', 'salla_qty', 'abc_qty', 'difference']], 
-                     use_container_width=True)
-        
-        # زر تنزيل النتائج
-        output = pd.ExcelWriter('temp.xlsx', engine='openpyxl')
-        df.to_excel(output, index=False)
-        output.close()
-        with open('temp.xlsx', 'rb') as f:
-            st.download_button(
-                "📥 تحميل النتائج كـ Excel",
-                data=f,
-                file_name="reconciliation_results.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
+    # إدارة الجلسات السابقة
+    st.markdown('<div class="section-title">📋 إدارة الجلسات السابقة</div>', unsafe_allow_html=True)
     
-    # عرض المستخدمين
-    st.markdown("### 📋 المستخدمين المسجلين")
-    users_df = get_all_users()
-    if not users_df.empty:
-        st.dataframe(users_df[['username', 'role', 'pharmacist_name', 'last_login']], use_container_width=True)
-    else:
-        st.info("لا توجد مستخدمين")
+    sessions_df = get_all_sessions()
+    if not sessions_df.empty:
+        for _, session in sessions_df.iterrows():
+            col1, col2, col3, col4, col5 = st.columns([2, 2, 1.5, 1.5, 2])
+            
+            session_name_val = session.get('session_name', '')
+            if not session_name_val or pd.isna(session_name_val):
+                session_name_val = session['upload_batch_id'][:8]
+            
+            with col1:
+                st.markdown(f"""
+                <div class="session-card">
+                    <strong>📅 {session_name_val}</strong><br>
+                    <small>{session['file_name'][:35] if session['file_name'] else ''}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                is_active = session.get('is_active', 0)
+                active_badge = "✅ نشطة" if is_active else "⏸ غير نشطة"
+                st.markdown(f"""
+                <div class="session-card">
+                    <small>👤 {session['uploaded_by']}<br>
+                    📅 {session['uploaded_at'][:16] if session['uploaded_at'] else ''}<br>
+                    {active_badge}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                st.markdown(f"""
+                <div class="session-card">
+                    <small>📊 {int(session.get('total_cases', 0))} حالة<br>
+                    ➕ {int(session.get('total_additions', 0))}<br>
+                    ➖ {int(session.get('total_returns', 0))}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col4:
+                is_locked = session.get('is_locked', 0)
+                lock_text = "🔒 مقفلة" if is_locked else "🔓 مفتوحة"
+                st.markdown(f"""
+                <div class="session-card" style="text-align: center;">
+                    <small>{lock_text}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col5:
+                btn1, btn2, btn3, btn4 = st.columns(4)
+                with btn1:
+                    if not is_locked:
+                        if st.button(f"🔒", key=f"lock_{session['upload_batch_id']}", help="قفل الجلسة"):
+                            lock_session(session['upload_batch_id'], st.session_state.username)
+                            st.rerun()
+                    else:
+                        if st.button(f"🔓", key=f"unlock_{session['upload_batch_id']}", help="فتح الجلسة"):
+                            unlock_session(session['upload_batch_id'])
+                            st.rerun()
+                with btn2:
+                    if not is_active:
+                        if st.button(f"⭐", key=f"activate_{session['upload_batch_id']}", help="تفعيل الجلسة"):
+                            activate_session(session['upload_batch_id'])
+                            st.rerun()
+                with btn3:
+                    if st.button(f"👁️", key=f"view_{session['upload_batch_id']}", help="عرض الجلسة"):
+                        st.session_state.view_session_id = session['upload_batch_id']
+                        st.rerun()
+                with btn4:
+                    if st.button(f"🗑️", key=f"delete_{session['upload_batch_id']}", help="حذف الجلسة"):
+                        delete_session(session['upload_batch_id'])
+                        st.rerun()
+        
+        st.markdown("---")
+    
+    # عرض جلسة محددة
+    if st.session_state.get('view_session_id'):
+        st.markdown(f'<div class="section-title">📄 عرض الجلسة المحددة</div>', unsafe_allow_html=True)
+        session_items = get_session_items(st.session_state.view_session_id)
+        if not session_items.empty:
+            st.dataframe(session_items, use_container_width=True)
+        if st.button("إغلاق العرض", use_container_width=True):
+            del st.session_state.view_session_id
+            st.rerun()
+    
+    # جلب البيانات النشطة
+    df = fetch_active_items(include_hidden=True)
+    if df.empty:
+        st.info("📂 لا توجد بيانات فعالة بعد. ارفع ملف Excel من الأعلى لبدء التحليل.")
+        return
+    
+    # إحصائيات سريعة
+    render_metrics(df)
+    
+    # فلاتر
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        branch_options = ["الكل"] + sorted(df["pharmacy_name"].dropna().astype(str).unique().tolist())
+        selected_branch = st.selectbox("🏥 فلتر الفرع", branch_options)
+    with col2:
+        status_filter = st.selectbox("📌 فلتر الحالة", ["الكل", "قيد المتابعة", "تم"])
+    with col3:
+        case_filter = st.selectbox("📋 فلتر نوع الحالة", 
+                                   ["الكل", "إضافة", "إرجاع", "طلب بدون فاتورة", "فاتورة بدون طلب", "فاتورة بعد آخر طلب"])
+    
+    # تطبيق الفلاتر
+    filtered_df = df.copy()
+    if selected_branch != "الكل":
+        filtered_df = filtered_df[filtered_df["pharmacy_name"] == selected_branch]
+    if status_filter != "الكل":
+        filtered_df = filtered_df[filtered_df["status"] == ("تم" if status_filter == "تم" else "قيد المتابعة")]
+    
+    # إعداد التبويبات
+    total_active = len(filtered_df)
+    additions_count = len(filtered_df[filtered_df["case_type"] == "addition"])
+    returns_count = len(filtered_df[filtered_df["case_type"] == "return"])
+    orphan_salla_count = len(filtered_df[filtered_df["case_type"] == "orphan_salla"])
+    orphan_abc_count = len(filtered_df[filtered_df["case_type"] == "orphan_abc"])
+    post_cutoff_count = len(filtered_df[filtered_df["case_type"] == "post_cutoff_abc"])
+    payment_pending_count = len(filtered_df[filtered_df["order_status"].apply(is_pending_payment_status)])
+    cancelled_count = len(filtered_df[filtered_df["order_status"].apply(is_cancelled_or_returned_status)])
+    
+    # تبويب تم الانتهاء مع فلتر
+    completed_df = get_completed_items()
+    if selected_branch != "الكل":
+        completed_df = completed_df[completed_df["pharmacy_name"] == selected_branch]
+    completed_count = len(completed_df)
+    
+    # عرض التبويبات
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+        get_tab_label("📈 الإضافات", additions_count, total_active),
+        get_tab_label("📉 الإرجاعات", returns_count, total_active),
+        get_tab_label("📦 طلبات بدون فاتورة", orphan_salla_count, total_active),
+        get_tab_label("🧾 فواتير بدون طلب", orphan_abc_count, total_active),
+        get_tab_label("⏰ فواتير بعد آخر طلب", post_cutoff_count, total_active),
+        get_tab_label("💰 بانتظار الدفع", payment_pending_count, total_active),
+        get_tab_label("⚠️ ملغي/مسترجع", cancelled_count, total_active),
+        get_tab_label("✅ تم الانتهاء", completed_count, completed_count)
+    ])
+    
+    def styled_frame(input_df, case_type_filter=None):
+        if input_df.empty:
+            return input_df
+        def row_style(row):
+            case_type = row.get("نوع الحالة", "")
+            order_status = row.get("حالة الطلب", "")
+            status = row.get("الحالة", "")
+            
+            if status == "تم":
+                color = "background-color: #d4edda"
+            elif is_cancelled_or_returned_status(order_status):
+                color = "background-color: #ffe5e5"
+            elif is_pending_payment_status(order_status):
+                color = "background-color: #fff4d6"
+            elif case_type == "إرجاع":
+                color = "background-color: #ffe0df"
+            elif case_type == "إضافة":
+                color = "background-color: #dff1ff"
+            else:
+                color = "background-color: #ffe9cc"
+            return [color] * len(row)
+        
+        display_df = input_df.copy()
+        display_df = display_df.rename(columns={
+            "order_number": "رقم الطلب",
+            "invoice_number": "رقم الفاتورة",
+            "sku": "SKU",
+            "product_name": "المنتج",
+            "pharmacy_name": "الفرع",
+            "salla_qty": "كمية سلة",
+            "abc_qty": "كمية ABC",
+            "difference": "الفرق",
+            "case_label": "نوع الحالة",
+            "status": "الحالة",
+            "performed_by": "تم بواسطة",
+            "performed_at": "تاريخ التنفيذ",
+            "order_status": "حالة الطلب",
+            "city": "المدينة",
+            "profile_type": "نوع البروفايل"
+        })
+        return display_df.style.apply(row_style, axis=1)
+    
+    with tab1:
+        additions = filtered_df[filtered_df["case_type"] == "addition"]
+        st.dataframe(styled_frame(additions), use_container_width=True)
+    
+    with tab2:
+        returns = filtered_df[filtered_df["case_type"] == "return"]
+        st.dataframe(styled_frame(returns), use_container_width=True)
+    
+    with tab3:
+        orphan_salla = filtered_df[filtered_df["case_type"] == "orphan_salla"]
+        st.dataframe(styled_frame(orphan_salla), use_container_width=True)
+    
+    with tab4:
+        orphan_abc = filtered_df[filtered_df["case_type"] == "orphan_abc"]
+        st.dataframe(styled_frame(orphan_abc), use_container_width=True)
+    
+    with tab5:
+        post_cutoff = filtered_df[filtered_df["case_type"] == "post_cutoff_abc"]
+        st.dataframe(styled_frame(post_cutoff), use_container_width=True)
+    
+    with tab6:
+        payment_pending = filtered_df[filtered_df["order_status"].apply(is_pending_payment_status)]
+        st.dataframe(styled_frame(payment_pending), use_container_width=True)
+    
+    with tab7:
+        cancelled = filtered_df[filtered_df["order_status"].apply(is_cancelled_or_returned_status)]
+        st.dataframe(styled_frame(cancelled), use_container_width=True)
+    
+    with tab8:
+        # عرض جدول المكتملات مع أزرار إعادة الفتح
+        if not completed_df.empty:
+            st.dataframe(styled_frame(completed_df), use_container_width=True)
+            
+            # إضافة أزرار إعادة فتح لكل صف
+            st.markdown("#### 🔓 إعادة فتح الطلبات المكتملة")
+            for idx, row in completed_df.iterrows():
+                col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 1])
+                with col1:
+                    st.write(f"طلب: {row['order_number']}")
+                with col2:
+                    st.write(f"SKU: {row['sku']}")
+                with col3:
+                    st.write(f"الفرع: {row['pharmacy_name']}")
+                with col4:
+                    st.write(f"تم بواسطة: {row['performed_by']}")
+                with col5:
+                    if st.button(f"🔓 إعادة فتح", key=f"reopen_{idx}"):
+                        if 'item_key' in row:
+                            reopen_case_by_item_key(row['item_key'])
+                            st.success("✅ تم إعادة فتح الطلب")
+                            st.rerun()
+                st.divider()
+        else:
+            st.info("لا توجد طلبات مكتملة")
+    
+    # آخر دخول للصيدليات
+    st.markdown('<div class="section-title">👥 آخر دخول للصيدليات</div>', unsafe_allow_html=True)
+    last_logins = get_all_last_logins()
+    if not last_logins.empty:
+        cols = st.columns(4)
+        for idx, (_, row) in enumerate(last_logins.head(8).iterrows()):
+            with cols[idx % 4]:
+                st.markdown(
+                    f"""
+                    <div class="note-card">
+                        <strong>🏥 {row['pharmacy_name'][-10:]}</strong><br>
+                        <span>👤 {row['pharmacist_name'] or 'غير مسجل'}</span><br>
+                        <span>📅 {row['last_login'][:16] if row['last_login'] else 'لم يدخل'}</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
