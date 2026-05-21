@@ -166,4 +166,64 @@ def show():
     with col6:
         st.metric("✅ تم إنجازها", completed)
 
-    active_non_cancelled = ~df["order_status"].apply(is_cancelled_or_return
+    active_non_cancelled = ~df["order_status"].apply(is_cancelled_or_returned_status)
+    active_non_payment = ~df["order_status"].apply(is_pending_payment_status)
+    active_operational = active_non_cancelled & active_non_payment
+    
+    additions_df = df[(df["case_type"] == "addition") & active_operational].copy()
+    returns_df = df[(df["case_type"] == "return") & active_operational].copy()
+    orphan_salla_df = df[(df["case_type"] == "orphan_salla") & active_operational].copy()
+    orphan_abc_df = df[(df["case_type"] == "orphan_abc") & active_operational].copy()
+    post_cutoff_df = df[df["case_type"] == "post_cutoff_abc"].copy()
+    cancelled_df = df[df["order_status"].apply(is_cancelled_or_returned_status)].copy()
+    payment_pending_df = df[df["order_status"].apply(is_pending_payment_status)].copy()
+    
+    completed_df = get_completed_items(pharmacy_name)
+    
+    # الحصول على أعداد المنجزات داخل كل تبويب
+    tab_completed = get_tab_completed_counts(pharmacy_name)
+    
+    # إعداد التبويبات مع الأعداد الصحيحة (المنجز/الإجمالي داخل نفس التبويب)
+    tab1_total = len(additions_df) + len(df[df["case_type"] == "addition"])
+    tab1_completed = tab_completed.get("addition", 0)
+    
+    tab2_total = len(returns_df) + len(df[df["case_type"] == "return"])
+    tab2_completed = tab_completed.get("return", 0)
+    
+    tab3_total = len(orphan_salla_df) + len(df[df["case_type"] == "orphan_salla"])
+    tab3_completed = tab_completed.get("orphan_salla", 0)
+    
+    tab4_total = len(orphan_abc_df) + len(df[df["case_type"] == "orphan_abc"])
+    tab4_completed = tab_completed.get("orphan_abc", 0)
+    
+    tab8_total = len(completed_df)
+    tab8_completed = tab8_total
+    
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+        get_tab_label("📈 الإضافات", tab1_completed, tab1_total),
+        get_tab_label("📉 الإرجاعات", tab2_completed, tab2_total),
+        get_tab_label("📦 طلبات بدون فاتورة", tab3_completed, tab3_total),
+        get_tab_label("🧾 فواتير بدون طلب", tab4_completed, tab4_total),
+        get_tab_label("⏰ فواتير بعد آخر طلب", 0, len(post_cutoff_df)),
+        get_tab_label("💰 بانتظار الدفع", 0, len(payment_pending_df)),
+        get_tab_label("⚠️ ملغي/مسترجع", 0, len(cancelled_df)),
+        get_tab_label("✅ تم الانتهاء", tab8_completed, tab8_total)
+    ])
+
+    with tab1:
+        render_case_cards_pharmacy(additions_df, allow_actions, pharmacist_name, pharmacy_name)
+    with tab2:
+        render_case_cards_pharmacy(returns_df, allow_actions, pharmacist_name, pharmacy_name)
+    with tab3:
+        render_case_cards_pharmacy(orphan_salla_df, allow_actions, pharmacist_name, pharmacy_name)
+    with tab4:
+        render_case_cards_pharmacy(orphan_abc_df, allow_actions, pharmacist_name, pharmacy_name)
+    with tab5:
+        render_case_cards_pharmacy(post_cutoff_df, False, pharmacist_name, pharmacy_name)
+    with tab6:
+        render_case_cards_pharmacy(payment_pending_df, False, pharmacist_name, pharmacy_name)
+    with tab7:
+        render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name)
+    with tab8:
+        from utils.ui_components import render_completed_table
+        render_completed_table(completed_df, is_admin=False)
