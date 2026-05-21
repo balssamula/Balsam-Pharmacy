@@ -513,3 +513,48 @@ def get_tab_completed_counts(pharmacy_name: str = None) -> dict:
         return {}
     finally:
         conn.close()
+
+def lock_item(item_key: str, locked_by: str):
+    """قفل عنصر لمنع التعديل عليه من الصيدلية"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    # التحقق من وجود عمود is_item_locked
+    cur.execute("PRAGMA table_info(reconciliation_items)")
+    existing_columns = [row[1] for row in cur.fetchall()]
+    
+    if "is_item_locked" not in existing_columns:
+        cur.execute("ALTER TABLE reconciliation_items ADD COLUMN is_item_locked INTEGER DEFAULT 0")
+    if "item_locked_by" not in existing_columns:
+        cur.execute("ALTER TABLE reconciliation_items ADD COLUMN item_locked_by TEXT DEFAULT ''")
+    if "item_locked_at" not in existing_columns:
+        cur.execute("ALTER TABLE reconciliation_items ADD COLUMN item_locked_at TEXT DEFAULT ''")
+    
+    cur.execute("""
+        UPDATE reconciliation_items 
+        SET is_item_locked = 1, item_locked_by = ?, item_locked_at = ?
+        WHERE item_key = ?
+    """, (locked_by, now_str(), item_key))
+    conn.commit()
+    conn.close()
+
+def unlock_item(item_key: str):
+    """فتح قفل عنصر للسماح بالتعديل عليه"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE reconciliation_items 
+        SET is_item_locked = 0, item_locked_by = '', item_locked_at = ''
+        WHERE item_key = ?
+    """, (item_key,))
+    conn.commit()
+    conn.close()
+
+def get_item_lock_status(item_key: str) -> bool:
+    """الحصول على حالة قفل العنصر"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT is_item_locked FROM reconciliation_items WHERE item_key = ?", (item_key,))
+    result = cur.fetchone()
+    conn.close()
+    return result[0] == 1 if result else False
