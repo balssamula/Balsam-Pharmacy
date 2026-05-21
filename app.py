@@ -24,6 +24,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Session State
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'username' not in st.session_state:
@@ -37,6 +38,8 @@ if 'page' not in st.session_state:
 
 with st.sidebar:
     st.title("🌟 نظام بلسم العلا")
+    st.markdown("---")
+    
     if not st.session_state.logged_in:
         username = st.text_input("👤 اسم المستخدم")
         password = st.text_input("🔒 كلمة المرور", type="password")
@@ -52,6 +55,7 @@ with st.sidebar:
                 st.error("بيانات الدخول غير صحيحة")
     else:
         st.success(f"مرحباً {st.session_state.username}")
+        
         if st.session_state.user_role == "pharmacy" and not st.session_state.pharmacist_name:
             name = st.text_input("👤 اسم الصيدلي")
             if st.button("💾 حفظ"):
@@ -59,6 +63,7 @@ with st.sidebar:
                     st.session_state.pharmacist_name = name.strip()
                     update_last_access(st.session_state.username, st.session_state.pharmacist_name)
                     st.rerun()
+        
         if st.session_state.user_role in ["admin", "manager"]:
             st.markdown("---")
             if st.button("📊 لوحة التحكم"):
@@ -74,8 +79,14 @@ with st.sidebar:
                 if st.button("👥 إدارة المستخدمين"):
                     st.session_state.page = "users"
                     st.rerun()
-        st.button("🚪 تسجيل خروج", on_click=lambda: [st.session_state.update({k: False if k == 'logged_in' else '' for k in ['logged_in', 'username', 'user_role', 'pharmacist_name']})])
+        
+        st.markdown("---")
+        if st.button("🚪 تسجيل خروج"):
+            for key in ['logged_in', 'username', 'user_role', 'pharmacist_name', 'page']:
+                st.session_state[key] = False if key == 'logged_in' else "dashboard"
+            st.rerun()
 
+# Main Content
 if not st.session_state.logged_in:
     st.markdown("""
     <div class="hero">
@@ -83,6 +94,13 @@ if not st.session_state.logged_in:
         <p>نظام متكامل لمطابقة طلبات سلة والفواتير</p>
     </div>
     """, unsafe_allow_html=True)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown('<div class="metric-box"><div style="font-size:1.5rem;font-weight:800;">17</div><div>🏥 فرع</div></div>', unsafe_allow_html=True)
+    with col2:
+        st.markdown('<div class="metric-box"><div style="font-size:1.5rem;font-weight:800;">1000+</div><div>📦 طلب شهرياً</div></div>', unsafe_allow_html=True)
+    with col3:
+        st.markdown('<div class="metric-box"><div style="font-size:1.5rem;font-weight:800;">99%</div><div>⚡ دقة المطابقة</div></div>', unsafe_allow_html=True)
 elif st.session_state.user_role == "pharmacy":
     if not st.session_state.pharmacist_name:
         st.info("👈 الرجاء إدخال اسم الصيدلي من القائمة الجانبية")
