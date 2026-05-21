@@ -1,8 +1,7 @@
 import os
 import sqlite3
-import uuid
-from datetime import datetime, timedelta
 import pandas as pd
+from datetime import datetime, timedelta
 
 DB_DIR = "data"
 DB_PATH = os.path.join(DB_DIR, "pharmacy_reconciliation.db")
@@ -21,7 +20,6 @@ def init_database():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    # Users table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY,
@@ -38,7 +36,6 @@ def init_database():
         )
     """)
 
-    # Last access table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS last_access (
             pharmacy_name TEXT PRIMARY KEY,
@@ -47,7 +44,6 @@ def init_database():
         )
     """)
 
-    # Uploads table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS uploads (
             upload_batch_id TEXT PRIMARY KEY,
@@ -68,7 +64,6 @@ def init_database():
         )
     """)
 
-    # Reconciliation items table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS reconciliation_items (
             item_key TEXT PRIMARY KEY,
@@ -121,7 +116,6 @@ def init_database():
             VALUES ('admin', 'admin123', 'admin', 'مدير النظام', 1, 1, 1, 1, 1, 1)
         """)
 
-    # Insert default manager
     cur.execute("SELECT * FROM users WHERE username = 'manager'")
     if not cur.fetchone():
         cur.execute("""
@@ -130,7 +124,6 @@ def init_database():
             VALUES ('manager', 'manager123', 'manager', 'مدير عام', 1, 1, 1, 0, 1, 1)
         """)
 
-    # Insert default pharmacies
     for index, name in enumerate(pharmacy_names(), start=1):
         cur.execute("SELECT * FROM users WHERE username = ?", (name,))
         if not cur.fetchone():
@@ -293,7 +286,7 @@ def get_latest_upload_summary():
         cur.execute("""
             SELECT upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
                    total_additions, total_returns, total_orphan_salla, total_orphan_abc,
-                   total_post_cutoff, is_locked, session_name
+                   is_locked, session_name
             FROM uploads WHERE is_active = 1 ORDER BY uploaded_at DESC LIMIT 1
         """)
         return cur.fetchone()
@@ -308,7 +301,7 @@ def get_all_sessions() -> pd.DataFrame:
         return pd.read_sql_query("""
             SELECT upload_batch_id, session_name, file_name, uploaded_by, uploaded_at, 
                    total_cases, total_additions, total_returns, total_orphan_salla, 
-                   total_orphan_abc, total_post_cutoff, is_locked, is_active
+                   total_orphan_abc, is_locked, is_active
             FROM uploads ORDER BY uploaded_at DESC
         """, conn)
     finally:
