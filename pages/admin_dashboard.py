@@ -14,7 +14,7 @@ from utils.database import (
 )
 from utils.helpers import (
     is_cancelled_or_returned_status, is_pending_payment_status,
-    get_tab_label
+    get_tab_label, numeric_value
 )
 from utils.ui_components import render_metrics
 from utils.excel_processor import process_excel
@@ -85,10 +85,12 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str = None) -> bytes:
 
 def compare_sessions(session1_id: str, session2_id: str) -> pd.DataFrame:
     """مقارنة بين جلستين وإظهار الاختلافات"""
+    import sqlite3
+    from utils.database import DB_PATH
+    
     conn = sqlite3.connect(DB_PATH)
     
-    # جلب بيانات الجلسة الأولى
-    query1 = f"""
+    query1 = """
         SELECT order_number, invoice_number, sku, product_name, pharmacy_name,
                salla_qty, abc_qty, (salla_qty - abc_qty) as difference,
                case_type, order_status, abc_pharmacist_name
@@ -98,21 +100,17 @@ def compare_sessions(session1_id: str, session2_id: str) -> pd.DataFrame:
     df1 = pd.read_sql_query(query1, conn, params=(session1_id,))
     df1['session'] = 'الجلسة الأولى'
     
-    # جلب بيانات الجلسة الثانية
     df2 = pd.read_sql_query(query1, conn, params=(session2_id,))
     df2['session'] = 'الجلسة الثانية'
     
     conn.close()
     
-    # دمج البيانات
     combined = pd.concat([df1, df2], ignore_index=True)
     
-    # إضافة عمود المطلوب
     combined['required_action'] = combined['difference'].apply(
         lambda x: 'إضافة' if x > 0 else ('إرجاع' if x < 0 else 'مطابق')
     )
     
-    # إعادة تسمية الأعمدة
     combined = combined.rename(columns={
         "order_number": "رقم الطلب",
         "invoice_number": "رقم الفاتورة",
@@ -129,6 +127,126 @@ def compare_sessions(session1_id: str, session2_id: str) -> pd.DataFrame:
     
     return combined[["رقم الطلب", "رقم الفاتورة", "الصيدلي", "SKU", "المنتج", 
                      "كمية سلة", "كمية ABC", "الفرق", "حالة الطلب", "required_action", "الفرع", "الجلسة"]]
+
+def render_styled_row(row, idx, is_admin=True):
+    """عرض صف كامل مع جميع البيانات وأزرار في النهاية"""
+    
+    diff_value = numeric_value(row['difference'])
+    
+    # تحديد لون الخلفية حسب حالة الصف
+    if row['status'] == "تم":
+        if row['case_type'] == "addition":
+            bg_color = "#d4edda"  # أخضر فاتح للإضافات المكتملة
+        elif row['case_type'] == "return":
+            bg_color = "#f8d7da"  # أحمر فاتح للإرجاعات المكتملة
+        else:
+            bg_color = "#d1ecf1"  # أزرق فاتح للباقي
+    else:
+        bg_color = "#ffffff"
+    
+    # تحديد لون الفرق
+    if diff_value > 0:
+        diff_color = "#28a745"
+        diff_sign = "+"
+    elif diff_value < 0:
+        diff_color = "#dc3545"
+        diff_sign = ""
+    else:
+        diff_color = "#6c757d"
+        diff_sign = ""
+    
+    # عنوان البطاقة
+    st.markdown(f"""
+    <div style="background:{bg_color};border-radius:12px;padding:1rem;margin-bottom:1rem;border-right:4px solid #1f7a8c;box-shadow:0 2px 4px rgba(0,0,0,0.05);">
+        <div style="display:flex;justify-content:space-between;margin-bottom:0.8rem;flex-wrap:wrap;">
+            <div>
+                <span style="background:{'#d4edda' if row['case_type'] == 'addition' else '#f8d7da' if row['case_type'] == 'return' else '#d1ecf1'};padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;">
+                    {row['case_label']}
+                </span>
+                <span style="background:#e9ecef;padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;margin-right:0.5rem;">
+                    {row['status']}
+                </span>
+            </div>
+            <div style="color:#6c757d;font-size:0.8rem;">🕐 {row['order_date'][:16] if row['order_date'] else 'تاريخ غير متوفر'}</div>
+        </div>
+        
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.8rem;margin-bottom:0.8rem;">
+            <div><strong>📋 رقم الطلب:</strong><br>{row['order_number']}</div>
+            <div><strong>🏷️ SKU:</strong><br>{row['sku']}</div>
+            <div><strong>📦 المنتج:</strong><br>{row['product_name'][:50]}</div>
+            <div><strong>🏥 الفرع:</strong><br>{row['pharmacy_name'] or 'غير محدد'}</div>
+        </div>
+        
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.8rem;margin-bottom:0.8rem;">
+            <div><strong>🛒 كمية سلة:</strong><br>{int(row['salla_qty']) if pd.notna(row['salla_qty']) else 0}</div>
+            <div><strong>📄 كمية ABC:</strong><br>{int(row['abc_qty']) if pd.notna(row['abc_qty']) else 0}</div>
+            <div><strong>📊 الفرق:</strong><br><span style="color:{diff_color};font-weight:bold;">{diff_sign}{diff_value}</span></div>
+            <div><strong>🎯 المطلوب:</strong><br><span style="color:{'#28a745' if diff_value > 0 else '#dc3545' if diff_value < 0 else '#6c757d'};">{'إضافة' if diff_value > 0 else 'إرجاع' if diff_value < 0 else 'مطابق'}</span></div>
+        </div>
+        
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.8rem;margin-bottom:0.8rem;">
+            <div><strong>🧾 رقم الفاتورة:</strong><br>{row['invoice_number'] or 'غير متوفر'}</div>
+            <div><strong>👤 الصيدلي:</strong><br>{row.get('abc_pharmacist_name', 'غير معروف')}</div>
+            <div><strong>📌 حالة الطلب:</strong><br><span style="color:#d9534f;">{row['order_status'] or 'غير متوفرة'}</span></div>
+        </div>
+        
+        <div style="margin-bottom:0.8rem;">
+            <div><strong>📝 ملحوظة الصيدلي:</strong></div>
+            <div style="background:#f8f9fa;padding:0.5rem;border-radius:8px;margin-top:0.3rem;">
+                {row.get('pharmacist_note', 'لا توجد ملحوظات')[:100]}
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # الأزرار في صف منفصل أسفل البطاقة
+    st.markdown('<div style="margin-top:-0.8rem;margin-bottom:1rem;">', unsafe_allow_html=True)
+    
+    # تقسيم الأزرار إلى أعمدة
+    col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 4])
+    
+    # زر إخفاء/إظهار للصيدلية
+    with col1:
+        is_hidden = row.get('hidden_from_pharmacy', 0) == 1
+        if is_hidden:
+            if st.button("👁️ إظهار للصيدلية", key=f"unhide_{idx}", help="إظهار هذا العنصر للصيدلية", use_container_width=True):
+                unhide_item_from_pharmacy(row['item_key'])
+                st.rerun()
+        else:
+            if st.button("🙈 إخفاء من الصيدلية", key=f"hide_{idx}", help="إخفاء هذا العنصر من ظهوره للصيدلية", use_container_width=True):
+                hide_item_from_pharmacy(row['item_key'], st.session_state.username)
+                st.rerun()
+    
+    # زر قفل/فتح التعديل
+    with col2:
+        is_item_locked = row.get('is_item_locked', 0) == 1
+        if is_item_locked:
+            if st.button("🔓 فتح التعديل", key=f"unlock_item_{idx}", help="السماح للصيدلي بتعديل هذا العنصر", use_container_width=True):
+                unlock_item(row['item_key'])
+                st.rerun()
+        else:
+            if st.button("🔒 قفل التعديل", key=f"lock_item_{idx}", help="منع الصيدلي من تعديل هذا العنصر", use_container_width=True):
+                lock_item(row['item_key'], st.session_state.username)
+                st.rerun()
+    
+    # زر إعادة فتح (للمكتمل فقط)
+    with col3:
+        if row['status'] == "تم":
+            if st.button("🔓 إعادة فتح", key=f"reopen_{idx}", help="إعادة فتح هذا العنصر لتعديله مرة أخرى", use_container_width=True):
+                reopen_case_by_item_key(row['item_key'])
+                st.rerun()
+    
+    # زر حفظ الملحوظة
+    with col4:
+        note_key = f"note_{idx}"
+        note_value = st.text_area("", value=row.get("pharmacist_note", "") or "", key=note_key, height=40, label_visibility="collapsed", placeholder="📝 إضافة ملحوظة...")
+        if st.button("💾 حفظ", key=f"save_note_{idx}", help="حفظ الملحوظة", use_container_width=True):
+            from utils.database import save_case_note
+            save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note_value)
+            st.rerun()
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("---")
 
 def show():
     st.markdown("""
@@ -239,7 +357,6 @@ def show():
         if st.session_state.get('comparison_result') is not None:
             st.dataframe(st.session_state.comparison_result, use_container_width=True)
             
-            # تصدير نتيجة المقارنة
             export_data = {"مقارنة_الجلسات": st.session_state.comparison_result}
             excel_data = export_to_excel(export_data)
             st.download_button(
@@ -368,86 +485,31 @@ def show():
         get_tab_label("✅ تم الانتهاء", len(completed_df), len(completed_df))
     ])
     
-    def render_styled_table(input_df, title=""):
-        if input_df.empty:
-            st.success("لا توجد بيانات في هذا القسم.")
-            return
-        
-        for idx, row in input_df.iterrows():
-            item_key = row.get('item_key', f"{row['pharmacy_name']}||{row['order_number']}||{row['sku']}||{row['case_type']}")
-            is_hidden = row.get('hidden_from_pharmacy', 0) == 1
-            is_item_locked = row.get('is_locked', 0) == 1
-            
-            diff_value = row['difference'] if pd.notna(row['difference']) else 0
-            
-            with st.container():
-                st.markdown(f"""
-                <div style="background:#f8f9fa;border-radius:12px;padding:0.8rem;margin-bottom:0.8rem;border-right:4px solid #1f7a8c;">
-                    <div style="display:flex;flex-wrap:wrap;gap:0.5rem;">
-                        <div style="flex:2;"><strong>📋 رقم الطلب:</strong> {row['order_number']}</div>
-                        <div style="flex:2;"><strong>🏷️ SKU:</strong> {row['sku']}</div>
-                        <div style="flex:3;"><strong>📦 المنتج:</strong> {row['product_name'][:50]}</div>
-                    </div>
-                    <div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:0.5rem;">
-                        <div style="flex:1;"><strong>🛒 سلة:</strong> {int(row['salla_qty']) if pd.notna(row['salla_qty']) else 0}</div>
-                        <div style="flex:1;"><strong>📄 ABC:</strong> {int(row['abc_qty']) if pd.notna(row['abc_qty']) else 0}</div>
-                        <div style="flex:1;"><strong>📊 الفرق:</strong> <span style="color:{'#28a745' if diff_value > 0 else '#dc3545' if diff_value < 0 else '#6c757d'}">{'+' if diff_value > 0 else ''}{diff_value}</span></div>
-                        <div style="flex:1.5;"><strong>🧾 الفاتورة/الصيدلي:</strong> {row['invoice_number']}/{row.get('abc_pharmacist_name', '?')}</div>
-                        <div style="flex:1.5;"><strong>🏥 الفرع:</strong> {row['pharmacy_name'][-5:] if row['pharmacy_name'] else '?'}</div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # أزرار الإجراءات
-                btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 6])
-                
-                with btn_col1:
-                    if is_hidden:
-                        if st.button(f"👁️ إظهار للصيدلية", key=f"unhide_{item_key}_{idx}", use_container_width=True):
-                            unhide_item_from_pharmacy(item_key)
-                            st.rerun()
-                    else:
-                        if st.button(f"🙈 إخفاء من الصيدلية", key=f"hide_{item_key}_{idx}", use_container_width=True):
-                            hide_item_from_pharmacy(item_key, st.session_state.username)
-                            st.rerun()
-                
-                with btn_col2:
-                    if is_item_locked:
-                        if st.button(f"🔓 فتح التعديل", key=f"unlock_item_{item_key}_{idx}", use_container_width=True):
-                            from utils.database import unlock_item
-                            unlock_item(item_key)
-                            st.rerun()
-                    else:
-                        if st.button(f"🔒 قفل التعديل", key=f"lock_item_{item_key}_{idx}", use_container_width=True):
-                            from utils.database import lock_item
-                            lock_item(item_key, st.session_state.username)
-                            st.rerun()
-                
-                with btn_col3:
-                    if row["status"] == "تم":
-                        if st.button(f"🔓 إعادة فتح", key=f"reopen_{item_key}_{idx}", use_container_width=True):
-                            reopen_case_by_item_key(item_key)
-                            st.rerun()
-                
-                st.markdown("---")
-    
     with tab1:
-        render_styled_table(additions_df)
+        for idx, row in additions_df.iterrows():
+            render_styled_row(row, idx)
     with tab2:
-        render_styled_table(returns_df)
+        for idx, row in returns_df.iterrows():
+            render_styled_row(row, idx)
     with tab3:
-        render_styled_table(orphan_salla_df)
+        for idx, row in orphan_salla_df.iterrows():
+            render_styled_row(row, idx)
     with tab4:
-        render_styled_table(orphan_abc_df)
+        for idx, row in orphan_abc_df.iterrows():
+            render_styled_row(row, idx)
     with tab5:
-        render_styled_table(post_cutoff_df)
+        for idx, row in post_cutoff_df.iterrows():
+            render_styled_row(row, idx)
     with tab6:
-        render_styled_table(payment_df)
+        for idx, row in payment_df.iterrows():
+            render_styled_row(row, idx)
     with tab7:
-        render_styled_table(cancelled_df)
+        for idx, row in cancelled_df.iterrows():
+            render_styled_row(row, idx)
     with tab8:
         if not completed_df.empty:
-            render_styled_table(completed_df)
+            for idx, row in completed_df.iterrows():
+                render_styled_row(row, idx)
         else:
             st.info("لا توجد طلبات مكتملة")
     
