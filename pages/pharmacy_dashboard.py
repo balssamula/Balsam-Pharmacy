@@ -15,15 +15,29 @@ def render_case_cards_pharmacy(df: pd.DataFrame, allow_actions: bool, pharmacist
 
     for idx, row in df.iterrows():
         diff_value = numeric_value(row['difference'])
-        required_action = "إضافة" if diff_value > 0 else "إرجاع" if diff_value < 0 else "مطابق"
+        
+        # تحديد المطلوب بناءً على الفرق
+        if diff_value > 0:
+            required_action = "إضافة"
+            action_color = "#28a745"
+            button_label = "✅ تأكيد الإضافة"
+        elif diff_value < 0:
+            required_action = "إرجاع"
+            action_color = "#dc3545"
+            button_label = "🔄 تأكيد الإرجاع"
+        else:
+            required_action = "مطابق"
+            action_color = "#6c757d"
+            button_label = None
+        
         order_status = row.get('order_status', 'غير متوفرة')
         
-        # تحديد لون الخلفية حسب حالة الطلب
-        status_color = "#fff3cd" if "بانتظار الدفع" in order_status else "#f8f9fa"
+        # مفتاح فريد لكل عنصر باستخدام معرف متعدد
+        unique_key = f"{row['case_type']}_{row['order_number']}_{row['sku']}_{idx}"
         
         with st.container():
             st.markdown(f"""
-            <div style="background:{status_color};border-radius:16px;padding:1rem;margin-bottom:1rem;border-right:4px solid #1f7a8c;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+            <div style="background:#f8f9fa;border-radius:16px;padding:1rem;margin-bottom:1rem;border-right:4px solid #1f7a8c;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
                 <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;">
                     <span style="background:#dff1ff;color:#0f5488;padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;">{row['case_label']}</span>
                     <span style="color:#6c757d;font-size:0.8rem;">📅 {row['order_date'][:16] if row['order_date'] else ''}</span>
@@ -44,26 +58,25 @@ def render_case_cards_pharmacy(df: pd.DataFrame, allow_actions: bool, pharmacist
                         <strong>🧾 الفاتورة/الصيدلي:</strong><br>
                         {row['invoice_number']}/{row.get('abc_pharmacist_name', 'غير معروف')}<br>
                         <strong>📌 حالة الطلب:</strong> <span style="color:#d9534f;">{order_status}</span><br>
-                        <strong>🎯 المطلوب:</strong> <span style="color:{'#28a745' if diff_value > 0 else '#dc3545' if diff_value < 0 else '#6c757d'};">{required_action}</span>
+                        <strong>🎯 المطلوب:</strong> <span style="color:{action_color};">{required_action}</span>
                     </div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
             
-            note_key = f"note_{idx}"
+            note_key = f"note_{unique_key}"
             note_value = st.text_area("📝 ملحوظة الصيدلي", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
             
             btn_col1, btn_col2 = st.columns([1, 4])
             with btn_col1:
-                if st.button("💾 حفظ", key=f"save_{note_key}", use_container_width=True):
+                if st.button("💾 حفظ", key=f"save_{unique_key}", use_container_width=True):
                     from utils.database import save_case_note
                     save_case_note(row['order_number'], row['sku'], pharmacy_name, row['case_type'], note_value)
                     st.rerun()
             
-            if allow_actions and row["status"] != "تم" and row["case_type"] in {"addition", "return", "orphan_salla", "orphan_abc"}:
-                button_label = "✅ تأكيد الإضافة" if diff_value > 0 else "🔄 تأكيد الإرجاع"
+            if allow_actions and row["status"] != "تم" and button_label and row["case_type"] in {"addition", "return", "orphan_salla", "orphan_abc"}:
                 with btn_col2:
-                    if st.button(button_label, key=f"done_{note_key}", use_container_width=True):
+                    if st.button(button_label, key=f"done_{unique_key}", use_container_width=True):
                         from utils.database import save_case_note, mark_case_done
                         save_case_note(row['order_number'], row['sku'], pharmacy_name, row['case_type'], note_value)
                         mark_case_done(row['order_number'], row['sku'], pharmacy_name, row['case_type'], pharmacist_name)
@@ -104,13 +117,16 @@ def show():
         is_locked = df['is_locked'].iloc[0] == 1
     allow_actions = not is_locked
 
-    # إحصائيات سريعة
-    total = len(df)
-    additions = len(df[df["case_type"] == "addition"])
-    returns = len(df[df["case_type"] == "return"])
-    orphan_salla = len(df[df["case_type"] == "orphan_salla"])
-    orphan_abc = len(df[df["case_type"] == "orphan_abc"])
-    post_cutoff = len(df[df["case_type"] == "post_cutoff_abc"])
+    # إحصائيات سريعة - استبعاد الملغي والمسترجع
+    active_mask = ~df["order_status"].apply(is_cancelled_or_returned_status)
+    active_df = df[active_mask]
+    
+    total = len(active_df)
+    additions = len(active_df[active_df["case_type"] == "addition"])
+    returns = len(active_df[active_df["case_type"] == "return"])
+    orphan_salla = len(active_df[active_df["case_type"] == "orphan_salla"])
+    orphan_abc = len(active_df[active_df["case_type"] == "orphan_abc"])
+    post_cutoff = len(active_df[active_df["case_type"] == "post_cutoff_abc"])
     completed = len(df[df["status"] == "تم"])
     
     col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
@@ -129,14 +145,16 @@ def show():
     with col7:
         st.metric("✅ تم إنجازها", completed)
 
-    # فصل البيانات حسب النوع
-    additions_df = df[df["case_type"] == "addition"].copy()
-    returns_df = df[df["case_type"] == "return"].copy()
-    orphan_salla_df = df[df["case_type"] == "orphan_salla"].copy()
-    orphan_abc_df = df[df["case_type"] == "orphan_abc"].copy()
-    post_cutoff_df = df[df["case_type"] == "post_cutoff_abc"].copy()
-    payment_df = df[df["order_status"].apply(is_pending_payment_status)].copy()
+    # فصل البيانات - استبعاد الملغي والمسترجع من التبويبات الرئيسية
+    additions_df = df[(df["case_type"] == "addition") & active_mask].copy()
+    returns_df = df[(df["case_type"] == "return") & active_mask].copy()
+    orphan_salla_df = df[(df["case_type"] == "orphan_salla") & active_mask].copy()
+    orphan_abc_df = df[(df["case_type"] == "orphan_abc") & active_mask].copy()
+    post_cutoff_df = df[(df["case_type"] == "post_cutoff_abc") & active_mask].copy()
+    
+    # الطلبات الملغية والمسترجعة في تبويب منفصل
     cancelled_df = df[df["order_status"].apply(is_cancelled_or_returned_status)].copy()
+    payment_df = df[df["order_status"].apply(is_pending_payment_status) & active_mask].copy()
     
     completed_df = get_completed_items(pharmacy_name)
     tab_completed = get_tab_completed_counts(pharmacy_name)
