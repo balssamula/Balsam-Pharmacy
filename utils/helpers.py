@@ -38,7 +38,7 @@ def is_pending_payment_status(status_text: str) -> bool:
 
 def is_gift_or_promotion(customer_name: str) -> bool:
     name = normalize_text(customer_name)
-    gift_keywords = ["هدية", "دعاية", "gift", "promotion", "free", "sample", "اختبار", "test"]
+    gift_keywords = ["هدية", "دعاية", "gift", "promotion", "free", "sample"]
     for keyword in gift_keywords:
         if keyword in name.lower():
             return True
@@ -128,14 +128,12 @@ def case_pill(case_type: str) -> str:
         "return": "إرجاع",
         "orphan_salla": "طلب بدون فاتورة",
         "orphan_abc": "فاتورة بدون طلب",
-        "post_cutoff_abc": "فاتورة بعد آخر طلب",
     }
     mapping = {
         "addition": "pill-blue",
         "return": "pill-red",
         "orphan_salla": "pill-amber",
         "orphan_abc": "pill-slate",
-        "post_cutoff_abc": "pill-slate",
     }
     css_class = mapping.get(case_type, "pill-slate")
     return f'<span class="pill {css_class}">{CASE_LABELS.get(case_type, case_type)}</span>'
