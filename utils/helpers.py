@@ -1,5 +1,18 @@
 import re
 import pandas as pd
+from datetime import datetime
+import pytz
+
+# إعداد التوقيت المحلي للسعودية
+SAUDI_TZ = pytz.timezone('Asia/Riyadh')
+
+def get_saudi_time():
+    """الحصول على الوقت الحالي بتوقيت السعودية"""
+    return datetime.now(SAUDI_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+def get_saudi_date():
+    """الحصول على التاريخ الحالي بتوقيت السعودية"""
+    return datetime.now(SAUDI_TZ).strftime("%Y-%m-%d")
 
 def normalize_text(value) -> str:
     if pd.isna(value):
@@ -92,6 +105,18 @@ def get_branch_number(pharmacy_name: str) -> str:
     match = re.search(r"(\d{2})$", normalize_text(pharmacy_name))
     return match.group(1) if match else ""
 
+def get_branch_location(branch_number: str) -> str:
+    """تحديد موقع الفرع بناءً على رقمه"""
+    branch_num = int(branch_number) if branch_number.isdigit() else 0
+    # فروع العلا: 1-7 و 9
+    if branch_num in [1, 2, 3, 4, 5, 6, 7, 9]:
+        return "العلا"
+    # فروع تبوك: 8 و 10-17
+    elif branch_num in [8, 10, 11, 12, 13, 14, 15, 16, 17]:
+        return "تبوك"
+    else:
+        return "غير محدد"
+
 def status_pill(status: str) -> str:
     if status == "تم":
         return '<span class="pill pill-completed">✅ مغلق</span>'
@@ -126,7 +151,8 @@ def status_alert_pill(order_status: str) -> str:
 def payment_alert_pill(order_status: str) -> str:
     return '<span class="pill pill-payment">💰 بانتظار الدفع</span>' if is_pending_payment_status(order_status) else ""
 
-def get_tab_label(label: str, current: int, total: int) -> str:
+def get_tab_label(label: str, completed: int, total: int) -> str:
+    """إنشاء اسم التبويب مع عدد المنجز من الإجمالي داخل نفس التبويب"""
     if total > 0:
-        return f"{label} ({current}/{total})"
+        return f"{label} ({completed}/{total})"
     return label
