@@ -8,7 +8,17 @@ init_database()
 st.set_page_config(
     page_title="نظام بلسم العلا - مطابقة الطلبات والفواتير",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
+)
+
+st.markdown(
+    """
+    <style>
+    [data-testid="stSidebarNav"] {display: none !important;}
+    </style>
+    """,
+    unsafe_allow_name=True,
+    unsafe_allow_html=True
 )
 
 # CSS المشترك
