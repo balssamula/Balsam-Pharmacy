@@ -104,8 +104,8 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     merged["pharmacy_name"] = merged["salla_pharmacy_name"]
     merged.loc[merged["pharmacy_name"].eq(""), "pharmacy_name"] = merged.loc[merged["pharmacy_name"].eq(""), "abc_pharmacy_name"]
     merged["branch_number"] = merged["salla_branch_number"]
-    merged.loc[merged["branch_number"].eq(""), "branch_number"] = merged.loc[merged["branch_number"].eq(""), "abc_branch_number"] if "abc_branch_number" in merged.columns else ""
 
+    # حساب الفرق بشكل صحيح
     merged["difference"] = merged["salla_qty"] - merged["abc_qty"]
     merged["case_type"] = ""
     merged["case_reason"] = ""
@@ -139,7 +139,6 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
                    "other_branch_details", "total_amount"]]
 
 def process_excel(uploaded_file, uploaded_by: str):
-    from utils.database import now_str
     df_salla = pd.read_excel(uploaded_file, sheet_name="سلة")
     df_abc = pd.read_excel(uploaded_file, sheet_name="abc")
     results = classify_cases(df_salla, df_abc)
