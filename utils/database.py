@@ -1,16 +1,17 @@
 import os
 import sqlite3
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
-from utils.helpers import get_saudi_time
 
 DB_DIR = "data"
 DB_PATH = os.path.join(DB_DIR, "pharmacy_reconciliation.db")
 PHARMACY_COUNT = 17
 
-def now_str() -> str:
-    return get_saudi_time()
+def now_str():
+    utc_now = datetime.utcnow()
+    saudi_time = utc_now + timedelta(hours=3)
+    return saudi_time.strftime("%Y-%m-%d %H:%M:%S")
 
 def pharmacy_names():
     return [f"Balsam Alula Pharmacy {i:02d}" for i in range(1, PHARMACY_COUNT + 1)]
@@ -20,7 +21,7 @@ def init_database():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    # Users table with is_active field
+    # Users table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY,
@@ -36,12 +37,6 @@ def init_database():
             is_active INTEGER DEFAULT 1
         )
     """)
-
-    # Add is_active column if not exists
-    cur.execute("PRAGMA table_info(users)")
-    existing_users = [row[1] for row in cur.fetchall()]
-    if "is_active" not in existing_users:
-        cur.execute("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1")
 
     # Last access table
     cur.execute("""
@@ -66,8 +61,6 @@ def init_database():
             total_orphan_salla INTEGER DEFAULT 0,
             total_orphan_abc INTEGER DEFAULT 0,
             total_post_cutoff INTEGER DEFAULT 0,
-            total_branch_mismatch INTEGER DEFAULT 0,
-            total_special_review INTEGER DEFAULT 0,
             is_locked INTEGER DEFAULT 0,
             locked_by TEXT DEFAULT '',
             locked_at TEXT DEFAULT '',
@@ -107,7 +100,6 @@ def init_database():
             order_date TEXT DEFAULT '',
             invoice_date TEXT DEFAULT '',
             profile_type TEXT DEFAULT '',
-            profile_type_from_abc TEXT DEFAULT '',
             receipt_classification TEXT DEFAULT '',
             all_abc_pharmacies TEXT DEFAULT '',
             other_branch_details TEXT DEFAULT '',
@@ -116,25 +108,16 @@ def init_database():
             first_seen_at TEXT,
             last_seen_at TEXT,
             active INTEGER DEFAULT 1,
-            hidden_from_pharmacy INTEGER DEFAULT 0,
-            hidden_by TEXT DEFAULT '',
-            hidden_at TEXT DEFAULT ''
+            hidden_from_pharmacy INTEGER DEFAULT 0
         )
     """)
-
-    # Add missing columns
-    cur.execute("PRAGMA table_info(uploads)")
-    existing_uploads = [row[1] for row in cur.fetchall()]
-    if "total_post_cutoff" not in existing_uploads:
-        cur.execute("ALTER TABLE uploads ADD COLUMN total_post_cutoff INTEGER DEFAULT 0")
 
     # Insert default admin
     cur.execute("SELECT * FROM users WHERE username = 'admin'")
     if not cur.fetchone():
         cur.execute("""
-            INSERT INTO users 
-            (username, password, role, pharmacist_name, can_view_dashboard, can_view_balances, 
-             can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
+            INSERT INTO users (username, password, role, pharmacist_name, can_view_dashboard, 
+             can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
             VALUES ('admin', 'admin123', 'admin', 'مدير النظام', 1, 1, 1, 1, 1, 1)
         """)
 
@@ -142,9 +125,8 @@ def init_database():
     cur.execute("SELECT * FROM users WHERE username = 'manager'")
     if not cur.fetchone():
         cur.execute("""
-            INSERT INTO users 
-            (username, password, role, pharmacist_name, can_view_dashboard, can_view_balances, 
-             can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
+            INSERT INTO users (username, password, role, pharmacist_name, can_view_dashboard, 
+             can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
             VALUES ('manager', 'manager123', 'manager', 'مدير عام', 1, 1, 1, 0, 1, 1)
         """)
 
@@ -153,9 +135,8 @@ def init_database():
         cur.execute("SELECT * FROM users WHERE username = ?", (name,))
         if not cur.fetchone():
             cur.execute("""
-                INSERT INTO users 
-                (username, password, role, pharmacist_name, can_view_dashboard, can_view_balances, 
-                 can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
+                INSERT INTO users (username, password, role, pharmacist_name, can_view_dashboard, 
+                 can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
                 VALUES (?, ?, 'pharmacy', '', 1, 0, 0, 0, 0, 1)
             """, (name, f"balsam{index}"))
 
@@ -185,35 +166,6 @@ def get_user_permissions(username: str):
         }
     return None
 
-def update_user(username: str, password: str = None, pharmacist_name: str = None, role: str = None, is_active: bool = None):
-    """تحديث بيانات المستخدم"""
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    
-    updates = []
-    params = []
-    
-    if password is not None:
-        updates.append("password = ?")
-        params.append(password)
-    if pharmacist_name is not None:
-        updates.append("pharmacist_name = ?")
-        params.append(pharmacist_name)
-    if role is not None:
-        updates.append("role = ?")
-        params.append(role)
-    if is_active is not None:
-        updates.append("is_active = ?")
-        params.append(1 if is_active else 0)
-    
-    if updates:
-        params.append(username)
-        cur.execute(f"UPDATE users SET {', '.join(updates)} WHERE username = ?", params)
-    
-    conn.commit()
-    conn.close()
-    return True
-
 def update_user_permissions(username: str, permissions: dict):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -234,14 +186,37 @@ def update_user_permissions(username: str, permissions: dict):
     conn.commit()
     conn.close()
 
+def update_user(username: str, password: str = None, pharmacist_name: str = None, role: str = None, is_active: bool = None):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    updates = []
+    params = []
+    if password:
+        updates.append("password = ?")
+        params.append(password)
+    if pharmacist_name:
+        updates.append("pharmacist_name = ?")
+        params.append(pharmacist_name)
+    if role:
+        updates.append("role = ?")
+        params.append(role)
+    if is_active is not None:
+        updates.append("is_active = ?")
+        params.append(1 if is_active else 0)
+    if updates:
+        params.append(username)
+        cur.execute(f"UPDATE users SET {', '.join(updates)} WHERE username = ?", params)
+    conn.commit()
+    conn.close()
+    return True
+
 def add_user(username: str, password: str, role: str, pharmacist_name: str = ""):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     try:
         cur.execute("""
-            INSERT INTO users 
-            (username, password, role, pharmacist_name, can_view_dashboard, can_view_balances, 
-             can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
+            INSERT INTO users (username, password, role, pharmacist_name, can_view_dashboard, 
+             can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
             VALUES (?, ?, ?, ?, 1, 0, 0, 0, 0, 1)
         """, (username, password, role, pharmacist_name))
         conn.commit()
@@ -307,14 +282,7 @@ def fetch_user(username: str, password: str):
 def get_all_last_logins() -> pd.DataFrame:
     conn = sqlite3.connect(DB_PATH)
     try:
-        return pd.read_sql_query(
-            """
-            SELECT pharmacy_name, last_login, pharmacist_name
-            FROM last_access
-            ORDER BY last_login DESC
-            """,
-            conn,
-        )
+        return pd.read_sql_query("SELECT pharmacy_name, last_login, pharmacist_name FROM last_access ORDER BY last_login DESC", conn)
     finally:
         conn.close()
 
@@ -325,11 +293,8 @@ def get_latest_upload_summary():
         cur.execute("""
             SELECT upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
                    total_additions, total_returns, total_orphan_salla, total_orphan_abc,
-                   total_post_cutoff, total_branch_mismatch, total_special_review, is_locked, session_name
-            FROM uploads
-            WHERE is_active = 1
-            ORDER BY uploaded_at DESC
-            LIMIT 1
+                   total_post_cutoff, is_locked, session_name
+            FROM uploads WHERE is_active = 1 ORDER BY uploaded_at DESC LIMIT 1
         """)
         return cur.fetchone()
     except:
@@ -344,8 +309,7 @@ def get_all_sessions() -> pd.DataFrame:
             SELECT upload_batch_id, session_name, file_name, uploaded_by, uploaded_at, 
                    total_cases, total_additions, total_returns, total_orphan_salla, 
                    total_orphan_abc, total_post_cutoff, is_locked, is_active
-            FROM uploads
-            ORDER BY uploaded_at DESC
+            FROM uploads ORDER BY uploaded_at DESC
         """, conn)
     finally:
         conn.close()
@@ -355,8 +319,7 @@ def get_session_items(upload_batch_id: str) -> pd.DataFrame:
     try:
         return pd.read_sql_query("""
             SELECT order_number, sku, product_name, case_label, status, performed_by, pharmacy_name
-            FROM reconciliation_items
-            WHERE upload_batch_id = ?
+            FROM reconciliation_items WHERE upload_batch_id = ?
         """, conn, params=(upload_batch_id,))
     finally:
         conn.close()
@@ -364,22 +327,16 @@ def get_session_items(upload_batch_id: str) -> pd.DataFrame:
 def lock_session(upload_batch_id: str, locked_by: str):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("""
-        UPDATE uploads 
-        SET is_locked = 1, locked_by = ?, locked_at = ?
-        WHERE upload_batch_id = ?
-    """, (locked_by, now_str(), upload_batch_id))
+    cur.execute("UPDATE uploads SET is_locked = 1, locked_by = ?, locked_at = ? WHERE upload_batch_id = ?",
+                (locked_by, now_str(), upload_batch_id))
     conn.commit()
     conn.close()
 
 def unlock_session(upload_batch_id: str):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("""
-        UPDATE uploads 
-        SET is_locked = 0, locked_by = '', locked_at = ''
-        WHERE upload_batch_id = ?
-    """, (upload_batch_id,))
+    cur.execute("UPDATE uploads SET is_locked = 0, locked_by = '', locked_at = '' WHERE upload_batch_id = ?",
+                (upload_batch_id,))
     conn.commit()
     conn.close()
 
@@ -404,16 +361,14 @@ def get_completed_items(pharmacy_name: str = None) -> pd.DataFrame:
     query = """
         SELECT order_number, invoice_number, sku, product_name, case_type, case_label,
                performed_by, performed_at, status, item_key, pharmacy_name, branch_number,
-               salla_qty, abc_qty, difference
-        FROM reconciliation_items
-        WHERE active = 1 AND status = 'تم'
+               salla_qty, abc_qty, difference, abc_pharmacist_name
+        FROM reconciliation_items WHERE active = 1 AND status = 'تم'
     """
     params = []
     if pharmacy_name:
         query += " AND pharmacy_name = ?"
         params.append(pharmacy_name)
     query += " ORDER BY performed_at DESC"
-    
     try:
         return pd.read_sql_query(query, conn, params=params if params else None)
     finally:
@@ -421,47 +376,34 @@ def get_completed_items(pharmacy_name: str = None) -> pd.DataFrame:
 
 def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) -> pd.DataFrame:
     conn = sqlite3.connect(DB_PATH)
-    
     cur = conn.cursor()
-    cur.execute("""
-        SELECT upload_batch_id FROM uploads 
-        WHERE is_active = 1
-        ORDER BY uploaded_at DESC LIMIT 1
-    """)
+    cur.execute("SELECT upload_batch_id FROM uploads WHERE is_active = 1 ORDER BY uploaded_at DESC LIMIT 1")
     active_session = cur.fetchone()
-    
     if not active_session:
         conn.close()
         return pd.DataFrame()
-    
     active_batch_id = active_session[0]
     
     query = """
         SELECT order_number, invoice_number, sku, product_name, pharmacy_name, branch_number,
                salla_qty, abc_qty, difference, case_type, case_label, case_reason, status,
                performed_by, performed_at, customer_name, customer_phone, city, order_status,
-               order_date, invoice_date, total_amount, first_seen_at, last_seen_at,
-               profile_type, profile_type_from_abc, receipt_classification, 
-               all_abc_pharmacies, other_branch_details, pharmacist_note, item_key,
-               abc_pharmacy_name, abc_pharmacist_name, hidden_from_pharmacy,
+               order_date, invoice_date, total_amount, profile_type, receipt_classification,
+               pharmacist_note, item_key, abc_pharmacy_name, abc_pharmacist_name, hidden_from_pharmacy,
                0 as is_locked
-        FROM reconciliation_items
-        WHERE active = 1 AND upload_batch_id = ?
+        FROM reconciliation_items WHERE active = 1 AND upload_batch_id = ?
     """
     params = [active_batch_id]
-    
     if pharmacy_name:
         query += " AND pharmacy_name = ?"
         params.append(pharmacy_name)
         if not include_hidden:
             query += " AND (hidden_from_pharmacy = 0 OR hidden_from_pharmacy IS NULL)"
-    
     query += " ORDER BY case_type, order_number DESC, sku"
-    
     try:
         df = pd.read_sql_query(query, conn, params=params)
         return df
-    except Exception as e:
+    except:
         return pd.DataFrame()
     finally:
         conn.close()
@@ -469,22 +411,14 @@ def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) 
 def hide_item_from_pharmacy(item_key: str, hidden_by: str):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("""
-        UPDATE reconciliation_items 
-        SET hidden_from_pharmacy = 1, hidden_by = ?, hidden_at = ?
-        WHERE item_key = ?
-    """, (hidden_by, now_str(), item_key))
+    cur.execute("UPDATE reconciliation_items SET hidden_from_pharmacy = 1 WHERE item_key = ?", (item_key,))
     conn.commit()
     conn.close()
 
 def unhide_item_from_pharmacy(item_key: str):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("""
-        UPDATE reconciliation_items 
-        SET hidden_from_pharmacy = 0, hidden_by = '', hidden_at = ''
-        WHERE item_key = ?
-    """, (item_key,))
+    cur.execute("UPDATE reconciliation_items SET hidden_from_pharmacy = 0 WHERE item_key = ?", (item_key,))
     conn.commit()
     conn.close()
 
@@ -492,8 +426,7 @@ def save_case_note(order_number: str, sku: str, pharmacy_name: str, case_type: s
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""
-        UPDATE reconciliation_items
-        SET pharmacist_note = ?
+        UPDATE reconciliation_items SET pharmacist_note = ?
         WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
     """, (note, order_number, sku, pharmacy_name, case_type))
     conn.commit()
@@ -503,8 +436,7 @@ def mark_case_done(order_number: str, sku: str, pharmacy_name: str, case_type: s
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""
-        UPDATE reconciliation_items
-        SET status = 'تم', performed_by = ?, performed_at = ?
+        UPDATE reconciliation_items SET status = 'تم', performed_by = ?, performed_at = ?
         WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
     """, (performed_by, now_str(), order_number, sku, pharmacy_name, case_type))
     conn.commit()
@@ -514,8 +446,7 @@ def reopen_case(order_number: str, sku: str, pharmacy_name: str, case_type: str)
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""
-        UPDATE reconciliation_items
-        SET status = 'قيد المتابعة', performed_by = '', performed_at = ''
+        UPDATE reconciliation_items SET status = 'قيد المتابعة', performed_by = '', performed_at = ''
         WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
     """, (order_number, sku, pharmacy_name, case_type))
     conn.commit()
@@ -524,32 +455,21 @@ def reopen_case(order_number: str, sku: str, pharmacy_name: str, case_type: str)
 def reopen_case_by_item_key(item_key: str):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("""
-        UPDATE reconciliation_items
-        SET status = 'قيد المتابعة', performed_by = '', performed_at = ''
-        WHERE item_key = ?
-    """, (item_key,))
+    cur.execute("UPDATE reconciliation_items SET status = 'قيد المتابعة', performed_by = '', performed_at = '' WHERE item_key = ?", (item_key,))
     conn.commit()
     conn.close()
 
 def get_tab_completed_counts(pharmacy_name: str = None) -> dict:
-    """الحصول على عدد المنجزات داخل كل تبويب"""
     conn = sqlite3.connect(DB_PATH)
-    query = """
-        SELECT case_type, COUNT(*) as completed
-        FROM reconciliation_items
-        WHERE active = 1 AND status = 'تم'
-    """
+    query = "SELECT case_type, COUNT(*) as completed FROM reconciliation_items WHERE active = 1 AND status = 'تم'"
     params = []
     if pharmacy_name:
         query += " AND pharmacy_name = ?"
         params.append(pharmacy_name)
     query += " GROUP BY case_type"
-    
     try:
         df = pd.read_sql_query(query, conn, params=params if params else None)
-        result = df.set_index('case_type')['completed'].to_dict()
-        return result
+        return df.set_index('case_type')['completed'].to_dict()
     except:
         return {}
     finally:
