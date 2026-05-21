@@ -18,13 +18,13 @@ def show():
     st.markdown("""
     <div class="hero">
         <h1>👑 لوحة التحكم الإدارية</h1>
-        <p>إدارة الطلبات والفواتير - متابعة الإضافات والإرجاعات - إدارة الجلسات</p>
+        <p>إدارة الطلبات والفواتير - متابعة الإضافات والإرجاعات - إدارة الجلسات - تحديث الأرصدة</p>
     </div>
     """, unsafe_allow_html=True)
     
     col1, col2 = st.columns([1, 6])
     with col1:
-        if st.button("🔄 تحديث الصفحة", use_container_width=True):
+        if st.button("🔄 تحديث", use_container_width=True):
             st.rerun()
     
     with st.expander("📂 رفع ملف الطلبات والفواتير", expanded=True):
