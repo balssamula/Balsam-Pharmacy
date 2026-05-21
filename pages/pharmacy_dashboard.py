@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+from io import BytesIO
+from datetime import datetime
 from utils.database import fetch_active_items, get_completed_items, get_tab_completed_counts
 from utils.helpers import (
     is_cancelled_or_returned_status, is_pending_payment_status, 
@@ -7,6 +9,18 @@ from utils.helpers import (
     get_saudi_time
 )
 from utils.ui_components import render_metrics, render_completed_table
+
+def export_to_excel(dataframes_dict: dict) -> bytes:
+    """تصدير البيانات إلى ملف Excel"""
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        for sheet_name, df in dataframes_dict.items():
+            if df is not None and not df.empty:
+                df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+            else:
+                pd.DataFrame({"ملاحظة": ["لا توجد بيانات"]}).to_excel(writer, sheet_name=sheet_name[:31], index=False)
+    output.seek(0)
+    return output.getvalue()
 
 def render_case_cards_pharmacy(df: pd.DataFrame, allow_actions: bool, pharmacist_name: str, pharmacy_name: str):
     if df.empty:
@@ -16,7 +30,6 @@ def render_case_cards_pharmacy(df: pd.DataFrame, allow_actions: bool, pharmacist
     for idx, row in df.iterrows():
         diff_value = numeric_value(row['difference'])
         
-        # تحديد المطلوب بناءً على الفرق
         if diff_value > 0:
             required_action = "إضافة"
             action_color = "#28a745"
@@ -31,8 +44,6 @@ def render_case_cards_pharmacy(df: pd.DataFrame, allow_actions: bool, pharmacist
             button_label = None
         
         order_status = row.get('order_status', 'غير متوفرة')
-        
-        # مفتاح فريد لكل عنصر باستخدام معرف متعدد
         unique_key = f"{row['case_type']}_{row['order_number']}_{row['sku']}_{idx}"
         
         with st.container():
@@ -97,8 +108,13 @@ def show():
     </div>
     """, unsafe_allow_html=True)
 
-    if st.button("🔄 تحديث الصفحة", use_container_width=True):
-        st.rerun()
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("🔄 تحديث الصفحة", use_container_width=True):
+            st.rerun()
+    with col2:
+        if st.button("📥 تصدير إلى Excel", use_container_width=True):
+            st.session_state.show_export_pharmacy = True
 
     df = fetch_active_items(pharmacy_name, include_hidden=False)
     
@@ -145,19 +161,39 @@ def show():
     with col7:
         st.metric("✅ تم إنجازها", completed)
 
-    # فصل البيانات - استبعاد الملغي والمسترجع من التبويبات الرئيسية
+    # فصل البيانات
     additions_df = df[(df["case_type"] == "addition") & active_mask].copy()
     returns_df = df[(df["case_type"] == "return") & active_mask].copy()
     orphan_salla_df = df[(df["case_type"] == "orphan_salla") & active_mask].copy()
     orphan_abc_df = df[(df["case_type"] == "orphan_abc") & active_mask].copy()
     post_cutoff_df = df[(df["case_type"] == "post_cutoff_abc") & active_mask].copy()
-    
-    # الطلبات الملغية والمسترجعة في تبويب منفصل
     cancelled_df = df[df["order_status"].apply(is_cancelled_or_returned_status)].copy()
     payment_df = df[df["order_status"].apply(is_pending_payment_status) & active_mask].copy()
     
     completed_df = get_completed_items(pharmacy_name)
     tab_completed = get_tab_completed_counts(pharmacy_name)
+    
+    # تصدير Excel
+    if st.session_state.get('show_export_pharmacy', False):
+        export_data = {
+            "الإضافات": additions_df,
+            "الإرجاعات": returns_df,
+            "طلبات_بدون_فاتورة": orphan_salla_df,
+            "فواتير_بدون_طلب": orphan_abc_df,
+            "فواتير_بعد_آخر_طلب": post_cutoff_df,
+            "بانتظار_الدفع": payment_df,
+            "ملغي_ومسترجع": cancelled_df,
+            "تم_الانتهاء": completed_df
+        }
+        excel_data = export_to_excel(export_data)
+        st.download_button(
+            "📥 تحميل التقرير",
+            data=excel_data,
+            file_name=f"balsam_pharmacy_{pharmacy_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+        st.session_state.show_export_pharmacy = False
     
     # أعداد التبويبات
     tab1_completed = tab_completed.get("addition", 0)
