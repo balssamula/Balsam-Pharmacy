@@ -3,13 +3,14 @@ import sqlite3
 import uuid
 from datetime import datetime
 import pandas as pd
+from utils.helpers import get_saudi_time
 
 DB_DIR = "data"
 DB_PATH = os.path.join(DB_DIR, "pharmacy_reconciliation.db")
 PHARMACY_COUNT = 17
 
 def now_str() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return get_saudi_time()
 
 def pharmacy_names():
     return [f"Balsam Alula Pharmacy {i:02d}" for i in range(1, PHARMACY_COUNT + 1)]
@@ -19,7 +20,7 @@ def init_database():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    # Users table with manager role
+    # Users table with is_active field
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY,
@@ -31,9 +32,16 @@ def init_database():
             can_view_balances INTEGER DEFAULT 0,
             can_view_monitoring INTEGER DEFAULT 0,
             can_manage_users INTEGER DEFAULT 0,
-            can_view_pharmacy_actions INTEGER DEFAULT 0
+            can_view_pharmacy_actions INTEGER DEFAULT 0,
+            is_active INTEGER DEFAULT 1
         )
     """)
+
+    # Add is_active column if not exists
+    cur.execute("PRAGMA table_info(users)")
+    existing_users = [row[1] for row in cur.fetchall()]
+    if "is_active" not in existing_users:
+        cur.execute("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1")
 
     # Last access table
     cur.execute("""
@@ -114,16 +122,11 @@ def init_database():
         )
     """)
 
-    # إضافة أعمدة جديدة إذا لزم الأمر
+    # Add missing columns
     cur.execute("PRAGMA table_info(uploads)")
     existing_uploads = [row[1] for row in cur.fetchall()]
     if "total_post_cutoff" not in existing_uploads:
         cur.execute("ALTER TABLE uploads ADD COLUMN total_post_cutoff INTEGER DEFAULT 0")
-    
-    cur.execute("PRAGMA table_info(users)")
-    existing_users = [row[1] for row in cur.fetchall()]
-    if "can_view_pharmacy_actions" not in existing_users:
-        cur.execute("ALTER TABLE users ADD COLUMN can_view_pharmacy_actions INTEGER DEFAULT 0")
 
     # Insert default admin
     cur.execute("SELECT * FROM users WHERE username = 'admin'")
@@ -131,8 +134,8 @@ def init_database():
         cur.execute("""
             INSERT INTO users 
             (username, password, role, pharmacist_name, can_view_dashboard, can_view_balances, 
-             can_view_monitoring, can_manage_users, can_view_pharmacy_actions)
-            VALUES ('admin', 'admin123', 'admin', 'مدير النظام', 1, 1, 1, 1, 1)
+             can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
+            VALUES ('admin', 'admin123', 'admin', 'مدير النظام', 1, 1, 1, 1, 1, 1)
         """)
 
     # Insert default manager
@@ -141,8 +144,8 @@ def init_database():
         cur.execute("""
             INSERT INTO users 
             (username, password, role, pharmacist_name, can_view_dashboard, can_view_balances, 
-             can_view_monitoring, can_manage_users, can_view_pharmacy_actions)
-            VALUES ('manager', 'manager123', 'manager', 'مدير عام', 1, 1, 1, 0, 1)
+             can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
+            VALUES ('manager', 'manager123', 'manager', 'مدير عام', 1, 1, 1, 0, 1, 1)
         """)
 
     # Insert default pharmacies
@@ -152,8 +155,8 @@ def init_database():
             cur.execute("""
                 INSERT INTO users 
                 (username, password, role, pharmacist_name, can_view_dashboard, can_view_balances, 
-                 can_view_monitoring, can_manage_users, can_view_pharmacy_actions)
-                VALUES (?, ?, 'pharmacy', '', 1, 0, 0, 0, 0)
+                 can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
+                VALUES (?, ?, 'pharmacy', '', 1, 0, 0, 0, 0, 1)
             """, (name, f"balsam{index}"))
 
     conn.commit()
@@ -164,7 +167,7 @@ def get_user_permissions(username: str):
     cur = conn.cursor()
     cur.execute("""
         SELECT role, can_view_dashboard, can_view_balances, can_view_monitoring, 
-               can_manage_users, can_view_pharmacy_actions, pharmacist_name
+               can_manage_users, can_view_pharmacy_actions, pharmacist_name, is_active
         FROM users WHERE username = ?
     """, (username,))
     result = cur.fetchone()
@@ -177,9 +180,39 @@ def get_user_permissions(username: str):
             "can_view_monitoring": bool(result[3]),
             "can_manage_users": bool(result[4]),
             "can_view_pharmacy_actions": bool(result[5]),
-            "pharmacist_name": result[6] or ""
+            "pharmacist_name": result[6] or "",
+            "is_active": bool(result[7])
         }
     return None
+
+def update_user(username: str, password: str = None, pharmacist_name: str = None, role: str = None, is_active: bool = None):
+    """تحديث بيانات المستخدم"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    updates = []
+    params = []
+    
+    if password is not None:
+        updates.append("password = ?")
+        params.append(password)
+    if pharmacist_name is not None:
+        updates.append("pharmacist_name = ?")
+        params.append(pharmacist_name)
+    if role is not None:
+        updates.append("role = ?")
+        params.append(role)
+    if is_active is not None:
+        updates.append("is_active = ?")
+        params.append(1 if is_active else 0)
+    
+    if updates:
+        params.append(username)
+        cur.execute(f"UPDATE users SET {', '.join(updates)} WHERE username = ?", params)
+    
+    conn.commit()
+    conn.close()
+    return True
 
 def update_user_permissions(username: str, permissions: dict):
     conn = sqlite3.connect(DB_PATH)
@@ -208,8 +241,8 @@ def add_user(username: str, password: str, role: str, pharmacist_name: str = "")
         cur.execute("""
             INSERT INTO users 
             (username, password, role, pharmacist_name, can_view_dashboard, can_view_balances, 
-             can_view_monitoring, can_manage_users, can_view_pharmacy_actions)
-            VALUES (?, ?, ?, ?, 1, 0, 0, 0, 0)
+             can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
+            VALUES (?, ?, ?, ?, 1, 0, 0, 0, 0, 1)
         """, (username, password, role, pharmacist_name))
         conn.commit()
         return True
@@ -231,7 +264,7 @@ def delete_user(username: str):
 def get_all_users():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("""
-        SELECT username, role, pharmacist_name, last_login, 
+        SELECT username, role, pharmacist_name, last_login, is_active,
                can_view_dashboard, can_view_balances, can_view_monitoring, 
                can_manage_users, can_view_pharmacy_actions
         FROM users ORDER BY role, username
@@ -264,7 +297,7 @@ def fetch_user(username: str, password: str):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute(
-        "SELECT username, role, pharmacist_name FROM users WHERE username = ? AND password = ?",
+        "SELECT username, role, pharmacist_name FROM users WHERE username = ? AND password = ? AND is_active = 1",
         (username, password),
     )
     user = cur.fetchone()
@@ -370,7 +403,8 @@ def get_completed_items(pharmacy_name: str = None) -> pd.DataFrame:
     conn = sqlite3.connect(DB_PATH)
     query = """
         SELECT order_number, invoice_number, sku, product_name, case_type, case_label,
-               performed_by, performed_at, status, item_key, pharmacy_name, branch_number
+               performed_by, performed_at, status, item_key, pharmacy_name, branch_number,
+               salla_qty, abc_qty, difference
         FROM reconciliation_items
         WHERE active = 1 AND status = 'تم'
     """
@@ -497,3 +531,26 @@ def reopen_case_by_item_key(item_key: str):
     """, (item_key,))
     conn.commit()
     conn.close()
+
+def get_tab_completed_counts(pharmacy_name: str = None) -> dict:
+    """الحصول على عدد المنجزات داخل كل تبويب"""
+    conn = sqlite3.connect(DB_PATH)
+    query = """
+        SELECT case_type, COUNT(*) as completed
+        FROM reconciliation_items
+        WHERE active = 1 AND status = 'تم'
+    """
+    params = []
+    if pharmacy_name:
+        query += " AND pharmacy_name = ?"
+        params.append(pharmacy_name)
+    query += " GROUP BY case_type"
+    
+    try:
+        df = pd.read_sql_query(query, conn, params=params if params else None)
+        result = df.set_index('case_type')['completed'].to_dict()
+        return result
+    except:
+        return {}
+    finally:
+        conn.close()
