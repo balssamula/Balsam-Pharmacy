@@ -1,18 +1,16 @@
 import re
 import pandas as pd
-from datetime import datetime
-import pytz
-
-# إعداد التوقيت المحلي للسعودية
-SAUDI_TZ = pytz.timezone('Asia/Riyadh')
+from datetime import datetime, timedelta
 
 def get_saudi_time():
-    """الحصول على الوقت الحالي بتوقيت السعودية"""
-    return datetime.now(SAUDI_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    utc_now = datetime.utcnow()
+    saudi_time = utc_now + timedelta(hours=3)
+    return saudi_time.strftime("%Y-%m-%d %H:%M:%S")
 
 def get_saudi_date():
-    """الحصول على التاريخ الحالي بتوقيت السعودية"""
-    return datetime.now(SAUDI_TZ).strftime("%Y-%m-%d")
+    utc_now = datetime.utcnow()
+    saudi_time = utc_now + timedelta(hours=3)
+    return saudi_time.strftime("%Y-%m-%d")
 
 def normalize_text(value) -> str:
     if pd.isna(value):
@@ -35,7 +33,7 @@ def is_pending_payment_status(status_text: str) -> bool:
 
 def is_gift_or_promotion(customer_name: str) -> bool:
     name = normalize_text(customer_name)
-    gift_keywords = ["هدية", "دعاية", "gift", "promotion", "free", "sample", "اختبار", "test"]
+    gift_keywords = ["هدية", "دعاية", "gift", "promotion", "free", "sample"]
     for keyword in gift_keywords:
         if keyword in name.lower():
             return True
@@ -106,12 +104,9 @@ def get_branch_number(pharmacy_name: str) -> str:
     return match.group(1) if match else ""
 
 def get_branch_location(branch_number: str) -> str:
-    """تحديد موقع الفرع بناءً على رقمه"""
     branch_num = int(branch_number) if branch_number.isdigit() else 0
-    # فروع العلا: 1-7 و 9
     if branch_num in [1, 2, 3, 4, 5, 6, 7, 9]:
         return "العلا"
-    # فروع تبوك: 8 و 10-17
     elif branch_num in [8, 10, 11, 12, 13, 14, 15, 16, 17]:
         return "تبوك"
     else:
@@ -129,8 +124,6 @@ def case_pill(case_type: str) -> str:
         "orphan_salla": "طلب بدون فاتورة",
         "orphan_abc": "فاتورة بدون طلب",
         "post_cutoff_abc": "فاتورة بعد آخر طلب",
-        "branch_mismatch": "اختلاف فرع",
-        "special_review": "مراجعة رقم طلب خاص",
     }
     mapping = {
         "addition": "pill-blue",
@@ -138,21 +131,11 @@ def case_pill(case_type: str) -> str:
         "orphan_salla": "pill-amber",
         "orphan_abc": "pill-slate",
         "post_cutoff_abc": "pill-slate",
-        "branch_mismatch": "pill-red",
-        "special_review": "pill-slate",
     }
     css_class = mapping.get(case_type, "pill-slate")
     return f'<span class="pill {css_class}">{CASE_LABELS.get(case_type, case_type)}</span>'
 
-def status_alert_pill(order_status: str) -> str:
-    label = cancel_status_label(order_status)
-    return f'<span class="pill pill-cancel">{label}</span>' if label else ""
-
-def payment_alert_pill(order_status: str) -> str:
-    return '<span class="pill pill-payment">💰 بانتظار الدفع</span>' if is_pending_payment_status(order_status) else ""
-
 def get_tab_label(label: str, completed: int, total: int) -> str:
-    """إنشاء اسم التبويب مع عدد المنجز من الإجمالي داخل نفس التبويب"""
     if total > 0:
         return f"{label} ({completed}/{total})"
     return label
