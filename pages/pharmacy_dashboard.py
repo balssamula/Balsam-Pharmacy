@@ -220,4 +220,76 @@ def show():
     orphan_abc_df = df[(df["case_type"] == "orphan_abc") & active_mask].copy()
     post_cutoff_df = df[(df["case_type"] == "post_cutoff_abc") & active_mask].copy()
     cancelled_df = df[df["order_status"].apply(is_cancelled_or_returned_status)].copy()
-    payment_df = df[df["order_status"].apply(is
+    payment_df = df[df["order_status"].apply(is_pending_payment_status) & active_mask].copy()
+    
+    completed_df = get_completed_items(pharmacy_name)
+    tab_completed = get_tab_completed_counts(pharmacy_name)
+    
+    # تصدير Excel
+    if st.session_state.get('show_export_pharmacy', False):
+        export_data = {
+            "الإضافات": additions_df,
+            "الإرجاعات": returns_df,
+            "طلبات_بدون_فاتورة": orphan_salla_df,
+            "فواتير_بدون_طلب": orphan_abc_df,
+            "فواتير_بعد_آخر_طلب": post_cutoff_df,
+            "بانتظار_الدفع": payment_df,
+            "ملغي_ومسترجع": cancelled_df,
+            "تم_الانتهاء": completed_df
+        }
+        excel_data = export_to_excel(export_data, pharmacy_name)
+        st.download_button(
+            "📥 تحميل التقرير",
+            data=excel_data,
+            file_name=f"balsam_pharmacy_{pharmacy_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+        st.session_state.show_export_pharmacy = False
+    
+    # أعداد التبويبات
+    tab1_completed = tab_completed.get("addition", 0)
+    tab2_completed = tab_completed.get("return", 0)
+    tab3_completed = tab_completed.get("orphan_salla", 0)
+    tab4_completed = tab_completed.get("orphan_abc", 0)
+    tab5_completed = tab_completed.get("post_cutoff_abc", 0)
+    
+    # تلوين التبويبات
+    st.markdown("""
+    <style>
+    button[data-baseweb="tab"]:nth-child(1) { background-color: #4472C4; color: white; border-radius: 10px 10px 0 0; }
+    button[data-baseweb="tab"]:nth-child(2) { background-color: #ED7D31; color: white; border-radius: 10px 10px 0 0; }
+    button[data-baseweb="tab"]:nth-child(3) { background-color: #70AD47; color: white; border-radius: 10px 10px 0 0; }
+    button[data-baseweb="tab"]:nth-child(4) { background-color: #FFC000; color: white; border-radius: 10px 10px 0 0; }
+    button[data-baseweb="tab"][aria-selected="true"] { opacity: 1; }
+    button[data-baseweb="tab"][aria-selected="false"] { opacity: 0.8; }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+        get_tab_label("📈 الإضافات", tab1_completed, len(additions_df) + tab1_completed),
+        get_tab_label("📉 الإرجاعات", tab2_completed, len(returns_df) + tab2_completed),
+        get_tab_label("📦 طلبات بدون فاتورة", tab3_completed, len(orphan_salla_df) + tab3_completed),
+        get_tab_label("🧾 فواتير بدون طلب", tab4_completed, len(orphan_abc_df) + tab4_completed),
+        get_tab_label("⏰ فواتير بعد آخر طلب", tab5_completed, len(post_cutoff_df) + tab5_completed),
+        get_tab_label("💰 بانتظار الدفع", 0, len(payment_df)),
+        get_tab_label("⚠️ ملغي/مسترجع", 0, len(cancelled_df)),
+        get_tab_label("✅ تم الانتهاء", len(completed_df), len(completed_df))
+    ])
+
+    with tab1:
+        render_case_cards_pharmacy(additions_df, allow_actions, pharmacist_name, pharmacy_name)
+    with tab2:
+        render_case_cards_pharmacy(returns_df, allow_actions, pharmacist_name, pharmacy_name)
+    with tab3:
+        render_case_cards_pharmacy(orphan_salla_df, allow_actions, pharmacist_name, pharmacy_name)
+    with tab4:
+        render_case_cards_pharmacy(orphan_abc_df, allow_actions, pharmacist_name, pharmacy_name)
+    with tab5:
+        render_case_cards_pharmacy(post_cutoff_df, False, pharmacist_name, pharmacy_name)
+    with tab6:
+        render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name)
+    with tab7:
+        render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name)
+    with tab8:
+        render_completed_table(completed_df, is_admin=False)
