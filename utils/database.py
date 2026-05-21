@@ -73,7 +73,7 @@ def init_database():
         )
     """)
 
-    # Reconciliation items table - مع إضافة عمود difference
+    # Reconciliation items table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS reconciliation_items (
             item_key TEXT PRIMARY KEY,
@@ -116,15 +116,6 @@ def init_database():
             hidden_from_pharmacy INTEGER DEFAULT 0
         )
     """)
-
-    # Check and add missing columns
-    cur.execute("PRAGMA table_info(reconciliation_items)")
-    existing_columns = [row[1] for row in cur.fetchall()]
-    
-    if "difference" not in existing_columns:
-        cur.execute("ALTER TABLE reconciliation_items ADD COLUMN difference REAL DEFAULT 0")
-    if "post_cutoff" not in existing_columns:
-        cur.execute("ALTER TABLE uploads ADD COLUMN total_post_cutoff INTEGER DEFAULT 0")
 
     # Insert default admin
     cur.execute("SELECT * FROM users WHERE username = 'admin'")
@@ -444,7 +435,6 @@ def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) 
     
     try:
         df = pd.read_sql_query(query, conn, params=params)
-        # Ensure difference is numeric
         if 'difference' in df.columns:
             df['difference'] = pd.to_numeric(df['difference'], errors='coerce').fillna(0)
         return df
