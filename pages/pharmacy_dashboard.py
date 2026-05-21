@@ -2,9 +2,8 @@ import streamlit as st
 import pandas as pd
 from utils.database import fetch_active_items, get_completed_items, get_tab_completed_counts
 from utils.helpers import (
-    is_cancelled_or_returned_status, is_pending_payment_status,
     get_branch_number, get_branch_location, get_tab_label, numeric_value,
-    get_saudi_time, status_pill, case_pill
+    get_saudi_time
 )
 from utils.ui_components import render_metrics
 
@@ -37,7 +36,8 @@ def show():
             render_completed_table(completed_df, is_admin=False)
         return
 
-    allow_actions = True
+    # حساب الفرق بشكل صحيح
+    df['difference'] = df.apply(lambda row: numeric_value(row['salla_qty']) - numeric_value(row['abc_qty']), axis=1)
 
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     with col1:
@@ -71,20 +71,35 @@ def show():
 
     with tab1:
         for idx, row in additions_df.iterrows():
+            diff = numeric_value(row['difference'])
             with st.container():
-                diff = numeric_value(row['difference'])
-                required = "إضافة" if diff > 0 else "إرجاع"
                 st.markdown(f"""
-                <div style="background:white;border-radius:15px;padding:1rem;margin-bottom:1rem;border-right:4px solid #1f7a8c;">
-                    <div><strong>📋 رقم الطلب:</strong> {row['order_number']} | <strong>🏷️ SKU:</strong> {row['sku']}</div>
-                    <div><strong>📦 المنتج:</strong> {row['product_name'][:60]}</div>
-                    <div><strong>📊 كمية سلة:</strong> {int(row['salla_qty'])} | <strong>📊 كمية ABC:</strong> {int(row['abc_qty'])} | <strong>📊 الفرق:</strong> {'+' if diff > 0 else ''}{diff}</div>
-                    <div><strong>🎯 المطلوب:</strong> {required}</div>
-                    <div><strong>🧾 رقم الفاتورة/الصيدلي:</strong> {row['invoice_number']}/{row.get('abc_pharmacist_name', 'غير معروف')}</div>
+                <div style="background:linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);border-radius:16px;padding:1rem;margin-bottom:1rem;border-right:4px solid #1f7a8c;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
+                        <span style="background:#dff1ff;color:#0f5488;padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;">➕ إضافة</span>
+                        <span style="color:#6c757d;font-size:0.8rem;">{row['order_date'][:16] if row['order_date'] else ''}</span>
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;gap:1rem;">
+                        <div style="flex:2;">
+                            <strong>📋 رقم الطلب:</strong> {row['order_number']}<br>
+                            <strong>🏷️ SKU:</strong> {row['sku']}<br>
+                            <strong>📦 المنتج:</strong> {row['product_name'][:60]}
+                        </div>
+                        <div style="flex:1;">
+                            <strong>📊 الكميات:</strong><br>
+                            سلة: {int(row['salla_qty'])} | ABC: {int(row['abc_qty'])}<br>
+                            <strong>📊 الفرق:</strong> <span style="color:#28a745;font-weight:bold;">+{int(diff)}</span><br>
+                            <strong>🎯 المطلوب:</strong> <span style="color:#28a745;">إضافة</span>
+                        </div>
+                        <div style="flex:1.5;">
+                            <strong>🧾 الفاتورة/الصيدلي:</strong><br>
+                            {row['invoice_number']}/{row.get('abc_pharmacist_name', 'غير معروف')}
+                        </div>
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
-                note = st.text_area("ملحوظة", key=f"note_{idx}", height=60)
-                if st.button("✅ تأكيد الإضافة", key=f"add_{idx}"):
+                note = st.text_area("📝 ملحوظة", key=f"note_add_{idx}", height=60)
+                if st.button("✅ تأكيد الإضافة", key=f"add_{idx}", use_container_width=True):
                     from utils.database import mark_case_done, save_case_note
                     if note:
                         save_case_note(row['order_number'], row['sku'], pharmacy_name, row['case_type'], note)
@@ -94,20 +109,35 @@ def show():
     
     with tab2:
         for idx, row in returns_df.iterrows():
+            diff = abs(numeric_value(row['difference']))
             with st.container():
-                diff = numeric_value(row['difference'])
-                required = "إضافة" if diff > 0 else "إرجاع"
                 st.markdown(f"""
-                <div style="background:white;border-radius:15px;padding:1rem;margin-bottom:1rem;border-right:4px solid #dc3545;">
-                    <div><strong>📋 رقم الطلب:</strong> {row['order_number']} | <strong>🏷️ SKU:</strong> {row['sku']}</div>
-                    <div><strong>📦 المنتج:</strong> {row['product_name'][:60]}</div>
-                    <div><strong>📊 كمية سلة:</strong> {int(row['salla_qty'])} | <strong>📊 كمية ABC:</strong> {int(row['abc_qty'])} | <strong>📊 الفرق:</strong> {'+' if diff > 0 else ''}{diff}</div>
-                    <div><strong>🎯 المطلوب:</strong> {required}</div>
-                    <div><strong>🧾 رقم الفاتورة/الصيدلي:</strong> {row['invoice_number']}/{row.get('abc_pharmacist_name', 'غير معروف')}</div>
+                <div style="background:linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);border-radius:16px;padding:1rem;margin-bottom:1rem;border-right:4px solid #dc3545;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
+                        <span style="background:#ffe0df;color:#a32929;padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;">➖ إرجاع</span>
+                        <span style="color:#6c757d;font-size:0.8rem;">{row['order_date'][:16] if row['order_date'] else ''}</span>
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;gap:1rem;">
+                        <div style="flex:2;">
+                            <strong>📋 رقم الطلب:</strong> {row['order_number']}<br>
+                            <strong>🏷️ SKU:</strong> {row['sku']}<br>
+                            <strong>📦 المنتج:</strong> {row['product_name'][:60]}
+                        </div>
+                        <div style="flex:1;">
+                            <strong>📊 الكميات:</strong><br>
+                            سلة: {int(row['salla_qty'])} | ABC: {int(row['abc_qty'])}<br>
+                            <strong>📊 الفرق:</strong> <span style="color:#dc3545;font-weight:bold;">-{int(diff)}</span><br>
+                            <strong>🎯 المطلوب:</strong> <span style="color:#dc3545;">إرجاع</span>
+                        </div>
+                        <div style="flex:1.5;">
+                            <strong>🧾 الفاتورة/الصيدلي:</strong><br>
+                            {row['invoice_number']}/{row.get('abc_pharmacist_name', 'غير معروف')}
+                        </div>
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
-                note = st.text_area("ملحوظة", key=f"note_{idx}", height=60)
-                if st.button("🔄 تأكيد الإرجاع", key=f"return_{idx}"):
+                note = st.text_area("📝 ملحوظة", key=f"note_return_{idx}", height=60)
+                if st.button("🔄 تأكيد الإرجاع", key=f"return_{idx}", use_container_width=True):
                     from utils.database import mark_case_done, save_case_note
                     if note:
                         save_case_note(row['order_number'], row['sku'], pharmacy_name, row['case_type'], note)
@@ -118,17 +148,31 @@ def show():
     with tab3:
         for idx, row in orphan_salla_df.iterrows():
             with st.container():
-                diff = numeric_value(row['difference'])
                 st.markdown(f"""
-                <div style="background:white;border-radius:15px;padding:1rem;margin-bottom:1rem;border-right:4px solid #ffc107;">
-                    <div><strong>📋 رقم الطلب:</strong> {row['order_number']} | <strong>🏷️ SKU:</strong> {row['sku']}</div>
-                    <div><strong>📦 المنتج:</strong> {row['product_name'][:60]}</div>
-                    <div><strong>📊 كمية سلة:</strong> {int(row['salla_qty'])} | <strong>📊 كمية ABC:</strong> {int(row['abc_qty'])}</div>
-                    <div><strong>🧾 رقم الفاتورة/الصيدلي:</strong> {row['invoice_number']}/{row.get('abc_pharmacist_name', 'غير معروف')}</div>
+                <div style="background:linear-gradient(135deg, #ffffff 0%, #fff8e7 100%);border-radius:16px;padding:1rem;margin-bottom:1rem;border-right:4px solid #ffc107;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
+                        <span style="background:#fff0c2;color:#8a5b00;padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;">📦 طلب بدون فاتورة</span>
+                        <span style="color:#6c757d;font-size:0.8rem;">{row['order_date'][:16] if row['order_date'] else ''}</span>
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;gap:1rem;">
+                        <div style="flex:2;">
+                            <strong>📋 رقم الطلب:</strong> {row['order_number']}<br>
+                            <strong>🏷️ SKU:</strong> {row['sku']}<br>
+                            <strong>📦 المنتج:</strong> {row['product_name'][:60]}
+                        </div>
+                        <div style="flex:1;">
+                            <strong>📊 كمية سلة:</strong> {int(row['salla_qty'])}<br>
+                            <strong>📊 كمية ABC:</strong> {int(row['abc_qty'])}<br>
+                            <strong>🎯 المطلوب:</strong> <span style="color:#28a745;">إضافة</span>
+                        </div>
+                        <div style="flex:1.5;">
+                            <strong>🧾 رقم الفاتورة:</strong> {row['invoice_number'] or 'غير متوفر'}
+                        </div>
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
-                note = st.text_area("ملحوظة", key=f"note_{idx}", height=60)
-                if st.button("✅ تأكيد الإضافة", key=f"orphan_add_{idx}"):
+                note = st.text_area("📝 ملحوظة", key=f"note_orphan_{idx}", height=60)
+                if st.button("✅ تأكيد الإضافة", key=f"orphan_add_{idx}", use_container_width=True):
                     from utils.database import mark_case_done, save_case_note
                     if note:
                         save_case_note(row['order_number'], row['sku'], pharmacy_name, row['case_type'], note)
@@ -139,17 +183,31 @@ def show():
     with tab4:
         for idx, row in orphan_abc_df.iterrows():
             with st.container():
-                diff = numeric_value(row['difference'])
                 st.markdown(f"""
-                <div style="background:white;border-radius:15px;padding:1rem;margin-bottom:1rem;border-right:4px solid #17a2b8;">
-                    <div><strong>📋 رقم الطلب:</strong> {row['order_number']} | <strong>🏷️ SKU:</strong> {row['sku']}</div>
-                    <div><strong>📦 المنتج:</strong> {row['product_name'][:60]}</div>
-                    <div><strong>📊 كمية ABC:</strong> {int(row['abc_qty'])}</div>
-                    <div><strong>🧾 رقم الفاتورة/الصيدلي:</strong> {row['invoice_number']}/{row.get('abc_pharmacist_name', 'غير معروف')}</div>
+                <div style="background:linear-gradient(135deg, #ffffff 0%, #e8f4f8 100%);border-radius:16px;padding:1rem;margin-bottom:1rem;border-right:4px solid #17a2b8;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
+                        <span style="background:#d1ecf1;color:#0c5460;padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;">🧾 فاتورة بدون طلب</span>
+                        <span style="color:#6c757d;font-size:0.8rem;">{row['invoice_date'][:16] if row['invoice_date'] else ''}</span>
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;gap:1rem;">
+                        <div style="flex:2;">
+                            <strong>📋 رقم الطلب:</strong> {row['order_number']}<br>
+                            <strong>🏷️ SKU:</strong> {row['sku']}<br>
+                            <strong>📦 المنتج:</strong> {row['product_name'][:60]}
+                        </div>
+                        <div style="flex:1;">
+                            <strong>📊 كمية ABC:</strong> {int(row['abc_qty'])}<br>
+                            <strong>🎯 المطلوب:</strong> <span style="color:#dc3545;">إرجاع</span>
+                        </div>
+                        <div style="flex:1.5;">
+                            <strong>🧾 الفاتورة/الصيدلي:</strong><br>
+                            {row['invoice_number']}/{row.get('abc_pharmacist_name', 'غير معروف')}
+                        </div>
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
-                note = st.text_area("ملحوظة", key=f"note_{idx}", height=60)
-                if st.button("🔄 تأكيد الإرجاع", key=f"orphan_return_{idx}"):
+                note = st.text_area("📝 ملحوظة", key=f"note_orphan_abc_{idx}", height=60)
+                if st.button("🔄 تأكيد الإرجاع", key=f"orphan_return_{idx}", use_container_width=True):
                     from utils.database import mark_case_done, save_case_note
                     if note:
                         save_case_note(row['order_number'], row['sku'], pharmacy_name, row['case_type'], note)
