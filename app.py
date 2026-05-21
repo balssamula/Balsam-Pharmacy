@@ -5,48 +5,10 @@ from utils.helpers import get_branch_number
 # تهيئة قاعدة البيانات
 init_database()
 
-# تحديث صلاحيات المدير
-def fix_admin_permissions():
-    import sqlite3
-    import os
-    db_path = 'data/pharmacy_reconciliation.db'
-    if os.path.exists(db_path):
-        conn = sqlite3.connect(db_path)
-        cur = conn.cursor()
-        try:
-            # تحديث صلاحيات admin
-            cur.execute("""
-                UPDATE users 
-                SET can_view_dashboard = 1, 
-                    can_view_balances = 1, 
-                    can_view_monitoring = 1, 
-                    can_manage_users = 1 
-                WHERE username = 'admin'
-            """)
-            conn.commit()
-            
-            # إضافة الأعمدة إذا لم تكن موجودة
-            cur.execute("PRAGMA table_info(users)")
-            existing_columns = [row[1] for row in cur.fetchall()]
-            
-            if "can_view_balances" not in existing_columns:
-                cur.execute("ALTER TABLE users ADD COLUMN can_view_balances INTEGER DEFAULT 0")
-            if "can_view_monitoring" not in existing_columns:
-                cur.execute("ALTER TABLE users ADD COLUMN can_view_monitoring INTEGER DEFAULT 0")
-            if "can_manage_users" not in existing_columns:
-                cur.execute("ALTER TABLE users ADD COLUMN can_manage_users INTEGER DEFAULT 0")
-            
-            conn.commit()
-        except Exception as e:
-            print(f"خطأ: {e}")
-        finally:
-            conn.close()
-
-fix_admin_permissions()
-
 st.set_page_config(
     page_title="نظام بلسم العلا - مطابقة الطلبات والفواتير",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 # CSS المشترك
@@ -70,6 +32,21 @@ st.markdown("""
         text-align: center;
         margin: 0.5rem;
     }
+    .pill {
+        display: inline-block;
+        padding: 0.28rem 0.75rem;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 700;
+    }
+    .pill-green { background: #dff7e8; color: #0f7a3a; }
+    .pill-amber { background: #fff0c2; color: #8a5b00; }
+    .pill-red { background: #ffe0df; color: #a32929; }
+    .pill-blue { background: #dff1ff; color: #0f5488; }
+    .pill-slate { background: #eef3f5; color: #445b66; }
+    .pill-cancel { background: #ffd8d8; color: #8f1f1f; }
+    .pill-payment { background: #fff0c2; color: #8a5b00; }
+    .pill-completed { background: #28a745; color: white; }
     .stButton button { width: 100%; border-radius: 10px; }
     .note-card {
         background: linear-gradient(135deg, #f4fbfc 0%, #ffffff 100%);
@@ -85,6 +62,13 @@ st.markdown("""
         border-right: 5px solid #1f7a8c;
         padding-right: 0.65rem;
         margin: 1rem 0 0.8rem;
+    }
+    .session-card {
+        background: #f8f9fa;
+        border-radius: 12px;
+        padding: 0.8rem;
+        margin: 0.3rem 0;
+        border-right: 3px solid #1f7a8c;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -102,14 +86,14 @@ for key, default_value in {
 
 # Sidebar Login
 with st.sidebar:
-    st.title("نظام بلسم العلا")
+    st.title("🌟 نظام بلسم العلا")
     st.caption("مطابقة طلبات سلة والفواتير")
     st.markdown("---")
 
     if not st.session_state.logged_in:
-        username = st.text_input("اسم المستخدم")
-        password = st.text_input("كلمة المرور", type="password")
-        if st.button("دخول", use_container_width=True):
+        username = st.text_input("👤 اسم المستخدم")
+        password = st.text_input("🔒 كلمة المرور", type="password")
+        if st.button("🚪 دخول", use_container_width=True):
             user = fetch_user(username, password)
             if user:
                 st.session_state.logged_in = True
@@ -118,7 +102,7 @@ with st.sidebar:
                 st.session_state.pharmacist_name = user[2] or ""
                 st.rerun()
             else:
-                st.error("بيانات الدخول غير صحيحة.")
+                st.error("❌ بيانات الدخول غير صحيحة.")
     else:
         st.success(f"مرحباً {st.session_state.username}")
         
@@ -132,30 +116,32 @@ with st.sidebar:
                     st.success("✅ تم حفظ الاسم")
                     st.rerun()
         
-        # قائمة الأدوات للمدير
-        if st.session_state.user_role == "admin":
+        # قائمة الأدوات حسب الصلاحيات
+        if st.session_state.user_role in ["admin", "manager"]:
             st.markdown("---")
-            st.markdown("### 📂 أدوات المدير")
+            st.markdown("### 📂 الأدوات")
             
-            # زر لوحة التحكم الرئيسية
-            if st.button("📊 لوحة التحكم الرئيسية", use_container_width=True):
-                st.session_state.page = "dashboard"
-                st.rerun()
+            permissions = get_user_permissions(st.session_state.username)
             
-            # زر تحديث الأرصدة
-            if st.button("🔄 تحديث الأرصدة", use_container_width=True):
-                st.session_state.page = "balances"
-                st.rerun()
+            if permissions and permissions.get("can_view_dashboard"):
+                if st.button("📊 لوحة التحكم الرئيسية", use_container_width=True):
+                    st.session_state.page = "dashboard"
+                    st.rerun()
             
-            # زر مراقبة تعديلات الصيدليات
-            if st.button("👥 مراقبة تعديلات الصيدليات", use_container_width=True):
-                st.session_state.page = "monitoring"
-                st.rerun()
+            if permissions and permissions.get("can_view_balances"):
+                if st.button("🔄 تحديث الأرصدة", use_container_width=True):
+                    st.session_state.page = "balances"
+                    st.rerun()
             
-            # زر إدارة المستخدمين
-            if st.button("👥 إدارة المستخدمين والصلاحيات", use_container_width=True):
-                st.session_state.page = "users"
-                st.rerun()
+            if permissions and permissions.get("can_view_monitoring"):
+                if st.button("👥 مراقبة التعديلات", use_container_width=True):
+                    st.session_state.page = "monitoring"
+                    st.rerun()
+            
+            if permissions and permissions.get("can_manage_users"):
+                if st.button("👥 إدارة المستخدمين", use_container_width=True):
+                    st.session_state.page = "users"
+                    st.rerun()
         
         st.markdown("---")
         if st.button("🚪 تسجيل خروج", use_container_width=True):
@@ -177,21 +163,21 @@ if not st.session_state.logged_in:
         st.markdown("""
         <div class="metric-box">
             <div style="font-size:1.5rem;font-weight:800;">17</div>
-            <div>فرع</div>
+            <div>🏥 فرع</div>
         </div>
         """, unsafe_allow_html=True)
     with col2:
         st.markdown("""
         <div class="metric-box">
             <div style="font-size:1.5rem;font-weight:800;">1000+</div>
-            <div>طلب شهرياً</div>
+            <div>📦 طلب شهرياً</div>
         </div>
         """, unsafe_allow_html=True)
     with col3:
         st.markdown("""
         <div class="metric-box">
             <div style="font-size:1.5rem;font-weight:800;">99%</div>
-            <div>دقة المطابقة</div>
+            <div>⚡ دقة المطابقة</div>
         </div>
         """, unsafe_allow_html=True)
         
@@ -199,38 +185,27 @@ elif st.session_state.user_role == "pharmacy":
     if not st.session_state.pharmacist_name:
         st.info("👈 الرجاء إدخال اسم الصيدلي من القائمة الجانبية")
     else:
-        try:
-            from pages import pharmacy_dashboard
-            pharmacy_dashboard.show()
-        except ImportError:
-            st.error("❌ صفحة الصيدلية غير متوفرة")
-else:  # admin
+        from pages import pharmacy_dashboard
+        pharmacy_dashboard.show()
+else:  # admin or manager
     page = st.session_state.get("page", "dashboard")
+    permissions = get_user_permissions(st.session_state.username)
     
-    if page == "users":
-        try:
-            from pages import users_management
-            users_management.show()
-        except ImportError:
-            st.error("❌ صفحة إدارة المستخدمين غير متوفرة")
-    elif page == "balances":
-        try:
-            from pages import balances_updater
-            balances_updater.show()
-        except ImportError:
-            st.error("❌ صفحة تحديث الأرصدة غير متوفرة")
-    elif page == "monitoring":
-        try:
-            from pages import monitoring
-            monitoring.show()
-        except ImportError:
-            st.error("❌ صفحة مراقبة التعديلات غير متوفرة")
+    if page == "users" and permissions and permissions.get("can_manage_users"):
+        from pages import users_management
+        users_management.show()
+    elif page == "balances" and permissions and permissions.get("can_view_balances"):
+        from pages import balances_updater
+        balances_updater.show()
+    elif page == "monitoring" and permissions and permissions.get("can_view_monitoring"):
+        from pages import monitoring
+        monitoring.show()
     else:
-        try:
+        if permissions and permissions.get("can_view_dashboard"):
             from pages import admin_dashboard
             admin_dashboard.show()
-        except ImportError:
-            st.error("❌ صفحة لوحة التحكم غير متوفرة")
+        else:
+            st.error("⚠️ ليس لديك صلاحية الوصول إلى لوحة التحكم")
 
 st.markdown("---")
 st.markdown(
