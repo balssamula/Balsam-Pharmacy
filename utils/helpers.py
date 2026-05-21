@@ -2,10 +2,15 @@ import re
 import pandas as pd
 from datetime import datetime, timedelta
 
-def get_saudi_time():
+def now_str():
     utc_now = datetime.utcnow()
     saudi_time = utc_now + timedelta(hours=3)
     return saudi_time.strftime("%Y-%m-%d %H:%M:%S")
+
+def get_saudi_time():
+    utc_now = datetime.utcnow()
+    saudi_time = utc_now + timedelta(hours=3)
+    return saudi_time.strftime("%H:%M:%S %d-%m-%Y")
 
 def get_saudi_date():
     utc_now = datetime.utcnow()
@@ -33,7 +38,7 @@ def is_pending_payment_status(status_text: str) -> bool:
 
 def is_gift_or_promotion(customer_name: str) -> bool:
     name = normalize_text(customer_name)
-    gift_keywords = ["هدية", "دعاية", "gift", "promotion", "free", "sample"]
+    gift_keywords = ["هدية", "دعاية", "gift", "promotion", "free", "sample", "اختبار", "test"]
     for keyword in gift_keywords:
         if keyword in name.lower():
             return True
