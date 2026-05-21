@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from utils.database import get_all_users, add_user, delete_user, update_user_permissions, update_user
+from utils.database import get_all_users, add_user, delete_user, update_user_permissions, update_user, update_username
 
 def show():
     st.markdown(
@@ -55,6 +55,9 @@ def show():
                 
                 with col3:
                     if row['username'] not in ["admin", "manager"]:
+                        # حقل تعديل اسم المستخدم
+                        new_username = st.text_input("اسم المستخدم الجديد", value=row['username'], key=f"uname_{idx}")
+                        
                         # حقل تعديل الاسم
                         new_pharm_name = st.text_input("الاسم", value=row['pharmacist_name'] or "", key=f"name_{idx}")
                         
@@ -77,29 +80,36 @@ def show():
                         can_users = st.checkbox("👥 إدارة المستخدمين", value=bool(row['can_manage_users']), key=f"users_{idx}")
                         
                         if st.button("💾 حفظ التعديلات", key=f"save_{idx}"):
-                            # تحديث بيانات المستخدم الأساسية
-                            if new_password:
-                                update_user(row['username'], password=new_password, 
-                                           pharmacist_name=new_pharm_name, role=new_role, is_active=is_active)
+                            # تحديث اسم المستخدم إذا تغير
+                            if new_username != row['username']:
+                                if update_username(row['username'], new_username, new_password if new_password else None):
+                                    st.success(f"✅ تم تحديث اسم المستخدم إلى {new_username}")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ اسم المستخدم موجود مسبقاً")
                             else:
-                                update_user(row['username'], pharmacist_name=new_pharm_name, 
-                                           role=new_role, is_active=is_active)
-                            
-                            # تحديث الصلاحيات
-                            perms = {
-                                "can_view_dashboard": can_dash,
-                                "can_view_balances": can_bal,
-                                "can_view_monitoring": can_mon,
-                                "can_view_pharmacy_actions": can_pharm,
-                                "can_manage_users": can_users,
-                                "pharmacist_name": new_pharm_name
-                            }
-                            update_user_permissions(row['username'], perms)
-                            st.success(f"✅ تم تحديث بيانات {row['username']}")
-                            st.rerun()
+                                # تحديث بيانات المستخدم الأساسية
+                                if new_password:
+                                    update_user(row['username'], password=new_password, 
+                                               pharmacist_name=new_pharm_name, role=new_role, is_active=is_active)
+                                else:
+                                    update_user(row['username'], pharmacist_name=new_pharm_name, 
+                                               role=new_role, is_active=is_active)
+                                
+                                # تحديث الصلاحيات
+                                perms = {
+                                    "can_view_dashboard": can_dash,
+                                    "can_view_balances": can_bal,
+                                    "can_view_monitoring": can_mon,
+                                    "can_view_pharmacy_actions": can_pharm,
+                                    "can_manage_users": can_users,
+                                    "pharmacist_name": new_pharm_name
+                                }
+                                update_user_permissions(row['username'], perms)
+                                st.success(f"✅ تم تحديث بيانات {row['username']}")
+                                st.rerun()
                     elif row['username'] == "manager":
                         st.info("🔧 مدير عام - يمكن تعديل صلاحياته")
-                        # مدير عام يمكن تعديل صلاحياته
                         can_dash = st.checkbox("📊 لوحة التحكم", value=bool(row['can_view_dashboard']), key=f"dash_mgr")
                         can_bal = st.checkbox("🔄 تحديث الأرصدة", value=bool(row['can_view_balances']), key=f"bal_mgr")
                         can_mon = st.checkbox("👥 مراقبة التعديلات", value=bool(row['can_view_monitoring']), key=f"mon_mgr")
