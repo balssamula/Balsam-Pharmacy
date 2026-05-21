@@ -8,7 +8,7 @@ init_database()
 st.set_page_config(
     page_title="نظام بلسم العلا - مطابقة الطلبات والفواتير",
     layout="wide",
-    initial_sidebar_state="auto",
+    initial_sidebar_state="collapsed",
 )
 
 st.markdown(
