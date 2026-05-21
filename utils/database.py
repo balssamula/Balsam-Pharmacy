@@ -65,6 +65,7 @@ def init_database():
             total_returns INTEGER DEFAULT 0,
             total_orphan_salla INTEGER DEFAULT 0,
             total_orphan_abc INTEGER DEFAULT 0,
+            total_post_cutoff INTEGER DEFAULT 0,
             is_locked INTEGER DEFAULT 0,
             locked_by TEXT DEFAULT '',
             locked_at TEXT DEFAULT '',
@@ -72,7 +73,7 @@ def init_database():
         )
     """)
 
-    # Reconciliation items table
+    # Reconciliation items table - مع إضافة عمود difference
     cur.execute("""
         CREATE TABLE IF NOT EXISTS reconciliation_items (
             item_key TEXT PRIMARY KEY,
@@ -116,6 +117,15 @@ def init_database():
         )
     """)
 
+    # Check and add missing columns
+    cur.execute("PRAGMA table_info(reconciliation_items)")
+    existing_columns = [row[1] for row in cur.fetchall()]
+    
+    if "difference" not in existing_columns:
+        cur.execute("ALTER TABLE reconciliation_items ADD COLUMN difference REAL DEFAULT 0")
+    if "post_cutoff" not in existing_columns:
+        cur.execute("ALTER TABLE uploads ADD COLUMN total_post_cutoff INTEGER DEFAULT 0")
+
     # Insert default admin
     cur.execute("SELECT * FROM users WHERE username = 'admin'")
     if not cur.fetchone():
@@ -125,6 +135,7 @@ def init_database():
             VALUES ('admin', 'admin123', 'admin', 'مدير النظام', 1, 1, 1, 1, 1, 1)
         """)
 
+    # Insert default manager
     cur.execute("SELECT * FROM users WHERE username = 'manager'")
     if not cur.fetchone():
         cur.execute("""
@@ -133,13 +144,14 @@ def init_database():
             VALUES ('manager', 'manager123', 'manager', 'مدير عام', 1, 1, 1, 0, 1, 1)
         """)
 
+    # Insert default pharmacies - with can_view_dashboard = 0
     for index, name in enumerate(pharmacy_names(), start=1):
         cur.execute("SELECT * FROM users WHERE username = ?", (name,))
         if not cur.fetchone():
             cur.execute("""
                 INSERT INTO users (username, password, role, pharmacist_name, can_view_dashboard, 
                  can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
-                VALUES (?, ?, 'pharmacy', '', 0, 0, 0, 0, 0, 1)
+                VALUES (?, ?, 'pharmacy', '', 0, 0, 0, 0, 1, 1)
             """, (name, f"balsam{index}"))
 
     conn.commit()
@@ -169,7 +181,6 @@ def get_user_permissions(username: str):
     return None
 
 def update_username(old_username: str, new_username: str, password: str = None):
-    """تحديث اسم المستخدم"""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     try:
@@ -237,7 +248,7 @@ def add_user(username: str, password: str, role: str, pharmacist_name: str = "")
         cur.execute("""
             INSERT INTO users (username, password, role, pharmacist_name, can_view_dashboard, 
              can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
-            VALUES (?, ?, ?, ?, 1, 0, 0, 0, 0, 1)
+            VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, 1)
         """, (username, password, role, pharmacist_name))
         conn.commit()
         return True
@@ -317,7 +328,7 @@ def get_latest_upload_summary():
         cur.execute("""
             SELECT upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
                    total_additions, total_returns, total_orphan_salla, total_orphan_abc,
-                   is_locked, session_name
+                   total_post_cutoff, is_locked, session_name
             FROM uploads WHERE is_active = 1 ORDER BY uploaded_at DESC LIMIT 1
         """)
         return cur.fetchone()
@@ -332,7 +343,7 @@ def get_all_sessions() -> pd.DataFrame:
         return pd.read_sql_query("""
             SELECT upload_batch_id, session_name, file_name, uploaded_by, uploaded_at, 
                    total_cases, total_additions, total_returns, total_orphan_salla, 
-                   total_orphan_abc, is_locked, is_active
+                   total_orphan_abc, total_post_cutoff, is_locked, is_active
             FROM uploads ORDER BY uploaded_at DESC
         """, conn)
     finally:
@@ -387,7 +398,7 @@ def get_completed_items(pharmacy_name: str = None) -> pd.DataFrame:
     query = """
         SELECT order_number, invoice_number, sku, product_name, case_type, case_label,
                performed_by, performed_at, status, item_key, pharmacy_name, branch_number,
-               salla_qty, abc_qty, difference, abc_pharmacist_name
+               salla_qty, abc_qty, difference, abc_pharmacist_name, order_status
         FROM reconciliation_items WHERE active = 1 AND status = 'تم'
     """
     params = []
@@ -413,11 +424,7 @@ def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) 
     query = """
         SELECT order_number, invoice_number, sku, product_name, pharmacy_name, branch_number,
                salla_qty, abc_qty, 
-               CASE 
-                   WHEN salla_qty IS NULL THEN 0 - abc_qty
-                   WHEN abc_qty IS NULL THEN salla_qty
-                   ELSE salla_qty - abc_qty
-               END as difference,
+               (salla_qty - abc_qty) as difference,
                case_type, case_label, case_reason, status,
                performed_by, performed_at, customer_name, customer_phone, city, order_status,
                order_date, invoice_date, total_amount, profile_type, receipt_classification,
@@ -437,6 +444,9 @@ def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) 
     
     try:
         df = pd.read_sql_query(query, conn, params=params)
+        # Ensure difference is numeric
+        if 'difference' in df.columns:
+            df['difference'] = pd.to_numeric(df['difference'], errors='coerce').fillna(0)
         return df
     except Exception as e:
         return pd.DataFrame()
