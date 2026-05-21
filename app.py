@@ -11,16 +11,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-st.markdown(
-    """
-    <style>
-    [data-testid="stSidebarNav"] {display: none !important;}
-    </style>
-    """,
-    unsafe_allow_name=True,
-    unsafe_allow_html=True
-)
-
 # CSS المشترك
 st.markdown(
     """
