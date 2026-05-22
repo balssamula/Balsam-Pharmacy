@@ -3,35 +3,35 @@ import pandas as pd
 from io import BytesIO
 from datetime import datetime
 from openpyxl import load_workbook
-from openpyxl.styles import PatternFill, Font, Alignment
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from utils.database import (
     get_latest_upload_summary, get_all_sessions, get_session_items, 
     lock_session, unlock_session, activate_session, delete_session,
     fetch_active_items, get_all_last_logins, get_completed_items,
-    reopen_case_by_item_key, hide_item_from_pharmacy, unhide_item_from_pharmacy,
-    lock_item, unlock_item
+    reopen_case_by_item_key
 )
 from utils.helpers import (
     is_cancelled_or_returned_status, is_pending_payment_status,
-    get_tab_label, numeric_value
+    get_tab_label
 )
+from utils.ui_components import render_metrics
 from utils.excel_processor import process_excel
 
-def export_to_excel(dataframes_dict: dict) -> bytes:
+def export_to_excel(dataframes_dict: dict, pharmacy_name: str = None) -> bytes:
     """تصدير البيانات إلى ملف Excel مع تنسيق احترافي"""
     output = BytesIO()
     
+    # الألوان لكل تبويب
     tab_colors = {
-        "الإضافات": "4472C4",
-        "الإرجاعات": "ED7D31",
-        "طلبات_بدون_فاتورة": "70AD47",
-        "فواتير_بدون_طلب": "FFC000",
-        "فواتير_بعد_آخر_طلب": "9B59B6",
-        "بانتظار_الدفع": "3498DB",
-        "ملغي_ومسترجع": "E74C3C",
-        "تم_الانتهاء": "27AE60",
-        "مقارنة_الجلسات": "2A5298"
+        "الإضافات": "4472C4",      # أزرق
+        "الإرجاعات": "ED7D31",      # برتقالي
+        "طلبات_بدون_فاتورة": "70AD47",  # أخضر
+        "فواتير_بدون_طلب": "FFC000",    # ذهبي
+        "فواتير_بعد_آخر_طلب": "9B59B6",  # بنفسجي
+        "بانتظار_الدفع": "3498DB",   # أزرق فاتح
+        "ملغي_ومسترجع": "E74C3C",    # أحمر
+        "تم_الانتهاء": "27AE60"      # أخضر داكن
     }
     
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -39,19 +39,23 @@ def export_to_excel(dataframes_dict: dict) -> bytes:
             if df is not None and not df.empty:
                 df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
                 
+                # تنسيق الورقة
                 worksheet = writer.sheets[sheet_name[:31]]
                 
+                # لون الخلفية للعنوان
                 header_fill = PatternFill(start_color=tab_colors.get(sheet_name, "2A5298"), 
                                          end_color=tab_colors.get(sheet_name, "2A5298"), 
                                          fill_type="solid")
                 header_font = Font(color="FFFFFF", bold=True, size=12)
                 
+                # تنسيق صف العناوين
                 for col in range(1, len(df.columns) + 1):
                     cell = worksheet.cell(row=1, column=col)
                     cell.fill = header_fill
                     cell.font = header_font
                     cell.alignment = Alignment(horizontal="center", vertical="center")
                 
+                # تنسيق عرض الأعمدة تلقائياً
                 for col in range(1, len(df.columns) + 1):
                     column_letter = get_column_letter(col)
                     max_length = 0
@@ -61,6 +65,7 @@ def export_to_excel(dataframes_dict: dict) -> bytes:
                             max_length = max(max_length, len(str(cell_value)))
                     worksheet.column_dimensions[column_letter].width = min(max_length + 2, 40)
                 
+                # تلوين الصفوف بالتناوب
                 for row in range(2, len(df) + 2):
                     for col in range(1, len(df.columns) + 1):
                         cell = worksheet.cell(row=row, column=col)
@@ -68,6 +73,7 @@ def export_to_excel(dataframes_dict: dict) -> bytes:
                             cell.fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
                         cell.alignment = Alignment(horizontal="center", vertical="center")
                         
+                        # تلوين الفرق حسب القيمة
                         if worksheet.cell(row=1, column=col).value == "الفرق":
                             diff_value = cell.value
                             if diff_value:
@@ -76,56 +82,12 @@ def export_to_excel(dataframes_dict: dict) -> bytes:
                                 elif diff_value < 0:
                                     cell.font = Font(color="FF0000", bold=True)
             else:
+                # ورقة فارغة مع رسالة
                 empty_df = pd.DataFrame({"ملاحظة": ["لا توجد بيانات في هذا التبويب"]})
                 empty_df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
     
     output.seek(0)
     return output.getvalue()
-
-def compare_sessions(session1_id: str, session2_id: str) -> pd.DataFrame:
-    """مقارنة بين جلستين وإظهار الاختلافات"""
-    import sqlite3
-    from utils.database import DB_PATH
-    
-    conn = sqlite3.connect(DB_PATH)
-    
-    query1 = """
-        SELECT order_number, invoice_number, sku, product_name, pharmacy_name,
-               salla_qty, abc_qty, (salla_qty - abc_qty) as difference,
-               case_type, order_status, abc_pharmacist_name
-        FROM reconciliation_items 
-        WHERE upload_batch_id = ? AND active = 1
-    """
-    df1 = pd.read_sql_query(query1, conn, params=(session1_id,))
-    df1['session'] = 'الجلسة الأولى'
-    
-    df2 = pd.read_sql_query(query1, conn, params=(session2_id,))
-    df2['session'] = 'الجلسة الثانية'
-    
-    conn.close()
-    
-    combined = pd.concat([df1, df2], ignore_index=True)
-    
-    combined['required_action'] = combined['difference'].apply(
-        lambda x: 'إضافة' if x > 0 else ('إرجاع' if x < 0 else 'مطابق')
-    )
-    
-    combined = combined.rename(columns={
-        "order_number": "رقم الطلب",
-        "invoice_number": "رقم الفاتورة",
-        "sku": "SKU",
-        "product_name": "المنتج",
-        "pharmacy_name": "الفرع",
-        "salla_qty": "كمية سلة",
-        "abc_qty": "كمية ABC",
-        "difference": "الفرق",
-        "order_status": "حالة الطلب",
-        "abc_pharmacist_name": "الصيدلي",
-        "session": "الجلسة"
-    })
-    
-    return combined[["رقم الطلب", "رقم الفاتورة", "الصيدلي", "SKU", "المنتج", 
-                     "كمية سلة", "كمية ABC", "الفرق", "حالة الطلب", "required_action", "الفرع", "الجلسة"]]
 
 def show():
     st.markdown("""
@@ -212,39 +174,6 @@ def show():
                         delete_session(session['upload_batch_id'])
                         st.rerun()
         st.markdown("---")
-    
-    # مقارنة الجلسات
-    st.markdown('<div class="section-title">🔄 مقارنة الجلسات</div>', unsafe_allow_html=True)
-    
-    sessions_list = get_all_sessions()
-    if not sessions_list.empty:
-        session_options = {f"{row['session_name']} ({row['uploaded_at'][:16]})": row['upload_batch_id'] 
-                          for _, row in sessions_list.iterrows()}
-        
-        col1, col2, col3 = st.columns([2, 2, 1])
-        with col1:
-            session1 = st.selectbox("اختر الجلسة الأولى", list(session_options.keys()), key="session1")
-        with col2:
-            session2 = st.selectbox("اختر الجلسة الثانية", list(session_options.keys()), key="session2")
-        with col3:
-            if st.button("📊 مقارنة", use_container_width=True):
-                with st.spinner("جاري المقارنة..."):
-                    comparison_df = compare_sessions(session_options[session1], session_options[session2])
-                    st.session_state.comparison_result = comparison_df
-                    st.success(f"✅ تمت المقارنة بنجاح! عدد السجلات: {len(comparison_df)}")
-        
-        if st.session_state.get('comparison_result') is not None:
-            st.dataframe(st.session_state.comparison_result, use_container_width=True)
-            
-            export_data = {"مقارنة_الجلسات": st.session_state.comparison_result}
-            excel_data = export_to_excel(export_data)
-            st.download_button(
-                "📥 تحميل تقرير المقارنة",
-                data=excel_data,
-                file_name=f"session_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
     
     if st.session_state.get('view_session_id'):
         st.markdown(f'<div class="section-title">📄 عرض الجلسة المحددة</div>', unsafe_allow_html=True)
@@ -341,7 +270,7 @@ def show():
         )
         st.session_state.show_export = False
     
-    # التبويبات مع تلوين
+    # التبويبات مع تلوين مختلف
     st.markdown("""
     <style>
     button[data-baseweb="tab"]:nth-child(1) { background-color: #4472C4; color: white; border-radius: 10px 10px 0 0; }
@@ -350,7 +279,6 @@ def show():
     button[data-baseweb="tab"]:nth-child(4) { background-color: #FFC000; color: white; border-radius: 10px 10px 0 0; }
     button[data-baseweb="tab"][aria-selected="true"] { opacity: 1; }
     button[data-baseweb="tab"][aria-selected="false"] { opacity: 0.8; }
-    div[data-testid="stDataFrame"] { direction: rtl; }
     </style>
     """, unsafe_allow_html=True)
     
@@ -365,89 +293,72 @@ def show():
         get_tab_label("✅ تم الانتهاء", len(completed_df), len(completed_df))
     ])
     
-    # دالة لعرض جدول مع أزرار رموز في النهاية
-    def render_dataframe_with_buttons(df, title=""):
-        if df.empty:
-            st.success("لا توجد بيانات في هذا القسم.")
-            return
+    def styled_frame(input_df, bg_color="#e8f4f8"):
+        if input_df.empty:
+            return input_df
+        def row_style(row):
+            case_type = row.get("نوع الحالة", "")
+            order_status = row.get("حالة الطلب", "")
+            status = row.get("الحالة", "")
+            
+            if status == "تم":
+                color = "background-color: #d4edda"
+            elif is_cancelled_or_returned_status(order_status):
+                color = "background-color: #ffe5e5"
+            elif is_pending_payment_status(order_status):
+                color = "background-color: #fff4d6"
+            elif case_type == "إرجاع":
+                color = "background-color: #ffe0df"
+            elif case_type == "إضافة":
+                color = "background-color: #dff1ff"
+            else:
+                color = "background-color: #ffe9cc"
+            return [color] * len(row)
         
-        # تجهيز البيانات للعرض
-        display_df = df.copy()
+        display_df = input_df.copy()
         display_df = display_df.rename(columns={
-            "order_number": "رقم الطلب",
-            "invoice_number": "رقم الفاتورة",
-            "sku": "SKU",
-            "product_name": "المنتج",
-            "pharmacy_name": "الفرع",
-            "salla_qty": "كمية سلة",
-            "abc_qty": "كمية ABC",
-            "difference": "الفرق",
-            "order_status": "حالة الطلب",
-            "case_label": "نوع الحالة",
-            "status": "الحالة"
+            "order_number": "رقم الطلب", "invoice_number": "رقم الفاتورة", "sku": "SKU",
+            "product_name": "المنتج", "pharmacy_name": "الفرع", "salla_qty": "كمية سلة",
+            "abc_qty": "كمية ABC", "difference": "الفرق", "case_label": "نوع الحالة",
+            "status": "الحالة", "performed_by": "تم بواسطة", "performed_at": "تاريخ التنفيذ",
+            "order_status": "حالة الطلب", "city": "المدينة", "profile_type": "نوع البروفايل"
         })
-        
-        # إضافة عمود الأزرار
-        display_df["الإجراءات"] = ""
-        
-        # عرض الجدول
-        st.dataframe(
-            display_df[["رقم الطلب", "رقم الفاتورة", "SKU", "المنتج", "كمية سلة", "كمية ABC", "الفرق", "حالة الطلب", "الفرع", "نوع الحالة", "الحالة", "الإجراءات"]],
-            use_container_width=True,
-            height=400
-        )
-        
-        # عرض الأزرار أسفل الجدول (لكل صف على حدة)
-        st.markdown("### 🔧 إجراءات الصفوف")
-        
-        for idx, row in df.iterrows():
-            col1, col2, col3, col4, col5, col6 = st.columns([2, 1, 1, 1, 1, 4])
-            
-            with col1:
-                st.write(f"طلب: {row['order_number']} | SKU: {row['sku']}")
-            
-            with col2:
-                is_hidden = row.get('hidden_from_pharmacy', 0) == 1
-                if is_hidden:
-                    st.button("👁️", key=f"unhide_{idx}", help="إظهار للصيدلية", use_container_width=True)
-                else:
-                    st.button("🙈", key=f"hide_{idx}", help="إخفاء من الصيدلية", use_container_width=True)
-            
-            with col3:
-                is_locked = row.get('is_item_locked', 0) == 1
-                if is_locked:
-                    st.button("🔓", key=f"unlock_{idx}", help="فتح التعديل", use_container_width=True)
-                else:
-                    st.button("🔒", key=f"lock_{idx}", help="قفل التعديل", use_container_width=True)
-            
-            with col4:
-                if row['status'] == "تم":
-                    st.button("🔄", key=f"reopen_{idx}", help="إعادة فتح", use_container_width=True)
-            
-            with col5:
-                note_key = f"note_{idx}"
-                note_value = st.text_input("", key=note_key, placeholder="ملحوظة", label_visibility="collapsed")
-                st.button("💾", key=f"save_{idx}", help="حفظ الملحوظة", use_container_width=True)
-            
-            st.markdown("---")
+        return display_df.style.apply(row_style, axis=1)
     
     with tab1:
-        render_dataframe_with_buttons(additions_df)
+        st.dataframe(styled_frame(additions_df), use_container_width=True)
     with tab2:
-        render_dataframe_with_buttons(returns_df)
+        st.dataframe(styled_frame(returns_df), use_container_width=True)
     with tab3:
-        render_dataframe_with_buttons(orphan_salla_df)
+        st.dataframe(styled_frame(orphan_salla_df), use_container_width=True)
     with tab4:
-        render_dataframe_with_buttons(orphan_abc_df)
+        st.dataframe(styled_frame(orphan_abc_df), use_container_width=True)
     with tab5:
-        render_dataframe_with_buttons(post_cutoff_df)
+        st.dataframe(styled_frame(post_cutoff_df), use_container_width=True)
     with tab6:
-        render_dataframe_with_buttons(payment_df)
+        st.dataframe(styled_frame(payment_df), use_container_width=True)
     with tab7:
-        render_dataframe_with_buttons(cancelled_df)
+        st.dataframe(styled_frame(cancelled_df), use_container_width=True)
     with tab8:
         if not completed_df.empty:
-            render_dataframe_with_buttons(completed_df)
+            st.dataframe(styled_frame(completed_df), use_container_width=True)
+            st.markdown("#### 🔓 إعادة فتح الطلبات المكتملة")
+            for idx, row in completed_df.iterrows():
+                col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 1])
+                with col1:
+                    st.write(f"طلب: {row['order_number']}")
+                with col2:
+                    st.write(f"SKU: {row['sku']}")
+                with col3:
+                    st.write(f"الفرع: {row['pharmacy_name']}")
+                with col4:
+                    st.write(f"تم بواسطة: {row['performed_by']}")
+                with col5:
+                    if st.button(f"🔓 إعادة فتح", key=f"reopen_completed_{idx}"):
+                        if 'item_key' in row:
+                            reopen_case_by_item_key(row['item_key'])
+                            st.rerun()
+                st.divider()
         else:
             st.info("لا توجد طلبات مكتملة")
     
