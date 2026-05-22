@@ -323,14 +323,14 @@ def show():
     """, unsafe_allow_html=True)
     
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-        f"📈 الإضافات ({len(additions_df)})",
-        f"📉 الإرجاعات ({len(returns_df)})",
-        f"📦 طلبات بدون فاتورة ({len(orphan_salla_df)})",
-        f"🧾 فواتير بدون طلب ({len(orphan_abc_df)})",
-        f"⏰ فواتير بعد آخر طلب ({len(post_cutoff_df)})",
-        f"💰 بانتظار الدفع ({len(payment_df)})",
-        f"⚠️ ملغي/مسترجع ({len(cancelled_df)})",
-        f"✅ تم الانتهاء ({len(completed_df)})"
+        get_tab_label("📈 الإضافات", len(additions_df[additions_df["status"] == "تم"]), len(additions_df)),
+        get_tab_label("📉 الإرجاعات", len(returns_df[returns_df["status"] == "تم"]), len(returns_df)),
+        get_tab_label("📦 طلبات بدون فاتورة", len(orphan_salla_df[orphan_salla_df["status"] == "تم"]), len(orphan_salla_df)),
+        get_tab_label("🧾 فواتير بدون طلب", len(orphan_abc_df[orphan_abc_df["status"] == "تم"]), len(orphan_abc_df)),
+        get_tab_label("⏰ فواتير بعد آخر طلب", len(post_cutoff_df[post_cutoff_df["status"] == "تم"]), len(post_cutoff_df)),
+        get_tab_label("💰 بانتظار الدفع", 0, len(payment_df)),
+        get_tab_label("⚠️ ملغي/مسترجع", 0, len(cancelled_df)),
+        get_tab_label("✅ تم الانتهاء", len(completed_df), len(completed_df))
     ])
     
     # ========== دالة عرض الجدول مع تظليل الصفوف المكتملة ==========
