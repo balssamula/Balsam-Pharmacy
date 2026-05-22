@@ -379,12 +379,6 @@ def show():
                 color = "background-color: #ffe9cc"
             return [color] * len(row)
 
-    # دالة عرض الجدول مع النقر على الصف
-    def render_table_with_click(df, tab_name):
-        if df.empty:
-            st.success("لا توجد بيانات في هذا القسم.")
-            return
-        
         display_df = input_df.copy()
         display_df = display_df.rename(columns={
             "order_number": "رقم الطلب", "invoice_number": "رقم الفاتورة", "sku": "SKU",
@@ -394,7 +388,16 @@ def show():
             "order_status": "حالة الطلب", "city": "المدينة", "profile_type": "نوع البروفايل"
         })
         return display_df.style.apply(row_style, axis=1)
-    
+
+    # دالة عرض الجدول مع النقر على الصف
+    def render_table_with_click(df, tab_name):
+        if df.empty:
+            st.success("لا توجد بيانات في هذا القسم.")
+            return
+
+        # تنسيق الجدول
+        styled_df = styled_dataframe(df)
+        if styled_df is not None:   
         # عرض الجدول
         event = st.dataframe(
             display_df,
