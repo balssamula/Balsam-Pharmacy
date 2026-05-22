@@ -3,7 +3,7 @@ import pandas as pd
 from io import BytesIO
 from datetime import datetime
 from openpyxl import load_workbook
-from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
 from utils.database import (
     get_latest_upload_summary, get_all_sessions, get_session_items, 
@@ -113,7 +113,7 @@ def show():
                 with st.spinner("جاري معالجة الملف..."):
                     results, upload_batch_id = process_excel(uploaded_file, st.session_state.username)
                 if results is not None:
-                    st.success(f"✅ تمت المعالجة بنجاح! عدد الحالات: {len(results)}")
+                    st.success(f"✅ تمت المعالجة بنجاح!")
                     st.balloons()
                     st.rerun()
     
@@ -304,27 +304,74 @@ def show():
         )
         st.session_state.show_export = False
     
-    # ========== تنسيق التبويبات الملونة ==========
+    # ========== تلوين التبويبات - التبويبات الرئيسية مميزة ==========
     st.markdown("""
     <style>
-    button[data-baseweb="tab"]:nth-child(1) button { background-color: #4472C4; color: white; border-radius: 10px 10px 0 0; }
-    button[data-baseweb="tab"]:nth-child(2) button { background-color: #ED7D31; color: white; border-radius: 10px 10px 0 0; }
-    button[data-baseweb="tab"]:nth-child(3) button { background-color: #70AD47; color: white; border-radius: 10px 10px 0 0; }
-    button[data-baseweb="tab"]:nth-child(4) button { background-color: #FFC000; color: white; border-radius: 10px 10px 0 0; }
-    button[data-baseweb="tab"][aria-selected="true"] button { opacity: 1; }
-    button[data-baseweb="tab"][aria-selected="false"] button { opacity: 0.8; }
+    /* التبويبات الرئيسية بألوان مميزة وخلفية */
+    button[data-baseweb="tab"]:nth-child(1) button { 
+        background-color: #4472C4 !important; 
+        color: white !important; 
+        border-radius: 10px 10px 0 0 !important;
+        font-weight: bold !important;
+        border: 2px solid #4472C4 !important;
+    }
+    button[data-baseweb="tab"]:nth-child(2) button { 
+        background-color: #ED7D31 !important; 
+        color: white !important; 
+        border-radius: 10px 10px 0 0 !important;
+        font-weight: bold !important;
+        border: 2px solid #ED7D31 !important;
+    }
+    button[data-baseweb="tab"]:nth-child(3) button { 
+        background-color: #70AD47 !important; 
+        color: white !important; 
+        border-radius: 10px 10px 0 0 !important;
+        font-weight: bold !important;
+        border: 2px solid #70AD47 !important;
+    }
+    button[data-baseweb="tab"]:nth-child(4) button { 
+        background-color: #FFC000 !important; 
+        color: white !important; 
+        border-radius: 10px 10px 0 0 !important;
+        font-weight: bold !important;
+        border: 2px solid #FFC000 !important;
+    }
+    /* باقي التبويبات بلون رمادي فاتح */
+    button[data-baseweb="tab"]:nth-child(5) button,
+    button[data-baseweb="tab"]:nth-child(6) button,
+    button[data-baseweb="tab"]:nth-child(7) button,
+    button[data-baseweb="tab"]:nth-child(8) button { 
+        background-color: #6c757d !important; 
+        color: white !important; 
+        border-radius: 10px 10px 0 0 !important;
+        border: 2px solid #6c757d !important;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] button { 
+        opacity: 1 !important;
+        transform: translateY(-2px);
+        transition: all 0.2s ease;
+    }
+    button[data-baseweb="tab"][aria-selected="false"] button { 
+        opacity: 0.85 !important; 
+    }
+    button[data-baseweb="tab"] button:hover {
+        opacity: 1 !important;
+        transform: translateY(-2px);
+        transition: all 0.2s ease;
+    }
     </style>
     """, unsafe_allow_html=True)
     
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-        get_tab_label("📈 الإضافات", len(additions_df[additions_df["status"] == "تم"]), len(additions_df)),
-        get_tab_label("📉 الإرجاعات", len(returns_df[returns_df["status"] == "تم"]), len(returns_df)),
-        get_tab_label("📦 طلبات بدون فاتورة", len(orphan_salla_df[orphan_salla_df["status"] == "تم"]), len(orphan_salla_df)),
-        get_tab_label("🧾 فواتير بدون طلب", len(orphan_abc_df[orphan_abc_df["status"] == "تم"]), len(orphan_abc_df)),
-        get_tab_label("⏰ فواتير بعد آخر طلب", len(post_cutoff_df[post_cutoff_df["status"] == "تم"]), len(post_cutoff_df)),
-        get_tab_label("💰 بانتظار الدفع", 0, len(payment_df)),
-        get_tab_label("⚠️ ملغي/مسترجع", 0, len(cancelled_df)),
-        get_tab_label("✅ تم الانتهاء", len(completed_df), len(completed_df))
+    # إنشاء التبويبات مع أسماء واضحة
+    tabs = st.tabs([
+        f"📈 الإضافات ({len(additions_df)})",
+        f"📉 الإرجاعات ({len(returns_df)})",
+        f"📦 طلبات بدون فاتورة ({len(orphan_salla_df)})",
+        f"🧾 فواتير بدون طلب ({len(orphan_abc_df)})",
+        f"⏰ فواتير بعد آخر طلب ({len(post_cutoff_df)})",
+        f"💰 بانتظار الدفع ({len(payment_df)})",
+        f"⚠️ ملغي/مسترجع ({len(cancelled_df)})",
+        f"✅ تم الانتهاء ({len(completed_df)})"
     ])
     
     # ========== دالة تنسيق الجدول مع تظليل الصفوف ==========
@@ -380,7 +427,10 @@ def show():
                     # نافذة الإجراءات المنبثقة
                     st.markdown(f"""
                     <div style="background:#f0f2f6;border-radius:10px;padding:1rem;margin-top:1rem;border-right:4px solid #1f7a8c;">
-                        <h4 style="margin:0 0 0.5rem 0;">🛠️ إجراءات الصف المحدد: طلب رقم {row['order_number']}</h4>
+                        <h4 style="margin:0 0 0.5rem 0;">🛠️ إجراءات الصف المحدد</h4>
+                        <p><strong>📋 رقم الطلب:</strong> {row['order_number']} | 
+                        <strong>🏷️ SKU:</strong> {row['sku']} | 
+                        <strong>📦 المنتج:</strong> {row['product_name'][:50]}</p>
                     </div>
                     """, unsafe_allow_html=True)
                     
@@ -388,7 +438,7 @@ def show():
                     
                     # زر الإخفاء/الإظهار
                     is_hidden = row.get('hidden_from_pharmacy', 0) == 1
-                    if cols[0].button("🙈 إخفاء من الصيدلية" if not is_hidden else "👁️ إظهار للصيدلية", key=f"hide_{tab_name}_{selected_idx}"):
+                    if cols[0].button("🙈 إخفاء من الصيدلية" if not is_hidden else "👁️ إظهار للصيدلية", key=f"hide_{tab_name}_{selected_idx}", use_container_width=True):
                         if is_hidden:
                             unhide_item_from_pharmacy(item_key)
                         else:
@@ -397,7 +447,7 @@ def show():
                     
                     # زر القفل/الفتح
                     is_locked = row.get('is_item_locked', 0) == 1
-                    if cols[1].button("🔒 قفل التعديل" if not is_locked else "🔓 فتح التعديل", key=f"lock_{tab_name}_{selected_idx}"):
+                    if cols[1].button("🔒 قفل التعديل" if not is_locked else "🔓 فتح التعديل", key=f"lock_{tab_name}_{selected_idx}", use_container_width=True):
                         if is_locked:
                             unlock_item(item_key)
                         else:
@@ -406,31 +456,32 @@ def show():
                     
                     # زر إعادة الفتح (للمكتمل فقط)
                     if row['status'] == "تم":
-                        if cols[2].button("🔄 إعادة فتح", key=f"reopen_{tab_name}_{selected_idx}"):
+                        if cols[2].button("🔄 إعادة فتح", key=f"reopen_{tab_name}_{selected_idx}", use_container_width=True):
                             reopen_case_by_item_key(item_key)
                             st.rerun()
                     
                     # حفظ الملحوظة
                     note = cols[3].text_input("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=f"note_{tab_name}_{selected_idx}")
-                    if cols[4].button("💾 حفظ الملحوظة", key=f"save_note_{tab_name}_{selected_idx}"):
+                    if cols[4].button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
                         save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note)
                         st.rerun()
     
-    with tab1:
+    # عرض التبويبات
+    with tabs[0]:
         render_table_with_click(additions_df, "additions")
-    with tab2:
+    with tabs[1]:
         render_table_with_click(returns_df, "returns")
-    with tab3:
+    with tabs[2]:
         render_table_with_click(orphan_salla_df, "orphan_salla")
-    with tab4:
+    with tabs[3]:
         render_table_with_click(orphan_abc_df, "orphan_abc")
-    with tab5:
+    with tabs[4]:
         render_table_with_click(post_cutoff_df, "post_cutoff")
-    with tab6:
+    with tabs[5]:
         render_table_with_click(payment_df, "payment")
-    with tab7:
+    with tabs[6]:
         render_table_with_click(cancelled_df, "cancelled")
-    with tab8:
+    with tabs[7]:
         if not completed_df.empty:
             render_table_with_click(completed_df, "completed")
         else:
