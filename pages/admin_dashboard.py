@@ -3,7 +3,7 @@ import pandas as pd
 from io import BytesIO
 from datetime import datetime
 from openpyxl import load_workbook
-from openpyxl.styles import PatternFill, Font, Alignment
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from utils.database import (
     get_latest_upload_summary, get_all_sessions, get_session_items, 
@@ -16,9 +16,10 @@ from utils.helpers import (
     is_cancelled_or_returned_status, is_pending_payment_status,
     get_tab_label, numeric_value
 )
+from utils.ui_components import render_metrics
 from utils.excel_processor import process_excel
 
-def export_to_excel(dataframes_dict: dict) -> bytes:
+def export_to_excel(dataframes_dict: dict, pharmacy_name: str = None) -> bytes:
     output = BytesIO()
     tab_colors = {
         "الإضافات": "4472C4", "الإرجاعات": "ED7D31",
@@ -113,7 +114,7 @@ def show():
                 with st.spinner("جاري معالجة الملف..."):
                     results, upload_batch_id = process_excel(uploaded_file, st.session_state.username)
                 if results is not None:
-                    st.success(f"✅ تمت المعالجة بنجاح!")
+                    st.success(f"✅ تمت المعالجة بنجاح! عدد الحالات: {len(results)}")
                     st.balloons()
                     st.rerun()
     
@@ -300,6 +301,7 @@ def show():
             "📥 تحميل التقرير",
             data=excel_data,
             file_name=f"balsam_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
         st.session_state.show_export = False
