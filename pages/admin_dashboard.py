@@ -364,28 +364,47 @@ def show():
             return None
         
         def highlight_rows(row):
-            # 👇 التصحيح: البحث بالأسماء العربية الجديدة بعد الـ Rename لضمان التقاط الحالة بدقة
-            حالة_الطلب = row.get('الحالة')
-            نوع_الحالة = row.get('نوع الحالة')
-    
-            if حالة_الطلب == "تم":
-                if نوع_الحالة == "إضافة":
-                    return ['background-color: #d4edda'] * len(row) # أخضر فاتح للمكتمل
-                elif نوع_الحالة == "إرجاع":
-                    return ['background-color: #f8d7da'] * len(row) # أحمر فاتح للإرجاع المكتمل
-                else:
-                    return ['background-color: #d1ecf1'] * len(row) # أزرق فاتح للحالات الأخرى
-            
-            return [''] * len(row) # بدون تلوين للحالات قيد المتابعة
+            # قراءة الحقول بالأسماء العربية المحدثة بدقة مع إزالة المسافات
+            حالة_التنفيذ = str(row.get('الحالة', '')).strip()
+            نوع_الحالة = str(row.get('نوع الحالة', '')).strip()
+            حالة_الطلب = str(row.get('حالة الطلب', '')).strip()
         
+            # 1. إذا اكتمل الإجراء بواسطة الصيدلي (أخضر فاتح)
+            if حالة_التنفيذ == "تم":
+                return ['background-color: #d4edda; color: #155724; font-weight: 500;'] * len(row)
+            
+            # 2. إذا كان الطلب ملغياً أو مسترجعاً من العميل (أحمر فاتح جداً)
+            if any(word in حالة_الطلب for word in ["ملغي", "مسترجع"]):
+                return ['background-color: #f8d7da; color: #721c24;'] * len(row)
+            
+            # 3. إذا كان الطلب بانتظار الدفع (أصفر خفيف)
+            if "بانتظار الدفع" in حالة_الطلب:
+                return ['background-color: #fff3cd; color: #856404;'] * len(row)
+            
+            # 4. التمييز اللوني للحالات النشطة قيد المتابعة
+            if نوع_الحالة == "إرجاع":
+                return ['background-color: #ffe0df; color: #491217;'] * len(row) # برتقالي محمر خفيف
+            elif نوع_الحالة == "إضافة":
+                return ['background-color: #dff1ff; color: #084298;'] * len(row) # أزرق مريح
+            
+            return [''] * len(row)
+
+        # إجراء الـ Rename وتوحيد الأسماء أولاً
         display_df = input_df.copy()
         display_df = display_df.rename(columns={
-            "order_number": "رقم الطلب", "invoice_number": "رقم الفاتورة",
-            "sku": "SKU", "product_name": "المنتج", "pharmacy_name": "الفرع",
-            "salla_qty": "كمية سلة", "abc_qty": "كمية ABC",
-            "difference": "الفرق", "order_status": "حالة الطلب",
-            "case_label": "نوع الحالة", "status": "الحالة"
+            "order_number": "رقم الطلب", 
+            "invoice_number": "رقم الفاتورة", 
+            "sku": "SKU",
+            "product_name": "المنتج", 
+            "pharmacy_name": "الفرع", 
+            "salla_qty": "كمية سلة",
+            "abc_qty": "كمية ABC", 
+            "difference": "الفرق", 
+            "case_label": "نوع الحالة",
+            "status": "الحالة",
+            "order_status": "حالة الطلب"
         })
+    
         return display_df.style.apply(highlight_rows, axis=1)
     
     # ========== دالة عرض الجدول مع النقر ==========
