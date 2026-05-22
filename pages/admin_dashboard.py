@@ -53,7 +53,8 @@ def export_to_excel(dataframes_dict: dict) -> bytes:
                         if row % 2 == 0:
                             cell.fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
                         cell.alignment = Alignment(horizontal="center", vertical="center")
-                        if worksheet.cell(row=1, column=col).value == "الفرق":
+                        column_title = str(worksheet.cell(row=1, column=col).value).strip()
+                        if column_title == "الفرق":
                             diff_value = cell.value
                             if diff_value:
                                 if diff_value > 0:
@@ -363,14 +364,19 @@ def show():
             return None
         
         def highlight_rows(row):
-            if row.get('status') == "تم":
-                if row.get('case_type') == "addition":
-                    return ['background-color: #d4edda'] * len(row)
-                elif row.get('case_type') == "return":
-                    return ['background-color: #f8d7da'] * len(row)
+            # 👇 التصحيح: البحث بالأسماء العربية الجديدة بعد الـ Rename لضمان التقاط الحالة بدقة
+            حالة_الطلب = row.get('الحالة')
+            نوع_الحالة = row.get('نوع الحالة')
+    
+            if حالة_الطلب == "تم":
+                if نوع_الحالة == "إضافة":
+                    return ['background-color: #d4edda'] * len(row) # أخضر فاتح للمكتمل
+                elif نوع_الحالة == "إرجاع":
+                    return ['background-color: #f8d7da'] * len(row) # أحمر فاتح للإرجاع المكتمل
                 else:
-                    return ['background-color: #d1ecf1'] * len(row)
-            return [''] * len(row)
+                    return ['background-color: #d1ecf1'] * len(row) # أزرق فاتح للحالات الأخرى
+            
+            return [''] * len(row) # بدون تلوين للحالات قيد المتابعة
         
         display_df = input_df.copy()
         display_df = display_df.rename(columns={
@@ -426,7 +432,6 @@ def show():
                             unhide_item_from_pharmacy(item_key)
                         else:
                             hide_item_from_pharmacy(item_key, st.session_state.username)
-                        st.rerun()
                     
                     # زر القفل/الفتح
                     is_locked = row.get('is_item_locked', 0) == 1
@@ -435,19 +440,16 @@ def show():
                             unlock_item(item_key)
                         else:
                             lock_item(item_key, st.session_state.username)
-                        st.rerun()
                     
                     # زر إعادة الفتح (للمكتمل فقط)
                     if row['status'] == "تم":
                         if cols[2].button("🔄 إعادة فتح", key=f"reopen_{tab_name}_{selected_idx}", use_container_width=True):
                             reopen_case_by_item_key(item_key)
-                            st.rerun()
                     
                     # حفظ الملحوظة
                     note = cols[3].text_input("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=f"note_{tab_name}_{selected_idx}")
                     if cols[4].button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
                         save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note)
-                        st.rerun()
     
     # عرض التبويبات
     with tabs[0]:
