@@ -113,7 +113,7 @@ def show():
                 with st.spinner("جاري معالجة الملف..."):
                     results, upload_batch_id = process_excel(uploaded_file, st.session_state.username)
                 if results is not None:
-                    st.success(f"✅ تمت المعالجة بنجاح!")
+                    st.success(f"✅ تمت المعالجة بنجاح! عدد الحالات: {len(results)}")
                     st.balloons()
                     st.rerun()
     
@@ -311,10 +311,6 @@ def show():
     button[data-baseweb="tab"]:nth-child(2) button { background-color: #ED7D31; color: white; border-radius: 10px 10px 0 0; }
     button[data-baseweb="tab"]:nth-child(3) button { background-color: #70AD47; color: white; border-radius: 10px 10px 0 0; }
     button[data-baseweb="tab"]:nth-child(4) button { background-color: #FFC000; color: white; border-radius: 10px 10px 0 0; }
-    button[data-baseweb="tab"]:nth-child(5) button { background-color: #9B59B6; color: white; border-radius: 10px 10px 0 0; }
-    button[data-baseweb="tab"]:nth-child(6) button { background-color: #3498DB; color: white; border-radius: 10px 10px 0 0; }
-    button[data-baseweb="tab"]:nth-child(7) button { background-color: #E74C3C; color: white; border-radius: 10px 10px 0 0; }
-    button[data-baseweb="tab"]:nth-child(8) button { background-color: #27AE60; color: white; border-radius: 10px 10px 0 0; }
     button[data-baseweb="tab"][aria-selected="true"] button { opacity: 1; }
     button[data-baseweb="tab"][aria-selected="false"] button { opacity: 0.8; }
     </style>
