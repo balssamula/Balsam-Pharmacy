@@ -306,61 +306,44 @@ def show():
     
     # ========== تلوين التبويبات - التبويبات الرئيسية مميزة ==========
     st.markdown("""
-    <style>
-    /* التبويبات الرئيسية بألوان مميزة وخلفية */
-    button[data-baseweb="tab"]:nth-child(1) button { 
-        background-color: #4472C4 !important; 
-        color: white !important; 
-        border-radius: 10px 10px 0 0 !important;
-        font-weight: bold !important;
-        border: 2px solid #4472C4 !important;
-    }
-    button[data-baseweb="tab"]:nth-child(2) button { 
-        background-color: #ED7D31 !important; 
-        color: white !important; 
-        border-radius: 10px 10px 0 0 !important;
-        font-weight: bold !important;
-        border: 2px solid #ED7D31 !important;
-    }
-    button[data-baseweb="tab"]:nth-child(3) button { 
-        background-color: #70AD47 !important; 
-        color: white !important; 
-        border-radius: 10px 10px 0 0 !important;
-        font-weight: bold !important;
-        border: 2px solid #70AD47 !important;
-    }
-    button[data-baseweb="tab"]:nth-child(4) button { 
-        background-color: #FFC000 !important; 
-        color: white !important; 
-        border-radius: 10px 10px 0 0 !important;
-        font-weight: bold !important;
-        border: 2px solid #FFC000 !important;
-    }
-    /* باقي التبويبات بلون رمادي فاتح */
-    button[data-baseweb="tab"]:nth-child(5) button,
-    button[data-baseweb="tab"]:nth-child(6) button,
-    button[data-baseweb="tab"]:nth-child(7) button,
-    button[data-baseweb="tab"]:nth-child(8) button { 
-        background-color: #6c757d !important; 
-        color: white !important; 
-        border-radius: 10px 10px 0 0 !important;
-        border: 2px solid #6c757d !important;
-    }
-    button[data-baseweb="tab"][aria-selected="true"] button { 
-        opacity: 1 !important;
-        transform: translateY(-2px);
-        transition: all 0.2s ease;
-    }
-    button[data-baseweb="tab"][aria-selected="false"] button { 
-        opacity: 0.85 !important; 
-    }
-    button[data-baseweb="tab"] button:hover {
-        opacity: 1 !important;
-        transform: translateY(-2px);
-        transition: all 0.2s ease;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+     <style>
+     /* التبويبات الرئيسية بألوان مميزة وخلفية متوافقة */ 
+     button[data-baseweb="tab"]:nth-child(1) { 
+         background-color: #4472C4 !important; 
+         color: white !important; 
+         border-radius: 10px 10px 0 0 !important;
+         font-weight: bold !important;
+     }
+     button[data-baseweb="tab"]:nth-child(2) { 
+         background-color: #ED7D31 !important; 
+         color: white !important; 
+         border-radius: 10px 10px 0 0 !important;
+         font-weight: bold !important;
+     }
+     button[data-baseweb="tab"]:nth-child(3) { 
+         background-color: #70AD47 !important; 
+         color: white !important; 
+         border-radius: 10px 10px 0 0 !important;
+         font-weight: bold !important;
+     }
+     button[data-baseweb="tab"]:nth-child(4) { 
+         background-color: #FFC000 !important; 
+         color: white !important; 
+         border-radius: 10px 10px 0 0 !important;
+         font-weight: bold !important;
+     }
+ 
+     /* تأثيرات التبويب النشط وغير النشط عند التحويم */
+     button[data-baseweb="tab"][aria-selected="true"] { 
+         opacity: 1 !important; 
+         transform: translateY(-2px);
+         transition: all 0.2s ease;
+     }
+     button[data-baseweb="tab"][aria-selected="false"] { 
+         opacity: 0.8 !important; 
+     }
+     </style>
+     """, unsafe_allow_html=True)
     
     # إنشاء التبويبات مع أسماء واضحة
     tabs = st.tabs([
