@@ -1,12 +1,31 @@
 import os
 import sqlite3
 import uuid
+import socket
+import requests
 from datetime import datetime, timedelta
 import pandas as pd
 
 DB_DIR = "data"
 DB_PATH = os.path.join(DB_DIR, "pharmacy_reconciliation.db")
 PHARMACY_COUNT = 17
+
+def get_client_ip():
+    """الحصول على عنوان IP الخاص بالجهاز"""
+    try:
+        # محاولة الحصول على IP من خدمة خارجية
+        response = requests.get('https://api.ipify.org', timeout=5)
+        if response.status_code == 200:
+            return response.text
+    except:
+        pass
+    
+    try:
+        # محاولة الحصول على IP المحلي
+        hostname = socket.gethostname()
+        return socket.gethostbyname(hostname)
+    except:
+        return "غير معروف"
 
 def now_str():
     utc_now = datetime.utcnow()
@@ -34,12 +53,31 @@ def init_database():
             role TEXT NOT NULL,
             pharmacist_name TEXT DEFAULT '',
             last_login TEXT DEFAULT '',
+            last_ip TEXT DEFAULT '',
             can_view_dashboard INTEGER DEFAULT 0,
             can_view_balances INTEGER DEFAULT 0,
             can_view_monitoring INTEGER DEFAULT 0,
             can_manage_users INTEGER DEFAULT 0,
             can_view_pharmacy_actions INTEGER DEFAULT 0,
             is_active INTEGER DEFAULT 1
+        )
+    """)
+
+    # Add last_ip column if not exists
+    cur.execute("PRAGMA table_info(users)")
+    existing_columns = [row[1] for row in cur.fetchall()]
+    if "last_ip" not in existing_columns:
+        cur.execute("ALTER TABLE users ADD COLUMN last_ip TEXT DEFAULT ''")
+
+    # Login history table
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS login_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT,
+            role TEXT,
+            ip_address TEXT,
+            login_time TEXT,
+            user_agent TEXT DEFAULT ''
         )
     """)
 
@@ -119,7 +157,10 @@ def init_database():
             shipping_cost REAL DEFAULT 0,
             tax REAL DEFAULT 0,
             coupon_discount REAL DEFAULT 0,
-            offer_discount REAL DEFAULT 0
+            offer_discount REAL DEFAULT 0,
+            is_item_locked INTEGER DEFAULT 0,
+            item_locked_by TEXT DEFAULT '',
+            item_locked_at TEXT DEFAULT ''
         )
     """)
 
@@ -154,6 +195,48 @@ def init_database():
     conn.commit()
     conn.close()
 
+def record_login_history(username: str, role: str, ip_address: str = None, user_agent: str = None):
+    """تسجيل محاولة الدخول"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO login_history (username, role, ip_address, login_time, user_agent)
+        VALUES (?, ?, ?, ?, ?)
+    """, (username, role, ip_address or get_client_ip(), now_str(), user_agent or ''))
+    conn.commit()
+    conn.close()
+
+def get_login_history(limit: int = 50) -> pd.DataFrame:
+    """الحصول على سجل الدخول"""
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query(f"""
+        SELECT username, role, ip_address, login_time
+        FROM login_history
+        ORDER BY login_time DESC
+        LIMIT {limit}
+    """, conn)
+    conn.close()
+    return df
+
+def get_manager_last_login() -> dict:
+    """الحصول على آخر دخول للمدير العام"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT last_login, last_ip, pharmacist_name
+        FROM users WHERE username = 'manager'
+    """)
+    result = cur.fetchone()
+    conn.close()
+    if result:
+        return {
+            "last_login": result[0] or "لم يدخل بعد",
+            "last_ip": result[1] or "غير معروف",
+            "pharmacist_name": result[2] or "مدير عام"
+        }
+    return {"last_login": "لم يدخل بعد", "last_ip": "غير معروف", "pharmacist_name": "مدير عام"}
+
+# باقي الدوال كما هي (get_user_permissions, update_user, etc.)
 def get_user_permissions(username: str):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -250,7 +333,7 @@ def delete_user(username: str):
 def get_all_users():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("""
-        SELECT username, role, pharmacist_name, last_login, is_active,
+        SELECT username, role, pharmacist_name, last_login, last_ip, is_active,
                can_view_dashboard, can_view_balances, can_view_monitoring, 
                can_manage_users, can_view_pharmacy_actions
         FROM users ORDER BY role, username
@@ -258,13 +341,14 @@ def get_all_users():
     conn.close()
     return df
 
-def update_last_access(pharmacy_name: str, pharmacist_name: str):
+def update_last_access(pharmacy_name: str, pharmacist_name: str, ip_address: str = None):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     current_time = now_str()
+    current_ip = ip_address or get_client_ip()
     cur.execute(
-        "UPDATE users SET pharmacist_name = ?, last_login = ? WHERE username = ?",
-        (pharmacist_name, current_time, pharmacy_name),
+        "UPDATE users SET pharmacist_name = ?, last_login = ?, last_ip = ? WHERE username = ?",
+        (pharmacist_name, current_time, current_ip, pharmacy_name),
     )
     cur.execute(
         """
@@ -278,6 +362,7 @@ def update_last_access(pharmacy_name: str, pharmacist_name: str):
     )
     conn.commit()
     conn.close()
+    return current_ip
 
 def fetch_user(username: str, password: str):
     conn = sqlite3.connect(DB_PATH)
@@ -410,6 +495,7 @@ def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) 
                order_date, invoice_date, total_amount, profile_type, receipt_classification,
                pharmacist_note, item_key, abc_pharmacy_name, abc_pharmacist_name, hidden_from_pharmacy,
                payment_method, discount, shipping_cost, tax, coupon_discount, offer_discount,
+               is_item_locked,
                0 as is_locked
         FROM reconciliation_items WHERE active = 1 AND upload_batch_id = ?
     """
@@ -427,6 +513,8 @@ def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) 
         df = pd.read_sql_query(query, conn, params=params)
         if 'difference' in df.columns:
             df['difference'] = pd.to_numeric(df['difference'], errors='coerce').fillna(0)
+        if 'is_item_locked' not in df.columns:
+            df['is_item_locked'] = 0
         return df
     except Exception as e:
         return pd.DataFrame()
@@ -504,23 +592,10 @@ def get_tab_completed_counts(pharmacy_name: str = None) -> dict:
     finally:
         conn.close()
 
-# ========== الدوال المضافة للتحكم في قفل العناصر ==========
 def lock_item(item_key: str, locked_by: str):
     """قفل عنصر لمنع التعديل عليه من الصيدلية"""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    
-    # التحقق من وجود أعمدة القفل
-    cur.execute("PRAGMA table_info(reconciliation_items)")
-    existing_columns = [row[1] for row in cur.fetchall()]
-    
-    if "is_item_locked" not in existing_columns:
-        cur.execute("ALTER TABLE reconciliation_items ADD COLUMN is_item_locked INTEGER DEFAULT 0")
-    if "item_locked_by" not in existing_columns:
-        cur.execute("ALTER TABLE reconciliation_items ADD COLUMN item_locked_by TEXT DEFAULT ''")
-    if "item_locked_at" not in existing_columns:
-        cur.execute("ALTER TABLE reconciliation_items ADD COLUMN item_locked_at TEXT DEFAULT ''")
-    
     cur.execute("""
         UPDATE reconciliation_items 
         SET is_item_locked = 1, item_locked_by = ?, item_locked_at = ?
