@@ -73,7 +73,7 @@ def init_database():
         )
     """)
 
-    # Reconciliation items table with all columns
+    # Reconciliation items table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS reconciliation_items (
             item_key TEXT PRIMARY KEY,
@@ -119,51 +119,9 @@ def init_database():
             shipping_cost REAL DEFAULT 0,
             tax REAL DEFAULT 0,
             coupon_discount REAL DEFAULT 0,
-            offer_discount REAL DEFAULT 0,
-            batch_no TEXT DEFAULT '',
-            expiry_date TEXT DEFAULT '',
-            sale_price REAL DEFAULT 0,
-            total_sale REAL DEFAULT 0,
-            cost_price REAL DEFAULT 0,
-            total_cost REAL DEFAULT 0,
-            vat REAL DEFAULT 0,
-            total_vat REAL DEFAULT 0,
-            total_after_vat REAL DEFAULT 0,
-            receipt_no TEXT DEFAULT '',
-            branch_city TEXT DEFAULT ''
+            offer_discount REAL DEFAULT 0
         )
     """)
-
-    # Add missing columns for older databases
-    cur.execute("PRAGMA table_info(reconciliation_items)")
-    existing_columns = [row[1] for row in cur.fetchall()]
-    
-    new_columns = {
-        "payment_method": "TEXT DEFAULT ''",
-        "discount": "REAL DEFAULT 0",
-        "shipping_cost": "REAL DEFAULT 0",
-        "tax": "REAL DEFAULT 0",
-        "coupon_discount": "REAL DEFAULT 0",
-        "offer_discount": "REAL DEFAULT 0",
-        "batch_no": "TEXT DEFAULT ''",
-        "expiry_date": "TEXT DEFAULT ''",
-        "sale_price": "REAL DEFAULT 0",
-        "total_sale": "REAL DEFAULT 0",
-        "cost_price": "REAL DEFAULT 0",
-        "total_cost": "REAL DEFAULT 0",
-        "vat": "REAL DEFAULT 0",
-        "total_vat": "REAL DEFAULT 0",
-        "total_after_vat": "REAL DEFAULT 0",
-        "receipt_no": "TEXT DEFAULT ''",
-        "branch_city": "TEXT DEFAULT ''"
-    }
-    
-    for col_name, col_type in new_columns.items():
-        if col_name not in existing_columns:
-            try:
-                cur.execute(f"ALTER TABLE reconciliation_items ADD COLUMN {col_name} {col_type}")
-            except:
-                pass
 
     # Insert default admin
     cur.execute("SELECT * FROM users WHERE username = 'admin'")
@@ -218,23 +176,6 @@ def get_user_permissions(username: str):
             "is_active": bool(result[7])
         }
     return None
-
-def update_username(old_username: str, new_username: str, password: str = None):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    try:
-        if password:
-            cur.execute("UPDATE users SET username = ?, password = ? WHERE username = ?", 
-                       (new_username, password, old_username))
-        else:
-            cur.execute("UPDATE users SET username = ? WHERE username = ?", 
-                       (new_username, old_username))
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError:
-        return False
-    finally:
-        conn.close()
 
 def update_user(username: str, password: str = None, pharmacist_name: str = None, role: str = None, is_active: bool = None):
     conn = sqlite3.connect(DB_PATH)
@@ -486,9 +427,6 @@ def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) 
         df = pd.read_sql_query(query, conn, params=params)
         if 'difference' in df.columns:
             df['difference'] = pd.to_numeric(df['difference'], errors='coerce').fillna(0)
-        for col in ['payment_method', 'discount', 'shipping_cost', 'tax', 'coupon_discount', 'offer_discount']:
-            if col not in df.columns:
-                df[col] = 0 if col in ['discount', 'shipping_cost', 'tax', 'coupon_discount', 'offer_discount'] else ''
         return df
     except Exception as e:
         return pd.DataFrame()
@@ -563,7 +501,10 @@ def get_tab_completed_counts(pharmacy_name: str = None) -> dict:
         return df.set_index('case_type')['completed'].to_dict()
     except:
         return {}
+    finally:
+        conn.close()
 
+# ========== الدوال المضافة للتحكم في قفل العناصر ==========
 def lock_item(item_key: str, locked_by: str):
     """قفل عنصر لمنع التعديل عليه من الصيدلية"""
     conn = sqlite3.connect(DB_PATH)
@@ -608,6 +549,3 @@ def get_item_lock_status(item_key: str) -> bool:
     result = cur.fetchone()
     conn.close()
     return result[0] == 1 if result else False
-    
-    finally:
-        conn.close()
