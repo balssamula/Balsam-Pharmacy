@@ -100,6 +100,7 @@ for key, default_value in {
 with st.sidebar:
     st.title("🌟 نظام بلسم العلا")
     st.caption("مطابقة طلبات سلة والفواتير")
+    st.caption("Balsam Alula Pharmacy")
     st.markdown("---")
 
     if not st.session_state.logged_in:
