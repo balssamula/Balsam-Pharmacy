@@ -342,14 +342,19 @@ def get_all_users():
     return df
 
 def update_last_access(pharmacy_name: str, pharmacist_name: str, ip_address: str = None):
+    """تحديث آخر دخول للصيدلية مع IP"""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     current_time = now_str()
     current_ip = ip_address or get_client_ip()
+    
+    # تحديث في جدول users
     cur.execute(
         "UPDATE users SET pharmacist_name = ?, last_login = ?, last_ip = ? WHERE username = ?",
         (pharmacist_name, current_time, current_ip, pharmacy_name),
     )
+    
+    # تحديث في جدول last_access
     cur.execute(
         """
         INSERT INTO last_access (pharmacy_name, last_login, pharmacist_name)
@@ -360,6 +365,13 @@ def update_last_access(pharmacy_name: str, pharmacist_name: str, ip_address: str
         """,
         (pharmacy_name, current_time, pharmacist_name),
     )
+    
+    # تسجيل في سجل الدخول
+    cur.execute("""
+        INSERT INTO login_history (username, role, ip_address, login_time)
+        VALUES (?, 'pharmacy', ?, ?)
+    """, (pharmacy_name, current_ip, current_time))
+    
     conn.commit()
     conn.close()
     return current_ip
@@ -376,12 +388,19 @@ def fetch_user(username: str, password: str):
     return user
 
 def get_all_last_logins() -> pd.DataFrame:
+    """الحصول على آخر دخول للصيدليات مع IP"""
     conn = sqlite3.connect(DB_PATH)
     try:
         return pd.read_sql_query("""
-            SELECT pharmacy_name, last_login, pharmacist_name
-            FROM last_access
-            ORDER BY last_login DESC
+            SELECT 
+                u.pharmacy_name as pharmacy_name,
+                u.last_login,
+                u.pharmacist_name,
+                u.last_ip,
+                l.last_login as last_access_date
+            FROM last_access l
+            JOIN users u ON u.username = l.pharmacy_name
+            ORDER BY l.last_login DESC
         """, conn)
     finally:
         conn.close()
@@ -496,10 +515,12 @@ def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) 
                pharmacist_note, item_key, abc_pharmacy_name, abc_pharmacist_name, hidden_from_pharmacy,
                payment_method, discount, shipping_cost, tax, coupon_discount, offer_discount,
                is_item_locked,
+               (SELECT last_ip FROM users WHERE username = ?) as pharmacy_last_ip,
+               (SELECT last_login FROM users WHERE username = ?) as pharmacy_last_login,
                0 as is_locked
         FROM reconciliation_items WHERE active = 1 AND upload_batch_id = ?
     """
-    params = [active_batch_id]
+    params = [pharmacy_name if pharmacy_name else "", pharmacy_name if pharmacy_name else "", active_batch_id]
     
     if pharmacy_name:
         query += " AND pharmacy_name = ?"
