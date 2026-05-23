@@ -5,14 +5,13 @@ from datetime import datetime
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
-from utils.database import fetch_active_items, get_completed_items, get_tab_completed_counts
+from utils.database import fetch_active_items, get_completed_items, get_tab_completed_counts, get_old_orders, get_old_invoices
 from utils.helpers import (
     is_cancelled_or_returned_status, is_pending_payment_status, 
     get_branch_number, get_branch_location, get_tab_label, numeric_value,
     get_saudi_time
 )
 from utils.ui_components import render_metrics, render_completed_table
-from utils.database import (..., get_old_orders)
 
 def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
     """تصدير البيانات إلى ملف Excel مع تنسيق احترافي"""
@@ -287,7 +286,9 @@ def show():
         get_tab_label("💰 بانتظار الدفع", 0, len(payment_df)),
         get_tab_label("⚠️ ملغي/مسترجع", 0, len(cancelled_df)),
         get_tab_label("✅ تم الانتهاء", len(completed_df), len(completed_df)),
-        "📅 طلبات قديمة"
+        f"📅 طلبات قديمة ({old_orders_count})",
+        f"🧾 فواتير قديمة ({old_invoices_count})",
+        "📊 إحصائيات"
     ])
 
     with tab1:
