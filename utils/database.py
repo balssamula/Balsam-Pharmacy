@@ -391,17 +391,37 @@ def get_all_last_logins() -> pd.DataFrame:
     """الحصول على آخر دخول للصيدليات مع IP"""
     conn = sqlite3.connect(DB_PATH)
     try:
-        return pd.read_sql_query("""
+        # التحقق من وجود الأعمدة المطلوبة
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(users)")
+        user_columns = [row[1] for row in cur.fetchall()]
+        
+        # بناء الاستعلام ديناميكياً
+        query = """
             SELECT 
-                u.pharmacy_name as pharmacy_name,
+                u.username as pharmacy_name,
                 u.last_login,
                 u.pharmacist_name,
                 u.last_ip,
-                l.last_login as last_access_date
-            FROM last_access l
-            JOIN users u ON u.username = l.pharmacy_name
-            ORDER BY l.last_login DESC
-        """, conn)
+                la.last_login as last_access_date
+            FROM users u
+            LEFT JOIN last_access la ON la.pharmacy_name = u.username
+            WHERE u.role = 'pharmacy'
+            ORDER BY u.last_login DESC NULLS LAST
+        """
+        
+        df = pd.read_sql_query(query, conn)
+        
+        # إضافة أعمدة مفقودة بقيم افتراضية
+        if 'last_ip' not in df.columns:
+            df['last_ip'] = 'غير معروف'
+        if 'last_login' not in df.columns:
+            df['last_login'] = 'لم يدخل بعد'
+        
+        return df
+    except Exception as e:
+        # في حالة الخطأ، إرجاع DataFrame فارغ بالهيكل الصحيح
+        return pd.DataFrame(columns=['pharmacy_name', 'pharmacist_name', 'last_login', 'last_ip', 'last_access_date'])
     finally:
         conn.close()
 
