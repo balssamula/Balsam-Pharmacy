@@ -471,7 +471,7 @@ def show():
         else:
             st.info("لا توجد طلبات مكتملة")
     
-    # ========== آخر دخول للصيدليات ==========
+    # ========== آخر دخول للصيدليات مع IP ==========
     st.markdown('<div class="section-title">👥 آخر دخول للصيدليات</div>', unsafe_allow_html=True)
     last_logins = get_all_last_logins()
     if not last_logins.empty:
@@ -482,6 +482,7 @@ def show():
                 <div class="note-card">
                     <strong>🏥 {row['pharmacy_name'][-10:]}</strong><br>
                     <span>👤 {row['pharmacist_name'] or 'غير مسجل'}</span><br>
-                    <span>📅 {row['last_login'][:16] if row['last_login'] else 'لم يدخل'}</span>
+                    <span>📅 {row['last_login'][:16] if row['last_login'] else 'لم يدخل'}</span><br>
+                    <span>🌐 IP: {row['last_ip'] or 'غير معروف'}</span>
                 </div>
                 """, unsafe_allow_html=True)
