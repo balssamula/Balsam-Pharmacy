@@ -130,6 +130,10 @@ with st.sidebar:
                     update_last_access(st.session_state.username, st.session_state.pharmacist_name)
                     st.success("✅ تم حفظ الاسم")
                     st.rerun()
+        if st.session_state.user_role == "pharmacy":
+            from utils.database import update_last_access
+            ip = update_last_access(st.session_state.username, st.session_state.pharmacist_name)
+            st.success(f"✅ تم تسجيل الدخول من IP: {ip}")
         
         # قائمة الأدوات حسب الصلاحيات
         if st.session_state.user_role in ["admin", "manager"]:
