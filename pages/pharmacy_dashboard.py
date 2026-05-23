@@ -12,6 +12,7 @@ from utils.helpers import (
     get_saudi_time
 )
 from utils.ui_components import render_metrics, render_completed_table
+from utils.database import (..., get_old_orders)
 
 def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
     """تصدير البيانات إلى ملف Excel مع تنسيق احترافي"""
@@ -285,7 +286,8 @@ def show():
         get_tab_label("⏰ فواتير بعد آخر طلب", tab5_completed, len(post_cutoff_df) + tab5_completed),
         get_tab_label("💰 بانتظار الدفع", 0, len(payment_df)),
         get_tab_label("⚠️ ملغي/مسترجع", 0, len(cancelled_df)),
-        get_tab_label("✅ تم الانتهاء", len(completed_df), len(completed_df))
+        get_tab_label("✅ تم الانتهاء", len(completed_df), len(completed_df)),
+        "📅 طلبات قديمة"
     ])
 
     with tab1:
@@ -304,3 +306,81 @@ def show():
         render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name)
     with tab8:
         render_completed_table(completed_df, is_admin=False)
+    with tab9:
+    st.markdown("### 📅 الطلبات القديمة (أكثر من 6 أشهر)")
+    
+    # إضافة خيار عدد الأشهر
+    months = st.selectbox("عدد الأشهر للبحث", [3, 6, 9, 12, 18, 24], index=1, format_func=lambda x: f"{x} أشهر")
+    
+    # جلب الطلبات القديمة للفرع
+    old_orders_df = get_old_orders(pharmacy_name=pharmacy_name, months=months)
+    
+    if not old_orders_df.empty:
+        st.warning(f"⚠️ يوجد {len(old_orders_df)} طلب قديم (أكثر من {months} أشهر) لم يتم إكمالها")
+        
+        # عرض البطاقات
+        for idx, row in old_orders_df.iterrows():
+            days_old = int(row['days_old'])
+            if days_old > 365:
+                card_color = "#ffcccc"
+                badge = "🔴 قديم جداً"
+            elif days_old > 180:
+                card_color = "#ffe0cc"
+                badge = "🟠 قديم"
+            else:
+                card_color = "#fff3cd"
+                badge = "🟡 يحتاج مراجعة"
+            
+            diff_value = numeric_value(row['difference'])
+            required_action = "إضافة" if diff_value > 0 else "إرجاع" if diff_value < 0 else "مطابق"
+            
+            with st.container():
+                st.markdown(f"""
+                <div style="background:{card_color};border-radius:16px;padding:1rem;margin-bottom:1rem;border-right:4px solid #dc3545;">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;">
+                        <span style="background:#dc3545;color:white;padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;">{badge}</span>
+                        <span style="color:#6c757d;">📅 {row['order_date'][:16] if row['order_date'] else ''} | ⏰ {days_old} يوم</span>
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;gap:1rem;">
+                        <div style="flex:2;">
+                            <strong>📋 رقم الطلب:</strong> {row['order_number']}<br>
+                            <strong>🏷️ SKU:</strong> {row['sku']}<br>
+                            <strong>📦 المنتج:</strong> {row['product_name'][:60]}
+                        </div>
+                        <div style="flex:1;">
+                            <strong>📊 الكميات:</strong><br>
+                            🛒 سلة: {int(row['salla_qty'])}<br>
+                            📄 ABC: {int(row['abc_qty'])}<br>
+                            <strong>📊 الفرق:</strong> {diff_value}
+                        </div>
+                        <div style="flex:1.5;">
+                            <strong>🧾 الفاتورة/الصيدلي:</strong><br>
+                            {row['invoice_number']}/{row['abc_pharmacist_name'] or 'غير معروف'}<br>
+                            <strong>📌 حالة الطلب:</strong> {row['order_status']}<br>
+                            <strong>🎯 المطلوب:</strong> {required_action}
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                note_key = f"old_note_{idx}"
+                note_value = st.text_area("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=note_key, height=60)
+                
+                col1, col2 = st.columns([1, 4])
+                with col1:
+                    if st.button("💾 حفظ", key=f"save_old_{idx}"):
+                        from utils.database import save_case_note
+                        save_case_note(row['order_number'], row['sku'], pharmacy_name, row['case_type'], note_value)
+                        st.success("✅ تم حفظ الملحوظة")
+                        st.rerun()
+                
+                if row['status'] != "تم":
+                    with col2:
+                        if st.button("✅ تأكيد الإكمال", key=f"complete_old_{idx}"):
+                            from utils.database import mark_case_done
+                            mark_case_done(row['order_number'], row['sku'], pharmacy_name, row['case_type'], pharmacist_name)
+                            st.success("✅ تم تأكيد إكمال الطلب")
+                            st.rerun()
+                st.markdown("---")
+    else:
+        st.success(f"🎉 لا توجد طلبات قديمة (أكثر من {months} أشهر)")
