@@ -77,79 +77,88 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
     output.seek(0)
     return output.getvalue()
 
+@st.fragment
+def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_name):
+    # حساب الفروقات ديناميكياً لتفادي مشكلة الصفر
+    salla_numeric = int(row['salla_qty']) if pd.notna(row['salla_qty']) else 0
+    abc_numeric = int(row['abc_qty']) if pd.notna(row['abc_qty']) else 0
+    diff_value = salla_numeric - abc_numeric
+    
+    if diff_value > 0:
+        required_action = "إضافة"
+        action_color = "#28a745"
+        button_label = "✅ تأكيد الإضافة"
+    elif diff_value < 0:
+        required_action = "إرجاع"
+        action_color = "#dc3545"
+        button_label = "🔄 تأكيد الإرجاع"
+    else:
+        required_action = "مطابق"
+        action_color = "#6c757d"
+        button_label = None
+
+    order_status = row.get('order_status', 'غير متوفرة')
+    unique_key = f"{row['case_type']}_{row['order_number']}_{row['sku']}_{idx}"
+
+    # عرض تصميم الـ HTML الخاص بالبطاقة
+    st.markdown(f"""
+    <div style="background:#f8f9fa;border-radius:16px;padding:1rem;margin-bottom:0.5rem;border-right:4px solid #1f7a8c;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+        <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;">
+            <span style="background:#dff1ff;color:#0f5488;padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;">{row['case_label']}</span>
+            <span style="color:#6c757d;font-size:0.8rem;">📅 {row['order_date'][:16] if row['order_date'] else ''}</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:1rem;">
+            <div style="flex:2;">
+                <strong>📋 رقم الطلب:</strong> {row['order_number']}<br>
+                <strong>🏷️ SKU:</strong> {row['sku']}<br>
+                <strong>📦 المنتج:</strong> {row['product_name'][:60]}
+            </div>
+            <div style="flex:1;">
+                <strong>📊 الكميات:</strong><br>
+                🛒 سلة: {salla_numeric}<br>
+                📄 ABC: {abc_numeric}<br>
+                <strong>📊 الفرق:</strong> <span style="color:{'#28a745' if diff_value > 0 else '#dc3545' if diff_value < 0 else '#6c757d'};font-weight:bold;">{'+' if diff_value > 0 else ''}{diff_value}</span>
+            </div>
+            <div style="flex:1.5;">
+                <strong>🧾 الفاتورة/الصيدلي:</strong><br>
+                {row['invoice_number']}/{row.get('abc_pharmacist_name', 'غير معروف')}<br>
+                <strong>📌 حالة الطلب:</strong> <span style="color:#d9534f;">{order_status}</span><br>
+                <strong>🎯 المطلوب:</strong> <span style="color:{action_color};">{required_action}</span>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # حقل الملاحظات والأزرار التفاعلية المعزولة
+    note_key = f"note_{unique_key}"
+    note_value = st.text_area("📝 ملحوظة الصيدلي", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
+    
+    btn_col1, btn_col2 = st.columns([1, 4])
+    with btn_col1:
+        if st.button("💾 حفظ", key=f"save_{unique_key}", use_container_width=True):
+            from utils.database import save_case_note
+            save_case_note(row['order_number'], row['sku'], pharmacy_name, row['case_type'], note_value)
+            st.toast("📋 تم حفظ الملاحظة بنجاح!", icon="💾") # إشعار منبثق بديل للـ rerun المزعج
+
+    if allow_actions and row["status"] != "تم" and button_label and row["case_type"] in {"addition", "return", "orphan_salla", "orphan_abc"}:
+        with btn_col2:
+            if st.button(button_label, key=f"done_{unique_key}", use_container_width=True):
+                from utils.database import save_case_note, mark_case_done
+                save_case_note(row['order_number'], row['sku'], pharmacy_name, row['case_type'], note_value)
+                mark_case_done(row['order_number'], row['sku'], pharmacy_name, row['case_type'], pharmacist_name)
+                st.toast("✅ تم تأكيد الحالة وإغلاقها!", icon="🚀")
+                st.rerun() # هنا الـ rerun آمن لأنه يخص إخفاء البطاقة المكتملة فقط
+
+# 2. الدالة الأساسية التي تستدعي الحلقات التكرارية
 def render_case_cards_pharmacy(df: pd.DataFrame, allow_actions: bool, pharmacist_name: str, pharmacy_name: str):
     if df.empty:
         st.success("لا توجد حالات في هذا القسم.")
         return
 
     for idx, row in df.iterrows():
-        salla_numeric = int(row['salla_qty']) if pd.notna(row['salla_qty']) else 0
-        abc_numeric = int(row['abc_qty']) if pd.notna(row['abc_qty']) else 0
-        diff_value = salla_numeric - abc_numeric
-        
-        if diff_value > 0:
-            required_action = "إضافة"
-            action_color = "#28a745"
-            button_label = "✅ تأكيد الإضافة"
-        elif diff_value < 0:
-            required_action = "إرجاع"
-            action_color = "#dc3545"
-            button_label = "🔄 تأكيد الإرجاع"
-        else:
-            required_action = "مطابق"
-            action_color = "#6c757d"
-            button_label = None
-        
-        order_status = row.get('order_status', 'غير متوفرة')
-        unique_key = f"{row['case_type']}_{row['order_number']}_{row['sku']}_{idx}"
-        
-        with st.container():
-            st.markdown(f"""
-            <div style="background:#f8f9fa;border-radius:16px;padding:1rem;margin-bottom:1rem;border-right:4px solid #1f7a8c;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
-                <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;">
-                    <span style="background:#dff1ff;color:#0f5488;padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;">{row['case_label']}</span>
-                    <span style="color:#6c757d;font-size:0.8rem;">📅 {row['order_date'][:16] if row['order_date'] else ''}</span>
-                </div>
-                <div style="display:flex;flex-wrap:wrap;gap:1rem;">
-                    <div style="flex:2;">
-                        <strong>📋 رقم الطلب:</strong> {row['order_number']}<br>
-                        <strong>🏷️ SKU:</strong> {row['sku']}<br>
-                        <strong>📦 المنتج:</strong> {row['product_name'][:60]}
-                    </div>
-                    <div style="flex:1;">
-                        <strong>📊 الكميات:</strong><br>
-                        🛒 سلة: {int(row['salla_qty']) if pd.notna(row['salla_qty']) else 0}<br>
-                        📄 ABC: {int(row['abc_qty']) if pd.notna(row['abc_qty']) else 0}<br>
-                        <strong>📊 الفرق:</strong> <span style="color:{'#28a745' if diff_value > 0 else '#dc3545' if diff_value < 0 else '#6c757d'};font-weight:bold;">{'+' if diff_value > 0 else ''}{diff_value}</span>
-                    </div>
-                    <div style="flex:1.5;">
-                        <strong>🧾 الفاتورة/الصيدلي:</strong><br>
-                        {row['invoice_number']}/{row.get('abc_pharmacist_name', 'غير معروف')}<br>
-                        <strong>📌 حالة الطلب:</strong> <span style="color:#d9534f;">{order_status}</span><br>
-                        <strong>🎯 المطلوب:</strong> <span style="color:{action_color};">{required_action}</span>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            note_key = f"note_{unique_key}"
-            note_value = st.text_area("📝 ملحوظة الصيدلي", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
-            
-            btn_col1, btn_col2 = st.columns([1, 4])
-            with btn_col1:
-                if st.button("💾 حفظ", key=f"save_{unique_key}", use_container_width=True):
-                    from utils.database import save_case_note
-                    save_case_note(row['order_number'], row['sku'], pharmacy_name, row['case_type'], note_value)
-                    st.rerun()
-            
-            if allow_actions and row["status"] != "تم" and button_label and row["case_type"] in {"addition", "return", "orphan_salla", "orphan_abc"}:
-                with btn_col2:
-                    if st.button(button_label, key=f"done_{unique_key}", use_container_width=True):
-                        from utils.database import save_case_note, mark_case_done
-                        save_case_note(row['order_number'], row['sku'], pharmacy_name, row['case_type'], note_value)
-                        mark_case_done(row['order_number'], row['sku'], pharmacy_name, row['case_type'], pharmacist_name)
-                        st.rerun()
-            st.markdown("---")
+        # استدعاء البطاقة المعزولة برمجياً لكل سطر
+        render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_name)
+        st.markdown("---")
 
 def show():
     pharmacy_name = st.session_state.username
