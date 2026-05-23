@@ -172,6 +172,14 @@ def render_old_orders_table(df):
         st.success("🎉 لا توجد طلبات قديمة")
         return
     
+    # إضافة فلتر إضافي لاستبعاد الملغي والمسترجع (للتأكيد)
+    df = df[~df["order_status"].isin(["ملغي", "مسترجع", "محذوف"])]
+    df = df[~df["order_status"].str.contains("ملغي|مسترجع", na=False)]
+    
+    if df.empty:
+        st.success("🎉 لا توجد طلبات قديمة (بعد استبعاد الملغي والمسترجع)")
+        return
+    
     display_df = df.copy()
     display_df = display_df.rename(columns={
         "order_number": "رقم الطلب",
@@ -433,7 +441,7 @@ def show():
     .stTabs [data-baseweb="tab-list"] button:nth-child(2) { background-color: #ED7D31; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(3) { background-color: #70AD47; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(4) { background-color: #FFC000; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(5) { background-color: #9B59B6; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(5) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(6) { background-color: #3498DB; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(7) { background-color: #E74C3C; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(8) { background-color: #27AE60; color: white; border-radius: 10px 10px 0 0; }
