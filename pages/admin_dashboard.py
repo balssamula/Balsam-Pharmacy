@@ -504,3 +504,37 @@ def show():
         
     except Exception as e:
         st.warning(f"حدث خطأ في تحميل بيانات الصيدليات: {str(e)[:100]}")
+
+def get_client_ip():
+    """الحصول على عنوان IP الخاص بالجهاز"""
+    try:
+        # محاولة الحصول على IP من Streamlit Cloud
+        import streamlit as st
+        if hasattr(st, 'context') and hasattr(st.context, 'headers'):
+            headers = st.context.headers
+            if headers:
+                # محاولة الحصول على IP من headers
+                forwarded = headers.get('X-Forwarded-For', '')
+                if forwarded:
+                    return forwarded.split(',')[0].strip()
+                real_ip = headers.get('X-Real-IP', '')
+                if real_ip:
+                    return real_ip
+    except:
+        pass
+    
+    try:
+        # استخدام خدمة خارجية
+        import requests
+        response = requests.get('https://api.ipify.org', timeout=3)
+        if response.status_code == 200:
+            return response.text
+    except:
+        pass
+    
+    try:
+        import socket
+        hostname = socket.gethostname()
+        return socket.gethostbyname(hostname)
+    except:
+        return "غير معروف"
