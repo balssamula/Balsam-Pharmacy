@@ -22,6 +22,7 @@ def pharmacy_names():
     return [f"Balsam Alula Pharmacy {i:02d}" for i in range(1, PHARMACY_COUNT + 1)]
 
 def init_database():
+    """تهيئة قاعدة البيانات مع دعم الترقية"""
     os.makedirs(DB_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -73,7 +74,7 @@ def init_database():
         )
     """)
 
-    # Reconciliation items table
+    # Reconciliation items table with all new columns
     cur.execute("""
         CREATE TABLE IF NOT EXISTS reconciliation_items (
             item_key TEXT PRIMARY KEY,
@@ -113,9 +114,58 @@ def init_database():
             first_seen_at TEXT,
             last_seen_at TEXT,
             active INTEGER DEFAULT 1,
-            hidden_from_pharmacy INTEGER DEFAULT 0
+            hidden_from_pharmacy INTEGER DEFAULT 0,
+            payment_method TEXT DEFAULT '',
+            discount REAL DEFAULT 0,
+            shipping_cost REAL DEFAULT 0,
+            tax REAL DEFAULT 0,
+            coupon_discount REAL DEFAULT 0,
+            offer_discount REAL DEFAULT 0,
+            batch_no TEXT DEFAULT '',
+            expiry_date TEXT DEFAULT '',
+            sale_price REAL DEFAULT 0,
+            total_sale REAL DEFAULT 0,
+            cost_price REAL DEFAULT 0,
+            total_cost REAL DEFAULT 0,
+            vat REAL DEFAULT 0,
+            total_vat REAL DEFAULT 0,
+            total_after_vat REAL DEFAULT 0,
+            receipt_no TEXT DEFAULT '',
+            branch_city TEXT DEFAULT ''
         )
     """)
+
+    # إضافة الأعمدة الجديدة إذا لم تكن موجودة (لترقية القواعد القديمة)
+    cur.execute("PRAGMA table_info(reconciliation_items)")
+    existing_columns = [row[1] for row in cur.fetchall()]
+    
+    new_columns = {
+        "payment_method": "TEXT DEFAULT ''",
+        "discount": "REAL DEFAULT 0",
+        "shipping_cost": "REAL DEFAULT 0",
+        "tax": "REAL DEFAULT 0",
+        "coupon_discount": "REAL DEFAULT 0",
+        "offer_discount": "REAL DEFAULT 0",
+        "batch_no": "TEXT DEFAULT ''",
+        "expiry_date": "TEXT DEFAULT ''",
+        "sale_price": "REAL DEFAULT 0",
+        "total_sale": "REAL DEFAULT 0",
+        "cost_price": "REAL DEFAULT 0",
+        "total_cost": "REAL DEFAULT 0",
+        "vat": "REAL DEFAULT 0",
+        "total_vat": "REAL DEFAULT 0",
+        "total_after_vat": "REAL DEFAULT 0",
+        "receipt_no": "TEXT DEFAULT ''",
+        "branch_city": "TEXT DEFAULT ''"
+    }
+    
+    for col_name, col_type in new_columns.items():
+        if col_name not in existing_columns:
+            try:
+                cur.execute(f"ALTER TABLE reconciliation_items ADD COLUMN {col_name} {col_type}")
+                print(f"✅ تم إضافة العمود: {col_name}")
+            except Exception as e:
+                print(f"⚠️ خطأ في إضافة {col_name}: {e}")
 
     # Insert default admin
     cur.execute("SELECT * FROM users WHERE username = 'admin'")
@@ -135,7 +185,7 @@ def init_database():
             VALUES ('manager', 'manager123', 'manager', 'مدير عام', 1, 1, 1, 0, 1, 1)
         """)
 
-    # Insert default pharmacies - with can_view_dashboard = 0
+    # Insert default pharmacies
     for index, name in enumerate(pharmacy_names(), start=1):
         cur.execute("SELECT * FROM users WHERE username = ?", (name,))
         if not cur.fetchone():
