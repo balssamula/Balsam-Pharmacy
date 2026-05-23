@@ -111,44 +111,28 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     # إزالة صفوف الإجمالي (subtotal)
     df = df[~df.iloc[:, 0].astype(str).str.contains('SUBTOTAL', na=False, case=False)]
     
-    # التعامل مع الأعمدة حسب الموقع (index)
-    # بناءً على ملفك، هذه هي مواقع الأعمدة:
-    # العمود A (index 0) - نوع البروفايل
-    # العمود B (index 1) - رقم الصنف
-    # العمود C (index 2) - اسم الصنف
-    # العمود J (index 9) - صافي الكمية (Net Sold Qty)
-    # العمود AC (index 28) - رقم الفاتورة
-    # العمود AD (index 29) - التاريخ
-    # العمود AE (index 30) - رقم الطلب
-    # العمود AL (index 37) - رقم الصيدلية
-    # العمود AS (index 44) - اسم الصيدلي
-    
-    # طريقة بديلة: محاولة العثور على الأعمدة بأسمائها أولاً
-    # إذا لم تنجح، نستخدم المواقع
-    
-    # البحث عن الأعمدة بأسمائها
-    profile_col = find_column(df, ['نوع البروفايل', 'Profile', 'profile'])
+    # البحث عن الأعمدة بأسمائها أولاً
+    order_col = find_column(df, ['رقم الطلب', 'Order Number', 'order_number'])
     sku_col = find_column(df, ['رقم الصنف', 'Item No.', 'Item Number', 'item_number'])
     product_col = find_column(df, ['اسم الصنف', 'Product', 'product'])
     qty_col = find_column(df, ['Net Sold Qty', 'Net Qty.', 'Net Sold Quantity'])
     invoice_col = find_column(df, ['رقم الفاتورة', 'Receipt No.', 'receipt_no', 'invoice_number'])
-    date_col = find_column(df, ['التاريخ', 'Date', 'date', 'Sales Date', 'Sales Session'])
-    order_col = find_column(df, ['رقم الطلب', 'Order Number', 'order_number'])
+    date_col = find_column(df, ['التاريخ', 'Date', 'date', 'Sales Date'])
     pharmacy_col = find_column(df, ['رقم الصيدلية', 'Branch', 'branch'])
     pharmacist_col = find_column(df, ['الصيدلي', 'Username', 'username'])
+    profile_col = find_column(df, ['نوع البروفايل', 'Profile', 'profile'])
     
     # إذا لم يتم العثور على الأعمدة بأسمائها، نستخدم المواقع
     if order_col is None and len(df.columns) > 30:
-        # استخدام المواقع المحددة
-        order_col = df.columns[30]  # العمود AE (index 30)
-        invoice_col = df.columns[28]  # العمود AC (index 28)
-        date_col = df.columns[29]  # العمود AD (index 29)
-        profile_col = df.columns[0]  # العمود A (index 0)
-        sku_col = df.columns[1]  # العمود B (index 1)
-        product_col = df.columns[2]  # العمود C (index 2)
-        qty_col = df.columns[9] if len(df.columns) > 9 else None  # العمود J (index 9)
-        pharmacy_col = df.columns[37] if len(df.columns) > 37 else None  # العمود AL (index 37)
-        pharmacist_col = df.columns[44] if len(df.columns) > 44 else None  # العمود AS (index 44)
+        order_col = df.columns[30]  # العمود AE
+        invoice_col = df.columns[28]  # العمود AC
+        date_col = df.columns[29]  # العمود AD
+        profile_col = df.columns[0]  # العمود A
+        sku_col = df.columns[1]  # العمود B
+        product_col = df.columns[2]  # العمود C
+        qty_col = df.columns[9] if len(df.columns) > 9 else None  # العمود J
+        pharmacy_col = df.columns[37] if len(df.columns) > 37 else None  # العمود AL
+        pharmacist_col = df.columns[44] if len(df.columns) > 44 else None  # العمود AS
     
     if order_col is None:
         raise ValueError("لم يتم العثور على عمود رقم الطلب في شيت ABC")
@@ -164,13 +148,8 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     df["abc_pharmacist_name"] = df[pharmacist_col].apply(normalize_text) if pharmacist_col else ""
     df["profile_type"] = df[profile_col].apply(normalize_text) if profile_col else ""
     
-    # الأعمدة الإضافية
     df["all_abc_pharmacies"] = df["abc_pharmacy_name"]
-    
-    if "Receipt Classification" in df.columns:
-        df["receipt_classification"] = df["Receipt Classification"].apply(normalize_text)
-    else:
-        df["receipt_classification"] = ""
+    df["receipt_classification"] = ""
     
     # استبعاد FREE GIFTS
     EXCLUDED_PROFILE = "FREE GIFTS FOR CUSTOMERS"
@@ -320,29 +299,30 @@ def process_excel(uploaded_file, uploaded_by: str):
             INSERT OR REPLACE INTO reconciliation_items (
                 item_key, upload_batch_id, order_number, invoice_number, sku, product_name,
                 salla_product_name, abc_product_name, pharmacy_name, salla_pharmacy_name,
-                abc_pharmacy_name, abc_pharmacist_name, salla_qty, abc_qty, difference,
+                abc_pharmacy_name, abc_pharmacist_name, branch_number, salla_qty, abc_qty, difference,
                 case_type, case_label, case_reason, status, customer_name, customer_phone,
                 city, order_status, order_date, invoice_date, profile_type, receipt_classification,
-                all_abc_pharmacies, other_branch_details, pharmacist_note, total_amount, 
-                payment_method, discount, shipping_cost, tax, coupon_discount, offer_discount,
-                first_seen_at, last_seen_at, active
+                all_abc_pharmacies, other_branch_details, pharmacist_note, total_amount,
+                first_seen_at, last_seen_at, active,
+                payment_method, discount, shipping_cost, tax, coupon_discount, offer_discount
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?)
         """, (
             row["item_key"], upload_batch_id, str(row["order_number"]), str(row.get("invoice_number", "")),
             str(row["sku"]), str(row["product_name"])[:200], str(row.get("salla_product_name", ""))[:200],
             str(row.get("abc_product_name", ""))[:200], str(row["pharmacy_name"]),
             str(row.get("salla_pharmacy_name", "")), str(row.get("abc_pharmacy_name", "")),
-            str(row.get("abc_pharmacist_name", "")), float(row["salla_qty"]), float(row["abc_qty"]), float(row["difference"]),
+            str(row.get("abc_pharmacist_name", "")), str(row.get("branch_number", "")),
+            float(row["salla_qty"]), float(row["abc_qty"]), float(row["difference"]),
             str(row["case_type"]), str(row["case_label"]), str(row.get("case_reason", ""))[:500],
             "قيد المتابعة", str(row.get("customer_name", ""))[:100], str(row.get("customer_phone", "")),
             str(row.get("city", "")), str(row.get("order_status", "")), str(row.get("order_date", "")),
             str(row.get("invoice_date", "")), str(row.get("profile_type", "")), str(row.get("receipt_classification", "")),
             str(row.get("all_abc_pharmacies", "")), str(row.get("other_branch_details", "")),
-            "", float(row.get("total_amount", 0)),
+            "", float(row.get("total_amount", 0)), timestamp, timestamp, 1,
             str(row.get("payment_method", "")), float(row.get("discount", 0)), float(row.get("shipping_cost", 0)),
-            float(row.get("tax", 0)), float(row.get("coupon_discount", 0)), float(row.get("offer_discount", 0)),
-            timestamp, timestamp
+            float(row.get("tax", 0)), float(row.get("coupon_discount", 0)), float(row.get("offer_discount", 0))
         ))
     
     # تعطيل العناصر القديمة وتفعيل الجلسة الحالية
