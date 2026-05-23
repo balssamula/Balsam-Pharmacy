@@ -4,6 +4,8 @@ import json
 import re
 from io import BytesIO
 from datetime import datetime
+import plotly.express as px
+import plotly.graph_objects as go
 
 def extract_single_sku(combined_sku):
     """استخراج SKU الفردي من SKU المجمع"""
@@ -22,25 +24,26 @@ def extract_single_sku(combined_sku):
     if '+' in sku_str:
         sku_str = sku_str.split('+')[0].strip()
     
-    # إزالة أي أحرف غير رقمية
-    sku_str = re.sub(r'[^0-9]', '', sku_str)
+    # إزالة أي أحرف غير رقمية (مع الحفاظ على الحروف للSKU التي تحتوي على حروف)
+    if sku_str.replace('.', '').isdigit():
+        sku_str = re.sub(r'[^0-9]', '', sku_str)
     
     return sku_str
 
 def show():
     st.markdown("""
     <div class="hero">
-        <h1>📦 تفصيلي المنتجات</h1>
-        <p>تحليل تفاصيل المنتجات من ملف الطلبات وربطها بملف المنتجات</p>
+        <h1>📦 تفصيلي المنتجات وتحليلات متقدمة</h1>
+        <p>تحليل تفاصيل المنتجات من ملف الطلبات مع إحصائيات متقدمة ورسوم بيانية تفاعلية</p>
     </div>
     """, unsafe_allow_html=True)
     
     st.info("""
     **📌 تعليمات استخدام هذه الصفحة:**
-    1. قم برفع ملف `orders.xlsx` (يحتوي على عمودي 'رقم الطلب' و 'skus_json')
+    1. قم برفع ملف `orders.xlsx` (يحتوي على أعمدة: رقم الطلب، skus_json، الخصم، تكلفة الشحن، طريقة الدفع، الضريبة، تاريخ الطلب، قيمة خصم الكوبون، قيمة خصم العروض الخاصة)
     2. قم برفع ملف `products.xlsx` (يحتوي على عمودي 'SKU' و 'ProductName')
     3. سيتم معالجة البيانات واستخراج تفاصيل المنتجات الرئيسية والفرعية
-    4. يتم البحث عن اسم المنتج باستخدام `SKU مجمع (للمراجعة)` بعد استخراج SKU الفردي
+    4. يتم البحث عن اسم المنتج باستخدام SKU المجمع بعد استخراج SKU الفردي
     """)
     
     col1, col2 = st.columns(2)
@@ -71,6 +74,7 @@ def show():
                     
                     # التحقق من وجود الأعمدة المطلوبة
                     required_order_cols = ['رقم الطلب', 'skus_json']
+                    optional_order_cols = ['الخصم', 'تكلفة الشحن', 'طريقة الدفع', 'الضريبة', 'تاريخ الطلب', 'قيمة خصم الكوبون', 'قيمة خصم العروض الخاصة']
                     required_product_cols = ['SKU', 'ProductName']
                     
                     missing_order = [col for col in required_order_cols if col not in df_orders.columns]
@@ -83,24 +87,38 @@ def show():
                         st.error(f"❌ الأعمدة المفقودة في ملف المنتجات: {missing_product}")
                         st.stop()
                     
-                    # إنشاء قاموس المنتجات للبحث السريع (باستخدام SKU كـ string)
+                    # إنشاء قاموس المنتجات للبحث السريع
                     product_map = {}
                     for _, row in df_products.iterrows():
                         sku = str(row['SKU']).strip()
-                        # إزالة .0 من نهاية الرقم إذا وجدت
                         if sku.endswith('.0'):
                             sku = sku[:-2]
                         name = str(row['ProductName']).strip()
                         product_map[sku] = name
                     
+                    # إنشاء قاموس لبيانات الطلبات الإضافية
+                    order_info_map = {}
+                    for _, row in df_orders.iterrows():
+                        order_id = row['رقم الطلب']
+                        order_info_map[order_id] = {
+                            'الخصم': row.get('الخصم', 0),
+                            'تكلفة الشحن': row.get('تكلفة الشحن', 0),
+                            'طريقة الدفع': row.get('طريقة الدفع', 'غير محدد'),
+                            'الضريبة': row.get('الضريبة', 0),
+                            'تاريخ الطلب': row.get('تاريخ الطلب', ''),
+                            'قيمة خصم الكوبون': row.get('قيمة خصم الكوبون', 0),
+                            'قيمة خصم العروض الخاصة': row.get('قيمة خصم العروض الخاصة', 0)
+                        }
+                    
                     final_rows = []
                     processed_orders = 0
                     failed_orders = 0
                     
-                    for idx, row in df_orders.iterrows():
+                    for _, row in df_orders.iterrows():
                         order_id = row['رقم الطلب']
+                        order_info = order_info_map.get(order_id, {})
+                        
                         try:
-                            # تحويل JSON إلى قائمة
                             skus_json = row['skus_json']
                             if isinstance(skus_json, str):
                                 json_data = json.loads(skus_json)
@@ -108,14 +126,6 @@ def show():
                                 json_data = skus_json
                             
                             for item in json_data:
-                                # هيكل البيانات المتوقع في item:
-                                # item[0] = اسم المنتج الأساسي (أو معرف)
-                                # item[1] = الكمية (أحياناً)
-                                # item[2] = SKU المجمع
-                                # item[3] = الكمية (في بعض الحالات)
-                                # item[4] = سعر الوحدة
-                                # item[5] = قائمة المنتجات الفرعية
-                                
                                 # تحديد SKU المجمع
                                 combined_sku = ""
                                 quantity = 0
@@ -125,12 +135,10 @@ def show():
                                 # البحث عن SKU في positions المختلفة
                                 for pos in range(len(item)):
                                     val = str(item[pos]) if item[pos] is not None else ""
-                                    # إذا كان القيم عبارة عن SKU (أرقام فقط أو تحتوي على * أو -)
                                     if re.match(r'^[\d\*\-]+$', val) and len(val) > 2:
                                         combined_sku = val
                                         break
                                 
-                                # إذا لم نجد SKU، نستخدم item[2]
                                 if not combined_sku and len(item) > 2:
                                     combined_sku = str(item[2]) if item[2] else ""
                                 
@@ -138,13 +146,11 @@ def show():
                                 for pos in range(len(item)):
                                     val = item[pos]
                                     if isinstance(val, (int, float)) and val > 0 and val < 10000:
-                                        # قد تكون الكمية أو السعر
                                         if quantity == 0:
                                             quantity = float(val)
                                         elif unit_price == 0 and val != quantity:
                                             unit_price = float(val)
                                 
-                                # إذا لم نجد الكمية، نستخدم item[3]
                                 if quantity == 0 and len(item) > 3 and isinstance(item[3], (int, float)):
                                     quantity = float(item[3])
                                 
@@ -152,7 +158,7 @@ def show():
                                 if len(item) > 0 and isinstance(item[0], str) and not re.match(r'^[\d\*\-]+$', item[0]):
                                     product_name = item[0]
                                 
-                                # استخراج SKU الفردي من SKU المجمع
+                                # استخراج SKU الفردي
                                 single_sku = extract_single_sku(combined_sku)
                                 
                                 # جلب اسم المنتج من قاموس المنتجات
@@ -161,20 +167,27 @@ def show():
                                 
                                 total = quantity * unit_price if quantity and unit_price else 0
                                 
-                                # إضافة المنتج الأساسي
+                                # إضافة المنتج الأساسي مع البيانات الإضافية
                                 if combined_sku:
-                                    final_rows.append([
-                                        order_id,
-                                        product_name if product_name else combined_sku,
-                                        quantity,
-                                        single_sku,
-                                        combined_sku,
-                                        unit_price,
-                                        total,
-                                        "أساسي"
-                                    ])
+                                    final_rows.append({
+                                        'رقم الطلب': order_id,
+                                        'المنتج': product_name if product_name else combined_sku,
+                                        'الكمية': quantity,
+                                        'SKU فردي': single_sku,
+                                        'SKU مجمع (للمراجعة)': combined_sku,
+                                        'سعر الوحدة': unit_price,
+                                        'الإجمالي': total,
+                                        'النوع': 'أساسي',
+                                        'الخصم': order_info.get('الخصم', 0),
+                                        'تكلفة الشحن': order_info.get('تكلفة الشحن', 0),
+                                        'طريقة الدفع': order_info.get('طريقة الدفع', 'غير محدد'),
+                                        'الضريبة': order_info.get('الضريبة', 0),
+                                        'تاريخ الطلب': order_info.get('تاريخ الطلب', ''),
+                                        'قيمة خصم الكوبون': order_info.get('قيمة خصم الكوبون', 0),
+                                        'قيمة خصم العروض الخاصة': order_info.get('قيمة خصم العروض الخاصة', 0)
+                                    })
                                 
-                                # --- معالجة المنتجات الفرعية ---
+                                # معالجة المنتجات الفرعية
                                 if len(item) > 5 and isinstance(item[5], list):
                                     sub_items_list = item[5]
                                     
@@ -182,103 +195,236 @@ def show():
                                         if not isinstance(sub, list) or len(sub) < 3:
                                             continue
                                         
-                                        # استخراج بيانات المنتج الفرعي
                                         sub_combined_sku = str(sub[2]) if len(sub) > 2 else ""
                                         sub_quantity = sub[1] if len(sub) > 1 and isinstance(sub[1], (int, float)) else 0
                                         sub_unit_price = sub[3] if len(sub) > 3 and isinstance(sub[3], (int, float)) else 0
                                         sub_total = sub[4] if len(sub) > 4 and isinstance(sub[4], (int, float)) else (sub_quantity * sub_unit_price)
                                         
-                                        # اسم المنتج الفرعي
                                         sub_name = sub[0] if len(sub) > 0 and isinstance(sub[0], str) else ""
-                                        
-                                        # استخراج SKU الفردي للمنتج الفرعي
                                         sub_single_sku = extract_single_sku(sub_combined_sku)
                                         
-                                        # جلب اسم المنتج من قاموس المنتجات
                                         if sub_single_sku and sub_single_sku in product_map:
                                             sub_name = product_map[sub_single_sku]
                                         
-                                        # تجنب إضافة منتجات فرعية مكررة أو بدون اسم
                                         if sub_combined_sku and sub_quantity > 0:
-                                            final_rows.append([
-                                                order_id,
-                                                sub_name if sub_name else sub_combined_sku,
-                                                sub_quantity,
-                                                sub_single_sku,
-                                                sub_combined_sku,
-                                                sub_unit_price,
-                                                sub_total,
-                                                "فرعي"
-                                            ])
+                                            final_rows.append({
+                                                'رقم الطلب': order_id,
+                                                'المنتج': sub_name if sub_name else sub_combined_sku,
+                                                'الكمية': sub_quantity,
+                                                'SKU فردي': sub_single_sku,
+                                                'SKU مجمع (للمراجعة)': sub_combined_sku,
+                                                'سعر الوحدة': sub_unit_price,
+                                                'الإجمالي': sub_total,
+                                                'النوع': 'فرعي',
+                                                'الخصم': order_info.get('الخصم', 0),
+                                                'تكلفة الشحن': order_info.get('تكلفة الشحن', 0),
+                                                'طريقة الدفع': order_info.get('طريقة الدفع', 'غير محدد'),
+                                                'الضريبة': order_info.get('الضريبة', 0),
+                                                'تاريخ الطلب': order_info.get('تاريخ الطلب', ''),
+                                                'قيمة خصم الكوبون': order_info.get('قيمة خصم الكوبون', 0),
+                                                'قيمة خصم العروض الخاصة': order_info.get('قيمة خصم العروض الخاصة', 0)
+                                            })
                             
                             processed_orders += 1
                             
                         except Exception as e:
                             failed_orders += 1
-                            st.warning(f"⚠️ خطأ في معالجة الطلب {order_id}: {str(e)[:100]}")
                             continue
                     
-                    # إنشاء الجدول النهائي
-                    columns = ['رقم الطلب', 'المنتج', 'الكمية', 'SKU فردي', 'SKU مجمع (للمراجعة)', 'سعر الوحدة', 'الإجمالي', 'النوع']
-                    result_df = pd.DataFrame(final_rows, columns=columns)
+                    # إنشاء DataFrame النهائي
+                    result_df = pd.DataFrame(final_rows)
                     
                     # تنظيف البيانات
                     result_df = result_df[result_df['المنتج'].notna()]
                     result_df = result_df[result_df['المنتج'] != ""]
                     result_df = result_df[result_df['الكمية'] > 0]
-                    
-                    # إزالة الصفوف المكررة تقريباً
                     result_df = result_df.drop_duplicates(subset=['رقم الطلب', 'SKU مجمع (للمراجعة)'])
+                    
+                    # تحويل تاريخ الطلب إلى datetime
+                    result_df['تاريخ الطلب'] = pd.to_datetime(result_df['تاريخ الطلب'], errors='coerce')
                     
                     st.success(f"✅ تمت المعالجة بنجاح!")
                     st.info(f"📊 الإحصائيات: {processed_orders} طلب تمت معالجتها، {failed_orders} طلب فشل")
                     st.info(f"📦 عدد الصفوف المنتجة: {len(result_df)} (أساسي: {len(result_df[result_df['النوع'] == 'أساسي'])}, فرعي: {len(result_df[result_df['النوع'] == 'فرعي'])})")
                     
-                    # عرض عينة من النتائج
-                    st.subheader("📋 عينة من النتائج")
-                    display_df = result_df.head(20).copy()
-                    display_df['الكمية'] = display_df['الكمية'].round(2)
-                    display_df['سعر الوحدة'] = display_df['سعر الوحدة'].round(2)
-                    display_df['الإجمالي'] = display_df['الإجمالي'].round(2)
-                    st.dataframe(display_df, use_container_width=True)
+                    # ========== التبويبات المتقدمة ==========
+                    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                        "📋 جدول البيانات التفصيلي",
+                        "📊 إحصائيات وتحليلات",
+                        "📈 رسوم بيانية تفاعلية",
+                        "💰 تحليل المبيعات",
+                        "🏷️ تحليل طرق الدفع"
+                    ])
                     
-                    # زر تحميل النتيجة
-                    output = BytesIO()
-                    result_df.to_excel(output, index=False)
-                    output.seek(0)
+                    with tab1:
+                        st.subheader("📋 جدول البيانات التفصيلي")
+                        st.dataframe(result_df, use_container_width=True)
+                        
+                        # زر تحميل
+                        output = BytesIO()
+                        result_df.to_excel(output, index=False)
+                        output.seek(0)
+                        st.download_button(
+                            "📥 تحميل ملف النتائج (Excel)",
+                            data=output,
+                            file_name=f"product_details_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                        )
                     
-                    st.download_button(
-                        "📥 تحميل ملف النتائج (Excel)",
-                        data=output,
-                        file_name=f"product_details_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True,
-                    )
+                    with tab2:
+                        st.subheader("📊 إحصائيات وتحليلات متقدمة")
+                        
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("عدد الطلبات الفريدة", result_df['رقم الطلب'].nunique())
+                        with col2:
+                            st.metric("عدد المنتجات الفريدة", result_df['SKU فردي'].nunique())
+                        with col3:
+                            total_qty = result_df['الكمية'].sum()
+                            st.metric("إجمالي الكمية", f"{total_qty:,.2f}")
+                        with col4:
+                            total_amount = result_df['الإجمالي'].sum()
+                            st.metric("إجمالي المبيعات", f"{total_amount:,.2f} ₴")
+                        
+                        st.markdown("---")
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            # إجمالي الخصومات
+                            total_discount = result_df['الخصم'].sum() + result_df['قيمة خصم الكوبون'].sum() + result_df['قيمة خصم العروض الخاصة'].sum()
+                            st.metric("إجمالي الخصومات", f"{total_discount:,.2f} ₴")
+                        with col2:
+                            avg_delivery = result_df['تكلفة الشحن'].mean()
+                            st.metric("متوسط تكلفة الشحن", f"{avg_delivery:,.2f} ₴")
+                        with col3:
+                            avg_tax = result_df['الضريبة'].mean()
+                            st.metric("متوسط الضريبة", f"{avg_tax:,.2f} ₴")
+                        
+                        st.markdown("---")
+                        
+                        # أكثر 10 منتجات مبيعاً
+                        st.subheader("🏆 أكثر 10 منتجات مبيعاً")
+                        top_products = result_df.groupby(['SKU فردي', 'المنتج']).agg({
+                            'الكمية': 'sum',
+                            'الإجمالي': 'sum'
+                        }).reset_index().sort_values('الكمية', ascending=False).head(10)
+                        st.dataframe(top_products, use_container_width=True)
+                        
+                        # تحليل المنتجات حسب النوع
+                        st.subheader("📦 توزيع المنتجات حسب النوع")
+                        type_stats = result_df.groupby('النوع').agg({
+                            'الكمية': 'sum',
+                            'الإجمالي': 'sum'
+                        }).reset_index()
+                        st.dataframe(type_stats, use_container_width=True)
                     
-                    # إحصائيات إضافية
-                    st.subheader("📊 إحصائيات إضافية")
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("عدد الطلبات الفريدة", result_df['رقم الطلب'].nunique())
-                    with col2:
-                        st.metric("عدد المنتجات الفريدة", result_df['SKU فردي'].nunique())
-                    with col3:
-                        total_qty = result_df['الكمية'].sum()
-                        st.metric("إجمالي الكمية", f"{total_qty:,.2f}")
-                    with col4:
-                        total_amount = result_df['الإجمالي'].sum()
-                        st.metric("إجمالي القيمة", f"{total_amount:,.2f}")
+                    with tab3:
+                        st.subheader("📈 الرسوم البيانية التفاعلية")
+                        
+                        # 1. المبيعات اليومية
+                        st.markdown("### 📅 المبيعات اليومية")
+                        daily_sales = result_df.groupby(result_df['تاريخ الطلب'].dt.date).agg({
+                            'الإجمالي': 'sum',
+                            'الكمية': 'sum'
+                        }).reset_index()
+                        daily_sales = daily_sales.sort_values('تاريخ الطلب')
+                        
+                        fig1 = px.line(daily_sales, x='تاريخ الطلب', y='الإجمالي', 
+                                      title='المبيعات اليومية',
+                                      labels={'الإجمالي': 'المبيعات (₴)', 'تاريخ الطلب': 'التاريخ'})
+                        st.plotly_chart(fig1, use_container_width=True)
+                        
+                        # 2. توزيع المبيعات حسب المنتج
+                        st.markdown("### 🏷️ أفضل 10 منتجات من حيث المبيعات")
+                        top_10 = result_df.groupby('المنتج')['الإجمالي'].sum().sort_values(ascending=False).head(10)
+                        fig2 = px.bar(x=top_10.values, y=top_10.index, orientation='h',
+                                     title='أفضل 10 منتجات من حيث المبيعات',
+                                     labels={'x': 'المبيعات (₴)', 'y': 'المنتج'})
+                        st.plotly_chart(fig2, use_container_width=True)
+                        
+                        # 3. توزيع المبيعات حسب النوع
+                        st.markdown("### 📊 توزيع المبيعات (أساسي vs فرعي)")
+                        type_sales = result_df.groupby('النوع')['الإجمالي'].sum()
+                        fig3 = px.pie(values=type_sales.values, names=type_sales.index, 
+                                     title='نسبة المبيعات حسب النوع',
+                                     hole=0.4)
+                        st.plotly_chart(fig3, use_container_width=True)
                     
-                    # عرض المنتجات الأكثر مبيعاً
-                    st.subheader("🏆 أكثر 10 منتجات مبيعاً")
-                    top_products = result_df.groupby(['SKU فردي', 'المنتج']).agg({
-                        'الكمية': 'sum',
-                        'الإجمالي': 'sum'
-                    }).reset_index().sort_values('الكمية', ascending=False).head(10)
-                    top_products['الكمية'] = top_products['الكمية'].round(2)
-                    top_products['الإجمالي'] = top_products['الإجمالي'].round(2)
-                    st.dataframe(top_products, use_container_width=True)
+                    with tab4:
+                        st.subheader("💰 تحليل المبيعات المتقدم")
+                        
+                        # إجمالي الإيرادات
+                        total_revenue = result_df['الإجمالي'].sum()
+                        total_quantity = result_df['الكمية'].sum()
+                        avg_unit_price = total_revenue / total_quantity if total_quantity > 0 else 0
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("إجمالي الإيرادات", f"{total_revenue:,.2f} ₴")
+                        with col2:
+                            st.metric("إجمالي الكمية", f"{total_quantity:,.0f}")
+                        with col3:
+                            st.metric("متوسط سعر الوحدة", f"{avg_unit_price:,.2f} ₴")
+                        
+                        st.markdown("---")
+                        
+                        # تحليل الخصومات
+                        st.markdown("### 📉 تحليل الخصومات")
+                        discount_cols = ['الخصم', 'قيمة خصم الكوبون', 'قيمة خصم العروض الخاصة']
+                        discount_summary = {}
+                        for col in discount_cols:
+                            discount_summary[col] = result_df[col].sum()
+                        
+                        discount_df = pd.DataFrame(list(discount_summary.items()), columns=['نوع الخصم', 'القيمة'])
+                        fig4 = px.bar(discount_df, x='نوع الخصم', y='القيمة',
+                                     title='قيمة الخصومات حسب النوع',
+                                     labels={'القيمة': 'القيمة (₴)', 'نوع الخصم': 'نوع الخصم'})
+                        st.plotly_chart(fig4, use_container_width=True)
+                        
+                        # تحليل الضرائب
+                        st.markdown("### 🧾 تحليل الضرائب")
+                        total_tax = result_df['الضريبة'].sum()
+                        tax_percentage = (total_tax / total_revenue) * 100 if total_revenue > 0 else 0
+                        st.metric("إجمالي الضرائب", f"{total_tax:,.2f} ₴", delta=f"{tax_percentage:.2f}% من الإيرادات")
+                        
+                        # شحن مجاني
+                        st.markdown("### 🚚 تحليل الشحن")
+                        free_shipping = len(result_df[result_df['تكلفة الشحن'] == 0]['رقم الطلب'].unique())
+                        total_orders = result_df['رقم الطلب'].nunique()
+                        st.metric("طلبات بشحن مجاني", f"{free_shipping} من {total_orders}", delta=f"{(free_shipping/total_orders)*100:.1f}%")
                     
+                    with tab5:
+                        st.subheader("🏷️ تحليل طرق الدفع")
+                        
+                        # توزيع طرق الدفع
+                        payment_stats = result_df.groupby('طريقة الدفع').agg({
+                            'الإجمالي': 'sum',
+                            'رقم الطلب': 'nunique'
+                        }).reset_index()
+                        payment_stats.columns = ['طريقة الدفع', 'إجمالي المبيعات', 'عدد الطلبات']
+                        payment_stats = payment_stats.sort_values('إجمالي المبيعات', ascending=False)
+                        
+                        st.dataframe(payment_stats, use_container_width=True)
+                        
+                        # رسم بياني لطرق الدفع
+                        fig5 = px.pie(payment_stats, values='إجمالي المبيعات', names='طريقة الدفع',
+                                     title='نسبة المبيعات حسب طريقة الدفع',
+                                     hole=0.3)
+                        st.plotly_chart(fig5, use_container_width=True)
+                        
+                        # تحليل زمني لطرق الدفع
+                        st.markdown("### 📅 تطور طرق الدفع عبر الزمن")
+                        payment_over_time = result_df.groupby([result_df['تاريخ الطلب'].dt.date, 'طريقة الدفع']).agg({
+                            'الإجمالي': 'sum'
+                        }).reset_index()
+                        payment_over_time = payment_over_time.sort_values('تاريخ الطلب')
+                        
+                        fig6 = px.line(payment_over_time, x='تاريخ الطلب', y='الإجمالي', color='طريقة الدفع',
+                                      title='تطور المبيعات حسب طريقة الدفع',
+                                      labels={'الإجمالي': 'المبيعات (₴)', 'تاريخ الطلب': 'التاريخ'})
+                        st.plotly_chart(fig6, use_container_width=True)
+                        
                 except Exception as e:
                     st.error(f"❌ حدث خطأ أثناء المعالجة: {str(e)}")
                     st.exception(e)
