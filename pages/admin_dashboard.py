@@ -103,8 +103,13 @@ def styled_dataframe(input_df):
                 return ['background-color: #f8d7da'] * len(row)
             else:
                 return ['background-color: #d1ecf1'] * len(row)
+        # تظليل الصفوف التي تحتوي على "بانتظار الدفع"
+        if row.get('order_status') and "بانتظار الدفع" in str(row.get('order_status')):
+            return ['background-color: #fff4d6'] * len(row)
         return [''] * len(row)
-    
+        
+        # لا نقوم بتغيير أسماء الأعمدة قبل التلوين، نستخدم البيانات الأصلية
+        # فقط للعرض نقوم بترجمة الأعمدة
     display_df = input_df.copy()
     display_df = display_df.rename(columns={
         "order_number": "رقم الطلب", "invoice_number": "رقم الفاتورة",
@@ -113,8 +118,10 @@ def styled_dataframe(input_df):
         "difference": "الفرق", "order_status": "حالة الطلب",
         "case_label": "نوع الحالة", "status": "الحالة"
     })
-    return display_df.style.apply(highlight_rows, axis=1)
-
+    # تطبيق التلوين على البيانات الأصلية ثم العرض
+    return display_df.style.apply(lambda row: highlight_rows(input_df.loc[row.name]), axis=1)
+    
+# ========== دالة عرض الجدول مع النقر ==========
 def render_table_with_click(df, tab_name):
     if df.empty:
         st.success("لا توجد بيانات في هذا القسم.")
@@ -337,6 +344,7 @@ def show():
             st.session_state.show_export = True
     
     # فلاتر
+    st.markdown("### 🔍 فلاتر البحث")
     col1, col2, col3 = st.columns(3)
     with col1:
         branch_options = ["الكل"] + sorted(df["pharmacy_name"].dropna().astype(str).unique().tolist())
@@ -347,7 +355,15 @@ def show():
         order_status_options = ["الكل", "تم التوصيل", "ملغي", "مسترجع", "بانتظار الدفع", "تم الاستلام من فرع"]
         selected_order_status = st.selectbox("📋 فلتر حالة الطلب", order_status_options)
     
-    # تطبيق الفلاتر
+    col4, col5, col6 = st.columns(3)
+    with col4:
+        search_order = st.text_input("🔢 رقم الطلب", placeholder="بحث برقم الطلب...")
+    with col5:
+        search_invoice = st.text_input("🧾 رقم الفاتورة", placeholder="بحث برقم الفاتورة...")
+    with col6:
+        search_sku = st.text_input("🏷️ SKU", placeholder="بحث بـ SKU...")
+    
+    # تطبيق جميع الفلاتر
     filtered_df = df.copy()
     if selected_branch != "الكل":
         filtered_df = filtered_df[filtered_df["pharmacy_name"] == selected_branch]
@@ -358,6 +374,12 @@ def show():
             filtered_df = filtered_df[filtered_df["order_status"].str.contains("تم الاستلام من فرع", na=False)]
         else:
             filtered_df = filtered_df[filtered_df["order_status"] == selected_order_status]
+    if search_order:
+        filtered_df = filtered_df[filtered_df["order_number"].astype(str).str.contains(search_order, na=False)]
+    if search_invoice:
+        filtered_df = filtered_df[filtered_df["invoice_number"].astype(str).str.contains(search_invoice, na=False)]
+    if search_sku:
+        filtered_df = filtered_df[filtered_df["sku"].astype(str).str.contains(search_sku, na=False)]
     
     # فصل البيانات
     active_mask_filtered = ~filtered_df["order_status"].apply(is_cancelled_or_returned_status)
@@ -400,10 +422,10 @@ def show():
     .stTabs [data-baseweb="tab-list"] button:nth-child(2) { background-color: #ED7D31; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(3) { background-color: #70AD47; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(4) { background-color: #FFC000; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(5) { background-color: #9B59B6; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(6) { background-color: #3498DB; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(7) { background-color: #E74C3C; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(8) { background-color: #27AE60; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(5) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(6) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(7) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(8) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
         transform: translateY(-2px) !important;
         box-shadow: 0 4px 8px rgba(0,0,0,0.2) !important;
