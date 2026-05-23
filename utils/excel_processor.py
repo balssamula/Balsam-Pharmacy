@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import sqlite3
 import uuid
+import re
 from datetime import datetime
 from utils.helpers import (
     normalize_order_number, normalize_sku, normalize_text,
@@ -9,30 +10,58 @@ from utils.helpers import (
 )
 from utils.database import DB_PATH
 
+def find_column(df, possible_names):
+    """البحث عن عمود في DataFrame بأسماء محتملة"""
+    for name in possible_names:
+        # البحث بالاسم الأصلي
+        if name in df.columns:
+            return name
+        # البحث بعد تنظيف الاسم
+        clean_name = str(name).strip()
+        for col in df.columns:
+            if str(col).strip() == clean_name:
+                return col
+    return None
+
 def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
     """معالجة شيت سلة"""
     df = df_salla.copy()
     
     # تحديد الأعمدة المطلوبة
-    df["order_number"] = df["رقم الطلب"].apply(normalize_order_number)
-    df["sku"] = df["SKU"].apply(normalize_sku)
-    df["product_name"] = df["اسم المنتج"].apply(normalize_text)
-    df["quantity"] = pd.to_numeric(df["الكمية"], errors="coerce").fillna(0)
-    df["customer_name"] = df["اسم العميل"].apply(normalize_text)
-    df["customer_phone"] = df["رقم الجوال"].apply(normalize_text)
-    df["city"] = df["المدينة"].apply(normalize_text)
-    df["order_status"] = df["حالة الطلب"].apply(normalize_text)
-    df["order_date"] = df["تاريخ الطلب"].apply(normalize_text)
-    df["total_amount"] = pd.to_numeric(df["إجمالي الطلب"], errors="coerce").fillna(0)
+    order_col = find_column(df, ['رقم الطلب', 'Order Number', 'order_number'])
+    sku_col = find_column(df, ['SKU', 'Sku', 'sku'])
+    product_col = find_column(df, ['اسم المنتج', 'Product Name', 'product_name'])
+    qty_col = find_column(df, ['الكمية', 'Quantity', 'qty'])
+    customer_col = find_column(df, ['اسم العميل', 'Customer Name', 'customer_name'])
+    phone_col = find_column(df, ['رقم الجوال', 'Phone', 'phone'])
+    city_col = find_column(df, ['المدينة', 'City', 'city'])
+    status_col = find_column(df, ['حالة الطلب', 'Order Status', 'order_status'])
+    date_col = find_column(df, ['تاريخ الطلب', 'Order Date', 'order_date'])
+    total_col = find_column(df, ['إجمالي الطلب', 'Total', 'total'])
+    discount_col = find_column(df, ['الخصم', 'Discount', 'discount'])
+    shipping_col = find_column(df, ['تكلفة الشحن', 'Shipping Cost', 'shipping_cost'])
+    payment_col = find_column(df, ['طريقة الدفع', 'Payment Method', 'payment_method'])
+    tax_col = find_column(df, ['الضريبة', 'Tax', 'tax'])
+    coupon_col = find_column(df, ['قيمة خصم الكوبون', 'Coupon Discount', 'coupon_discount'])
+    offer_col = find_column(df, ['قيمة خصم العروض الخاصة', 'Offer Discount', 'offer_discount'])
     
-    # الأعمدة الجديدة من سلة
-    df["discount"] = pd.to_numeric(df["الخصم"], errors="coerce").fillna(0) if "الخصم" in df.columns else 0
-    df["shipping_cost"] = pd.to_numeric(df["تكلفة الشحن"], errors="coerce").fillna(0) if "تكلفة الشحن" in df.columns else 0
-    df["payment_method"] = df["طريقة الدفع"].apply(normalize_text) if "طريقة الدفع" in df.columns else ""
-    df["tax"] = pd.to_numeric(df["الضريبة"], errors="coerce").fillna(0) if "الضريبة" in df.columns else 0
-    df["coupon_discount"] = pd.to_numeric(df["قيمة خصم الكوبون"], errors="coerce").fillna(0) if "قيمة خصم الكوبون" in df.columns else 0
-    df["offer_discount"] = pd.to_numeric(df["قيمة خصم العروض الخاصة"], errors="coerce").fillna(0) if "قيمة خصم العروض الخاصة" in df.columns else 0
-    df["total_discount"] = pd.to_numeric(df["إجمالي الخصم"], errors="coerce").fillna(0) if "إجمالي الخصم" in df.columns else 0
+    # تطبيق الدوال على الأعمدة
+    df["order_number"] = df[order_col].apply(normalize_order_number) if order_col else ""
+    df["sku"] = df[sku_col].apply(normalize_sku) if sku_col else ""
+    df["product_name"] = df[product_col].apply(normalize_text) if product_col else ""
+    df["quantity"] = pd.to_numeric(df[qty_col], errors="coerce").fillna(0) if qty_col else 0
+    df["customer_name"] = df[customer_col].apply(normalize_text) if customer_col else ""
+    df["customer_phone"] = df[phone_col].apply(normalize_text) if phone_col else ""
+    df["city"] = df[city_col].apply(normalize_text) if city_col else ""
+    df["order_status"] = df[status_col].apply(normalize_text) if status_col else ""
+    df["order_date"] = df[date_col].apply(normalize_text) if date_col else ""
+    df["total_amount"] = pd.to_numeric(df[total_col], errors="coerce").fillna(0) if total_col else 0
+    df["discount"] = pd.to_numeric(df[discount_col], errors="coerce").fillna(0) if discount_col else 0
+    df["shipping_cost"] = pd.to_numeric(df[shipping_col], errors="coerce").fillna(0) if shipping_col else 0
+    df["payment_method"] = df[payment_col].apply(normalize_text) if payment_col else ""
+    df["tax"] = pd.to_numeric(df[tax_col], errors="coerce").fillna(0) if tax_col else 0
+    df["coupon_discount"] = pd.to_numeric(df[coupon_col], errors="coerce").fillna(0) if coupon_col else 0
+    df["offer_discount"] = pd.to_numeric(df[offer_col], errors="coerce").fillna(0) if offer_col else 0
     
     # استبعاد عملاء الهدية والدعاية
     df = df[~df["customer_name"].apply(is_gift_or_promotion)]
@@ -67,8 +96,7 @@ def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
         "payment_method": "first",
         "tax": "first",
         "coupon_discount": "first",
-        "offer_discount": "first",
-        "total_discount": "first"
+        "offer_discount": "first"
     }).rename(columns={
         "product_name": "salla_product_name",
         "quantity": "salla_qty",
@@ -82,50 +110,73 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     """معالجة شيت ABC مع الأعمدة الجديدة"""
     df = df_abc.copy()
     
-    # استبعاد FREE GIFTS
-    EXCLUDED_PROFILE = "FREE GIFTS FOR CUSTOMERS"
-    if "نوع البروفايل" in df.columns:
-        df = df[df["نوع البروفايل"].astype(str).str.strip() != EXCLUDED_PROFILE].copy()
+    # تحديد الأعمدة المطلوبة
+    order_col = find_column(df, ['رقم الطلب', 'Order Number', 'order_number'])
+    sku_col = find_column(df, ['رقم الصنف', 'Item No.', 'Item Number', 'item_number'])
+    product_col = find_column(df, ['اسم الصنف', 'Product', 'product'])
+    qty_col = find_column(df, ['Net Sold Qty', 'Net Qty.', 'Net Sold Quantity'])
+    invoice_col = find_column(df, ['رقم الفاتورة', 'Receipt No.', 'receipt_no', 'invoice_number'])
+    invoice_date_col = find_column(df, ['التاريخ', 'Date', 'date', 'Sales Date'])
+    pharmacy_col = find_column(df, ['رقم الصيدلية', 'Branch', 'branch'])
+    pharmacist_col = find_column(df, ['الصيدلي', 'Username', 'username'])
+    profile_col = find_column(df, ['نوع البروفايل', 'Profile', 'profile'])
     
-    # استبعاد DELIVERY FEE
-    if "اسم الصنف" in df.columns:
-        df = df[~df["اسم الصنف"].astype(str).str.upper().str.contains("DELIVERY FEE", na=False)].copy()
+    # الأعمدة الجديدة في ملفك
+    batch_col = find_column(df, ['Batch No.', 'Batch', 'batch'])
+    expiry_col = find_column(df, ['Expiry', 'Expiry Date', 'expiry_date'])
+    sale_price_col = find_column(df, ['Sale Price', 'sale_price'])
+    total_sale_col = find_column(df, ['Total Sale', 'total_sale'])
+    cost_price_col = find_column(df, ['Cost Price', 'cost_price'])
+    total_cost_col = find_column(df, ['Total Cost', 'total_cost'])
+    vat_col = find_column(df, ['VAT %', 'vat'])
+    total_vat_col = find_column(df, ['Total VAT.', 'total_vat'])
+    total_after_vat_col = find_column(df, ['Total After VAT', 'total_after_vat'])
+    receipt_no_col = find_column(df, ['Receipt No.', 'receipt_no'])
+    branch_city_col = find_column(df, ['Branch City', 'branch_city'])
     
-    # استبعاد SKU 16133
-    if "رقم الصنف" in df.columns:
-        df = df[df["رقم الصنف"].astype(str).str.strip() != "16133"].copy()
+    # تحقق من وجود العمود الأساسي
+    if order_col is None:
+        # محاولة العثور على عمود يشبه رقم الطلب
+        for col in df.columns:
+            if 'طلب' in str(col) or 'order' in str(col).lower():
+                order_col = col
+                break
     
-    # تحديد الأعمدة المطلوبة - ديناميكياً حسب المتاح
-    df["order_number"] = df["رقم الطلب"].apply(normalize_order_number)
-    df["sku"] = df["رقم الصنف"].apply(normalize_sku)
-    df["abc_product_name"] = df["اسم الصنف"].apply(normalize_text)
-    df["abc_qty"] = pd.to_numeric(df["Net Sold Qty"], errors="coerce").fillna(0)
-    df["invoice_number"] = df["رقم الفاتورة"].apply(normalize_text)
-    df["invoice_date"] = df["التاريخ"].apply(normalize_text)
-    df["abc_pharmacy_name"] = df["رقم الصيدلية"].apply(normalize_text)
-    df["abc_pharmacist_name"] = df["الصيدلي"].apply(normalize_text) if "الصيدلي" in df.columns else ""
+    if order_col is None:
+        raise ValueError("لم يتم العثور على عمود رقم الطلب في شيت ABC")
+    
+    # تطبيق الدوال
+    df["order_number"] = df[order_col].apply(normalize_order_number)
+    df["sku"] = df[sku_col].apply(normalize_sku) if sku_col else ""
+    df["abc_product_name"] = df[product_col].apply(normalize_text) if product_col else ""
+    df["abc_qty"] = pd.to_numeric(df[qty_col], errors="coerce").fillna(0) if qty_col else 0
+    df["invoice_number"] = df[invoice_col].apply(normalize_text) if invoice_col else ""
+    df["invoice_date"] = df[invoice_date_col].apply(normalize_text) if invoice_date_col else ""
+    df["abc_pharmacy_name"] = df[pharmacy_col].apply(normalize_text) if pharmacy_col else ""
+    df["abc_pharmacist_name"] = df[pharmacist_col].apply(normalize_text) if pharmacist_col else ""
+    df["profile_type"] = df[profile_col].apply(normalize_text) if profile_col else ""
+    
+    # الأعمدة الجديدة
+    df["batch_no"] = df[batch_col].apply(normalize_text) if batch_col else ""
+    df["expiry_date"] = df[expiry_col].apply(normalize_text) if expiry_col else ""
+    df["sale_price"] = pd.to_numeric(df[sale_price_col], errors="coerce").fillna(0) if sale_price_col else 0
+    df["total_sale"] = pd.to_numeric(df[total_sale_col], errors="coerce").fillna(0) if total_sale_col else 0
+    df["cost_price"] = pd.to_numeric(df[cost_price_col], errors="coerce").fillna(0) if cost_price_col else 0
+    df["total_cost"] = pd.to_numeric(df[total_cost_col], errors="coerce").fillna(0) if total_cost_col else 0
+    df["vat"] = pd.to_numeric(df[vat_col], errors="coerce").fillna(0) if vat_col else 0
+    df["total_vat"] = pd.to_numeric(df[total_vat_col], errors="coerce").fillna(0) if total_vat_col else 0
+    df["total_after_vat"] = pd.to_numeric(df[total_after_vat_col], errors="coerce").fillna(0) if total_after_vat_col else 0
+    df["receipt_no"] = df[receipt_no_col].apply(normalize_text) if receipt_no_col else ""
+    df["branch_city"] = df[branch_city_col].apply(normalize_text) if branch_city_col else ""
+    
     df["all_abc_pharmacies"] = df["abc_pharmacy_name"]
-    df["profile_type"] = df["نوع البروفايل"].apply(normalize_text) if "نوع البروفايل" in df.columns else ""
-    
-    # الأعمدة الجديدة من ABC
-    df["batch_no"] = df["Batch No."].apply(normalize_text) if "Batch No." in df.columns else ""
-    df["expiry_date"] = df["Expiry"].apply(normalize_text) if "Expiry" in df.columns else ""
-    df["sale_price"] = pd.to_numeric(df["Sale Price"], errors="coerce").fillna(0) if "Sale Price" in df.columns else 0
-    df["total_sale"] = pd.to_numeric(df["Total Sale"], errors="coerce").fillna(0) if "Total Sale" in df.columns else 0
-    df["cost_price"] = pd.to_numeric(df["Cost Price"], errors="coerce").fillna(0) if "Cost Price" in df.columns else 0
-    df["total_cost"] = pd.to_numeric(df["Total Cost"], errors="coerce").fillna(0) if "Total Cost" in df.columns else 0
-    df["vat"] = pd.to_numeric(df["VAT %"], errors="coerce").fillna(0) if "VAT %" in df.columns else 0
-    df["total_vat"] = pd.to_numeric(df["Total VAT."], errors="coerce").fillna(0) if "Total VAT." in df.columns else 0
-    df["total_after_vat"] = pd.to_numeric(df["Total After VAT"], errors="coerce").fillna(0) if "Total After VAT" in df.columns else 0
-    df["receipt_no"] = df["Receipt No."].apply(normalize_text) if "Receipt No." in df.columns else ""
-    df["branch_city"] = df["Branch City"].apply(normalize_text) if "Branch City" in df.columns else ""
     
     if "Receipt Classification" in df.columns:
         df["receipt_classification"] = df["Receipt Classification"].apply(normalize_text)
     else:
         df["receipt_classification"] = ""
     
-    # تصفية البيانات
+    # استبعاد البيانات غير الصالحة
     df = df[
         (df["sku"] != "")
         & (df["order_number"] != "")
@@ -166,6 +217,10 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     """تصنيف الحالات (إضافة/إرجاع/طلب بدون فاتورة/فاتورة بدون طلب)"""
     salla_grouped = prepare_salla_frame(df_salla)
     abc_grouped = prepare_abc_frame(df_abc)
+    
+    if salla_grouped.empty and abc_grouped.empty:
+        return pd.DataFrame()
+    
     merged = pd.merge(salla_grouped, abc_grouped, on=["order_number", "sku"], how="outer", indicator=True)
     
     # تعبئة القيم المفقودة
@@ -236,19 +291,17 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         "customer_phone", "city", "order_status", "order_date",
         "invoice_date", "profile_type", "receipt_classification",
         "all_abc_pharmacies", "other_branch_details", "total_amount",
-        # الأعمدة الجديدة
         "payment_method", "discount", "shipping_cost", "tax",
-        "coupon_discount", "offer_discount", "total_discount",
-        "batch_no", "expiry_date", "sale_price", "total_sale",
-        "cost_price", "total_cost", "vat", "total_vat",
-        "total_after_vat", "receipt_no", "branch_city"
+        "coupon_discount", "offer_discount", "batch_no", "expiry_date",
+        "sale_price", "total_sale", "cost_price", "total_cost",
+        "vat", "total_vat", "total_after_vat", "receipt_no", "branch_city"
     ]
     
     for col in ordered_columns:
         if col not in result.columns:
             result[col] = ""
     
-    return result[ordered_columns]
+    return result
 
 def process_excel(uploaded_file, uploaded_by: str):
     """معالجة ملف Excel وإدراج النتائج في قاعدة البيانات"""
