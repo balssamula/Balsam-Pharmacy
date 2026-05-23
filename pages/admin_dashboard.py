@@ -10,8 +10,9 @@ from utils.database import (
     lock_session, unlock_session, activate_session, delete_session,
     fetch_active_items, get_all_last_logins, get_completed_items,
     reopen_case_by_item_key, hide_item_from_pharmacy, unhide_item_from_pharmacy,
-    lock_item, unlock_item, save_case_note, get_old_orders, get_old_orders_stats,
-    get_manager_last_login, get_login_history
+    lock_item, unlock_item, save_case_note,
+    get_manager_last_login, get_login_history,
+    get_old_orders, get_old_orders_stats
 )
 from utils.helpers import (
     is_cancelled_or_returned_status, is_pending_payment_status,
@@ -103,13 +104,8 @@ def styled_dataframe(input_df):
                 return ['background-color: #f8d7da'] * len(row)
             else:
                 return ['background-color: #d1ecf1'] * len(row)
-        # تظليل الصفوف التي تحتوي على "بانتظار الدفع"
-        if row.get('order_status') and "بانتظار الدفع" in str(row.get('order_status')):
-            return ['background-color: #fff4d6'] * len(row)
         return [''] * len(row)
-        
-        # لا نقوم بتغيير أسماء الأعمدة قبل التلوين، نستخدم البيانات الأصلية
-        # فقط للعرض نقوم بترجمة الأعمدة
+    
     display_df = input_df.copy()
     display_df = display_df.rename(columns={
         "order_number": "رقم الطلب", "invoice_number": "رقم الفاتورة",
@@ -118,10 +114,8 @@ def styled_dataframe(input_df):
         "difference": "الفرق", "order_status": "حالة الطلب",
         "case_label": "نوع الحالة", "status": "الحالة"
     })
-    # تطبيق التلوين على البيانات الأصلية ثم العرض
-    return display_df.style.apply(lambda row: highlight_rows(input_df.loc[row.name]), axis=1)
-    
-# ========== دالة عرض الجدول مع النقر ==========
+    return display_df.style.apply(highlight_rows, axis=1)
+
 def render_table_with_click(df, tab_name):
     if df.empty:
         st.success("لا توجد بيانات في هذا القسم.")
@@ -172,6 +166,35 @@ def render_table_with_click(df, tab_name):
                     save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note)
                     st.rerun()
 
+def render_old_orders_table(df):
+    """عرض جدول الطلبات القديمة"""
+    if df.empty:
+        st.success("🎉 لا توجد طلبات قديمة")
+        return
+    
+    display_df = df.copy()
+    display_df = display_df.rename(columns={
+        "order_number": "رقم الطلب",
+        "invoice_number": "رقم الفاتورة",
+        "sku": "SKU",
+        "product_name": "المنتج",
+        "pharmacy_name": "الفرع",
+        "salla_qty": "كمية سلة",
+        "abc_qty": "كمية ABC",
+        "difference": "الفرق",
+        "case_label": "نوع الحالة",
+        "order_status": "حالة الطلب",
+        "order_date": "تاريخ الطلب",
+        "days_old": "عدد الأيام"
+    })
+    
+    st.dataframe(
+        display_df[["رقم الطلب", "رقم الفاتورة", "SKU", "المنتج", "الفرع", 
+                   "كمية سلة", "كمية ABC", "الفرق", "نوع الحالة", "حالة الطلب", 
+                   "تاريخ الطلب", "عدد الأيام"]].head(50),
+        use_container_width=True
+    )
+
 def show():
     st.markdown("""
     <div class="hero">
@@ -180,7 +203,7 @@ def show():
     </div>
     """, unsafe_allow_html=True)
     
-    # معلومات المدير العام في أعلى الصفحة
+    # معلومات المدير العام
     manager_info = get_manager_last_login()
     login_history = get_login_history(10)
     
@@ -227,7 +250,7 @@ def show():
         </div>
         """, unsafe_allow_html=True)
     
-    # إدارة الجلسات السابقة داخل expander
+    # إدارة الجلسات السابقة
     with st.expander("📋 إدارة الجلسات السابقة", expanded=False):
         sessions_df = get_all_sessions()
         if not sessions_df.empty:
@@ -274,7 +297,7 @@ def show():
         else:
             st.info("لا توجد جلسات سابقة")
     
-    # مقارنة الجلسات داخل expander
+    # مقارنة الجلسات
     with st.expander("🔄 مقارنة الجلسات", expanded=False):
         sessions_list = get_all_sessions()
         if not sessions_list.empty:
@@ -308,7 +331,7 @@ def show():
                 del st.session_state.view_session_id
                 st.rerun()
     
-    # ========== جلب البيانات النشطة ==========
+    # جلب البيانات النشطة
     df = fetch_active_items(include_hidden=True)
     if df.empty:
         st.info("📂 لا توجد بيانات فعالة بعد. ارفع ملف Excel من الأعلى لبدء التحليل.")
@@ -344,7 +367,6 @@ def show():
             st.session_state.show_export = True
     
     # فلاتر
-    st.markdown("### 🔍 فلاتر البحث")
     col1, col2, col3 = st.columns(3)
     with col1:
         branch_options = ["الكل"] + sorted(df["pharmacy_name"].dropna().astype(str).unique().tolist())
@@ -355,15 +377,7 @@ def show():
         order_status_options = ["الكل", "تم التوصيل", "ملغي", "مسترجع", "بانتظار الدفع", "تم الاستلام من فرع"]
         selected_order_status = st.selectbox("📋 فلتر حالة الطلب", order_status_options)
     
-    col4, col5, col6 = st.columns(3)
-    with col4:
-        search_order = st.text_input("🔢 رقم الطلب", placeholder="بحث برقم الطلب...")
-    with col5:
-        search_invoice = st.text_input("🧾 رقم الفاتورة", placeholder="بحث برقم الفاتورة...")
-    with col6:
-        search_sku = st.text_input("🏷️ SKU", placeholder="بحث بـ SKU...")
-    
-    # تطبيق جميع الفلاتر
+    # تطبيق الفلاتر
     filtered_df = df.copy()
     if selected_branch != "الكل":
         filtered_df = filtered_df[filtered_df["pharmacy_name"] == selected_branch]
@@ -374,12 +388,6 @@ def show():
             filtered_df = filtered_df[filtered_df["order_status"].str.contains("تم الاستلام من فرع", na=False)]
         else:
             filtered_df = filtered_df[filtered_df["order_status"] == selected_order_status]
-    if search_order:
-        filtered_df = filtered_df[filtered_df["order_number"].astype(str).str.contains(search_order, na=False)]
-    if search_invoice:
-        filtered_df = filtered_df[filtered_df["invoice_number"].astype(str).str.contains(search_invoice, na=False)]
-    if search_sku:
-        filtered_df = filtered_df[filtered_df["sku"].astype(str).str.contains(search_sku, na=False)]
     
     # فصل البيانات
     active_mask_filtered = ~filtered_df["order_status"].apply(is_cancelled_or_returned_status)
@@ -398,6 +406,9 @@ def show():
     if selected_branch != "الكل":
         completed_df = completed_df[completed_df["pharmacy_name"] == selected_branch]
     
+    # الطلبات القديمة
+    old_stats = get_old_orders_stats()
+    
     # تصدير Excel
     if st.session_state.get('show_export', False):
         export_data = {
@@ -415,17 +426,17 @@ def show():
         )
         st.session_state.show_export = False
     
-    # ========== التبويبات الملونة ==========
+    # التبويبات الملونة
     st.markdown("""
     <style>
     .stTabs [data-baseweb="tab-list"] button:nth-child(1) { background-color: #4472C4; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(2) { background-color: #ED7D31; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(3) { background-color: #70AD47; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(4) { background-color: #FFC000; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(5) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(5) { background-color: #9B59B6; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(6) { background-color: #3498DB; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(7) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(8) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(7) { background-color: #E74C3C; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(8) { background-color: #27AE60; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(9) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
         transform: translateY(-2px) !important;
@@ -441,7 +452,7 @@ def show():
     </style>
     """, unsafe_allow_html=True)
     
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
         f"📈 الإضافات ({len(additions_df)})",
         f"📉 الإرجاعات ({len(returns_df)})",
         f"📦 طلبات بدون فاتورة ({len(orphan_salla_df)})",
@@ -450,7 +461,7 @@ def show():
         f"💰 بانتظار الدفع ({len(payment_df)})",
         f"⚠️ ملغي/مسترجع ({len(cancelled_df)})",
         f"✅ تم الانتهاء ({len(completed_df)})",
-        f"📅 طلبات قديمة (>6 أشهر)"
+        f"📅 طلبات قديمة ({old_stats['total']})"
     ])
     
     with tab1:
@@ -468,68 +479,27 @@ def show():
     with tab7:
         render_table_with_click(cancelled_df, "cancelled")
     with tab8:
-        if not completed_df.empty:
-            render_table_with_click(completed_df, "completed")
-        else:
-            st.info("لا توجد طلبات مكتملة")
+        render_table_with_click(completed_df, "completed")
     with tab9:
-    st.markdown("### 📅 الطلبات التي مر عليها أكثر من 6 أشهر ولم تكتمل")
-    
-    # إضافة إحصائيات
-    old_stats = get_old_orders_stats()
-    if old_stats["total"] > 0:
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("📊 إجمالي الطلبات القديمة", old_stats["total"])
-        with col2:
-            st.metric("➕ إضافات قديمة", old_stats["additions"])
-        with col3:
-            st.metric("➖ إرجاعات قديمة", old_stats["returns"])
-        with col4:
-            st.metric("📦 طلبات بدون فاتورة", old_stats.get("orphan_salla", 0))
+        st.markdown("### 📅 الطلبات القديمة (أكثر من 6 أشهر)")
         
-        # إضافة خيار عدد الأشهر
-        months = st.slider("عدد الأشهر للبحث", min_value=3, max_value=24, value=6, step=3)
-        
-        # جلب الطلبات القديمة
-        old_orders_df = get_old_orders(months=months)
-        
-        if not old_orders_df.empty:
-            # عرض جدول الطلبات القديمة
-            display_df = old_orders_df.copy()
-            display_df = display_df.rename(columns={
-                "order_number": "رقم الطلب",
-                "invoice_number": "رقم الفاتورة",
-                "sku": "SKU",
-                "product_name": "المنتج",
-                "pharmacy_name": "الفرع",
-                "salla_qty": "كمية سلة",
-                "abc_qty": "كمية ABC",
-                "difference": "الفرق",
-                "case_label": "نوع الحالة",
-                "order_status": "حالة الطلب",
-                "order_date": "تاريخ الطلب",
-                "days_old": "عدد الأيام"
-            })
+        if old_stats["total"] > 0:
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("📊 إجمالي الطلبات القديمة", old_stats["total"])
+            with col2:
+                st.metric("➕ إضافات قديمة", old_stats["additions"])
+            with col3:
+                st.metric("➖ إرجاعات قديمة", old_stats["returns"])
+            with col4:
+                st.metric("📦 طلبات بدون فاتورة", old_stats.get("orphan_salla", 0))
             
-            # تلوين الصفوف حسب عدد الأيام
-            def color_days(val):
-                if val > 365:
-                    return 'background-color: #ffcccc'
-                elif val > 180:
-                    return 'background-color: #ffe0cc'
-                return ''
+            months = st.slider("عدد الأشهر للبحث", min_value=3, max_value=24, value=6, step=3)
+            old_orders_df = get_old_orders(months=months)
+            render_old_orders_table(old_orders_df)
             
-            st.dataframe(
-                display_df[["رقم الطلب", "رقم الفاتورة", "SKU", "المنتج", "الفرع", 
-                           "كمية سلة", "كمية ABC", "الفرق", "نوع الحالة", "حالة الطلب", 
-                           "تاريخ الطلب", "عدد الأيام"]].head(50),
-                use_container_width=True
-            )
-            
-            # زر تصدير الطلبات القديمة
             if st.button("📥 تصدير الطلبات القديمة إلى Excel", use_container_width=True):
-                excel_data = export_to_excel({"الطلبات_القديمة": display_df})
+                excel_data = export_to_excel({"الطلبات_القديمة": old_orders_df})
                 st.download_button(
                     "📥 تحميل التقرير",
                     data=excel_data,
@@ -538,74 +508,25 @@ def show():
                     use_container_width=True,
                 )
         else:
-            st.success(f"🎉 لا توجد طلبات قديمة (أكثر من {months} أشهر)")
-    else:
-        st.success("🎉 لا توجد طلبات قديمة (أكثر من 6 أشهر)")
-        
-    # ========== آخر دخول للصيدليات ==========
+            st.success("🎉 لا توجد طلبات قديمة (أكثر من 6 أشهر)")
+    
+    # آخر دخول للصيدليات
     st.markdown('<div class="section-title">👥 آخر دخول للصيدليات</div>', unsafe_allow_html=True)
-
-    # التحقق من وجود البيانات
-    try:
-        last_logins = get_all_last_logins()
-        if not last_logins.empty:
-            cols = st.columns(4)
-            for idx, (_, row) in enumerate(last_logins.head(8).iterrows()):
-                with cols[idx % 4]:
-                    # تحديد اللون حسب آخر دخول
-                    last_login = row.get('last_login', 'لم يدخل بعد')
-                    last_ip = row.get('last_ip', 'غير معروف')
-                    pharmacist_name = row.get('pharmacist_name', 'غير مسجل')
-                    pharmacy_name = row.get('pharmacy_name', 'غير معروف')
-                
-                    st.markdown(f"""
-                    <div style="background:#f8f9fa;border-radius:12px;padding:0.8rem;margin-bottom:0.8rem;border-right:3px solid #1f7a8c;">
-                        <strong>🏥 {str(pharmacy_name)[-15:]}</strong><br>
-                        👤 {str(pharmacist_name)[:20]}<br>
-                        📅 {str(last_login)[:16] if last_login and str(last_login) != 'لم يدخل بعد' else 'لم يدخل بعد'}<br>
-                        🌐 IP: {str(last_ip)[:15]}
-                    </div>
-                    """, unsafe_allow_html=True)
+    last_logins = get_all_last_logins()
+    if not last_logins.empty:
+        cols = st.columns(4)
+        for idx, (_, row) in enumerate(last_logins.head(8).iterrows()):
+            with cols[idx % 4]:
+                st.markdown(f"""
+                <div class="note-card">
+                    <strong>🏥 {row['pharmacy_name'][-10:]}</strong><br>
+                    <span>👤 {row['pharmacist_name'] or 'غير مسجل'}</span><br>
+                    <span>📅 {row['last_login'][:16] if row['last_login'] else 'لم يدخل'}</span><br>
+                    <span>🌐 IP: {row['last_ip'] or 'غير معروف'}</span>
+                </div>
+                """, unsafe_allow_html=True)
         
-            # عرض جدول كامل في expander
-            with st.expander("📋 عرض جميع الصيدليات"):
-                st.dataframe(last_logins[['pharmacy_name', 'pharmacist_name', 'last_login', 'last_ip']], use_container_width=True)
-        else:
-            st.info("لا توجد سجلات دخول للصيدليات بعد")
-        
-    except Exception as e:
-        st.warning(f"حدث خطأ في تحميل بيانات الصيدليات: {str(e)[:100]}")
-
-def get_client_ip():
-    """الحصول على عنوان IP الخاص بالجهاز"""
-    try:
-        # محاولة الحصول على IP من Streamlit Cloud
-        import streamlit as st
-        if hasattr(st, 'context') and hasattr(st.context, 'headers'):
-            headers = st.context.headers
-            if headers:
-                # محاولة الحصول على IP من headers
-                forwarded = headers.get('X-Forwarded-For', '')
-                if forwarded:
-                    return forwarded.split(',')[0].strip()
-                real_ip = headers.get('X-Real-IP', '')
-                if real_ip:
-                    return real_ip
-    except:
-        pass
-    
-    try:
-        # استخدام خدمة خارجية
-        import requests
-        response = requests.get('https://api.ipify.org', timeout=3)
-        if response.status_code == 200:
-            return response.text
-    except:
-        pass
-    
-    try:
-        import socket
-        hostname = socket.gethostname()
-        return socket.gethostbyname(hostname)
-    except:
-        return "غير معروف"
+        with st.expander("📋 عرض جميع الصيدليات"):
+            st.dataframe(last_logins[['pharmacy_name', 'pharmacist_name', 'last_login', 'last_ip']], use_container_width=True)
+    else:
+        st.info("لا توجد سجلات دخول للصيدليات بعد")
