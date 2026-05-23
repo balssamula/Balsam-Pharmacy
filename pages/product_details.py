@@ -1,8 +1,31 @@
 import streamlit as st
 import pandas as pd
 import json
+import re
 from io import BytesIO
 from datetime import datetime
+
+def extract_single_sku(combined_sku):
+    """استخراج SKU الفردي من SKU المجمع"""
+    if pd.isna(combined_sku) or combined_sku == "":
+        return ""
+    
+    sku_str = str(combined_sku).strip()
+    
+    # إزالة أي أرقام بعد * (مثل 14373*6 -> 14373)
+    if '*' in sku_str:
+        sku_str = sku_str.split('*')[0].strip()
+    
+    # إذا كان هناك عدة SKU مفصولة بـ - أو +، نأخذ أول واحد
+    if '-' in sku_str:
+        sku_str = sku_str.split('-')[0].strip()
+    if '+' in sku_str:
+        sku_str = sku_str.split('+')[0].strip()
+    
+    # إزالة أي أحرف غير رقمية
+    sku_str = re.sub(r'[^0-9]', '', sku_str)
+    
+    return sku_str
 
 def show():
     st.markdown("""
@@ -17,7 +40,7 @@ def show():
     1. قم برفع ملف `orders.xlsx` (يحتوي على عمودي 'رقم الطلب' و 'skus_json')
     2. قم برفع ملف `products.xlsx` (يحتوي على عمودي 'SKU' و 'ProductName')
     3. سيتم معالجة البيانات واستخراج تفاصيل المنتجات الرئيسية والفرعية
-    4. يمكنك تحميل النتيجة كملف Excel
+    4. يتم البحث عن اسم المنتج باستخدام `SKU مجمع (للمراجعة)` بعد استخراج SKU الفردي
     """)
     
     col1, col2 = st.columns(2)
@@ -64,6 +87,9 @@ def show():
                     product_map = {}
                     for _, row in df_products.iterrows():
                         sku = str(row['SKU']).strip()
+                        # إزالة .0 من نهاية الرقم إذا وجدت
+                        if sku.endswith('.0'):
+                            sku = sku[:-2]
                         name = str(row['ProductName']).strip()
                         product_map[sku] = name
                     
@@ -71,7 +97,7 @@ def show():
                     processed_orders = 0
                     failed_orders = 0
                     
-                    for _, row in df_orders.iterrows():
+                    for idx, row in df_orders.iterrows():
                         order_id = row['رقم الطلب']
                         try:
                             # تحويل JSON إلى قائمة
@@ -83,101 +109,107 @@ def show():
                             
                             for item in json_data:
                                 # هيكل البيانات المتوقع في item:
-                                # item[0] = رقم المنتج أو معرف
-                                # item[1] = اسم المنتج (قد يكون موجود أو لا)
-                                # item[2] = SKU المجمع (مثل "14373*6" أو "14024-15388-14023")
-                                # item[3] = الكمية
+                                # item[0] = اسم المنتج الأساسي (أو معرف)
+                                # item[1] = الكمية (أحياناً)
+                                # item[2] = SKU المجمع
+                                # item[3] = الكمية (في بعض الحالات)
                                 # item[4] = سعر الوحدة
-                                # item[5] = قائمة المنتجات الفرعية (اختياري)
+                                # item[5] = قائمة المنتجات الفرعية
                                 
-                                # --- سطر المنتج الأساسي ---
-                                main_sku_combined = str(item[2]) if len(item) > 2 else ""
+                                # تحديد SKU المجمع
+                                combined_sku = ""
+                                quantity = 0
+                                unit_price = 0
+                                product_name = ""
                                 
-                                # استخراج SKU الفردي للمنتج الأساسي
-                                # إذا كان SKU يحتوي على * أو -، نأخذ أول جزء
-                                if '*' in main_sku_combined:
-                                    main_sku_single = main_sku_combined.split('*')[0].strip()
-                                elif '-' in main_sku_combined:
-                                    main_sku_single = main_sku_combined.split('-')[0].strip()
-                                else:
-                                    main_sku_single = main_sku_combined
+                                # البحث عن SKU في positions المختلفة
+                                for pos in range(len(item)):
+                                    val = str(item[pos]) if item[pos] is not None else ""
+                                    # إذا كان القيم عبارة عن SKU (أرقام فقط أو تحتوي على * أو -)
+                                    if re.match(r'^[\d\*\-]+$', val) and len(val) > 2:
+                                        combined_sku = val
+                                        break
                                 
-                                # جلب اسم المنتج من قاموس المنتجات أو من البيانات
-                                product_name = product_map.get(main_sku_single, "")
-                                if not product_name and len(item) > 1:
-                                    product_name = str(item[1]) if item[1] else main_sku_single
+                                # إذا لم نجد SKU، نستخدم item[2]
+                                if not combined_sku and len(item) > 2:
+                                    combined_sku = str(item[2]) if item[2] else ""
                                 
-                                quantity = item[3] if len(item) > 3 else 0
-                                unit_price = item[4] if len(item) > 4 else 0
-                                total = quantity * unit_price if isinstance(quantity, (int, float)) and isinstance(unit_price, (int, float)) else 0
+                                # البحث عن الكمية
+                                for pos in range(len(item)):
+                                    val = item[pos]
+                                    if isinstance(val, (int, float)) and val > 0 and val < 10000:
+                                        # قد تكون الكمية أو السعر
+                                        if quantity == 0:
+                                            quantity = float(val)
+                                        elif unit_price == 0 and val != quantity:
+                                            unit_price = float(val)
                                 
-                                final_rows.append([
-                                    order_id,
-                                    product_name,
-                                    quantity,
-                                    main_sku_single,
-                                    main_sku_combined,
-                                    unit_price,
-                                    total,
-                                    "أساسي"
-                                ])
+                                # إذا لم نجد الكمية، نستخدم item[3]
+                                if quantity == 0 and len(item) > 3 and isinstance(item[3], (int, float)):
+                                    quantity = float(item[3])
+                                
+                                # البحث عن اسم المنتج
+                                if len(item) > 0 and isinstance(item[0], str) and not re.match(r'^[\d\*\-]+$', item[0]):
+                                    product_name = item[0]
+                                
+                                # استخراج SKU الفردي من SKU المجمع
+                                single_sku = extract_single_sku(combined_sku)
+                                
+                                # جلب اسم المنتج من قاموس المنتجات
+                                if single_sku and single_sku in product_map:
+                                    product_name = product_map[single_sku]
+                                
+                                total = quantity * unit_price if quantity and unit_price else 0
+                                
+                                # إضافة المنتج الأساسي
+                                if combined_sku:
+                                    final_rows.append([
+                                        order_id,
+                                        product_name if product_name else combined_sku,
+                                        quantity,
+                                        single_sku,
+                                        combined_sku,
+                                        unit_price,
+                                        total,
+                                        "أساسي"
+                                    ])
                                 
                                 # --- معالجة المنتجات الفرعية ---
                                 if len(item) > 5 and isinstance(item[5], list):
                                     sub_items_list = item[5]
                                     
-                                    for idx, sub in enumerate(sub_items_list):
-                                        # هيكل المنتج الفرعي:
-                                        # sub[0] = اسم المنتج
-                                        # sub[1] = الكمية
-                                        # sub[2] = SKU المجمع (مثل "14024-15388-14023")
-                                        # sub[3] = سعر الوحدة
-                                        # sub[4] = الإجمالي
+                                    for sub_idx, sub in enumerate(sub_items_list):
+                                        if not isinstance(sub, list) or len(sub) < 3:
+                                            continue
                                         
-                                        raw_sku_combined = str(sub[2]) if len(sub) > 2 else ""
+                                        # استخراج بيانات المنتج الفرعي
+                                        sub_combined_sku = str(sub[2]) if len(sub) > 2 else ""
+                                        sub_quantity = sub[1] if len(sub) > 1 and isinstance(sub[1], (int, float)) else 0
+                                        sub_unit_price = sub[3] if len(sub) > 3 and isinstance(sub[3], (int, float)) else 0
+                                        sub_total = sub[4] if len(sub) > 4 and isinstance(sub[4], (int, float)) else (sub_quantity * sub_unit_price)
                                         
-                                        # تحديد الفاصل وتقسيم الـ SKU
-                                        if '+' in raw_sku_combined:
-                                            delim = '+'
-                                        elif '-' in raw_sku_combined:
-                                            delim = '-'
-                                        else:
-                                            delim = None
+                                        # اسم المنتج الفرعي
+                                        sub_name = sub[0] if len(sub) > 0 and isinstance(sub[0], str) else ""
                                         
-                                        if delim:
-                                            # تقسيم SKU وحذف أي أجزاء تحتوي على *
-                                            sku_parts = []
-                                            for s in raw_sku_combined.split(delim):
-                                                clean_s = s.split('*')[0].strip()
-                                                sku_parts.append(clean_s)
-                                        else:
-                                            sku_parts = [raw_sku_combined.split('*')[0].strip()]
+                                        # استخراج SKU الفردي للمنتج الفرعي
+                                        sub_single_sku = extract_single_sku(sub_combined_sku)
                                         
-                                        # ربط المنتج الفرعي بالـ SKU المنفرد حسب الترتيب
-                                        try:
-                                            current_sku_single = sku_parts[idx]
-                                        except IndexError:
-                                            current_sku_single = sku_parts[-1] if sku_parts else raw_sku_combined
+                                        # جلب اسم المنتج من قاموس المنتجات
+                                        if sub_single_sku and sub_single_sku in product_map:
+                                            sub_name = product_map[sub_single_sku]
                                         
-                                        # جلب الاسم من قاموس المنتجات
-                                        sub_product_name = product_map.get(current_sku_single, "")
-                                        if not sub_product_name and len(sub) > 0:
-                                            sub_product_name = str(sub[0]) if sub[0] else current_sku_single
-                                        
-                                        sub_quantity = sub[1] if len(sub) > 1 else 0
-                                        sub_unit_price = sub[3] if len(sub) > 3 else 0
-                                        sub_total = sub[4] if len(sub) > 4 else (sub_quantity * sub_unit_price)
-                                        
-                                        final_rows.append([
-                                            order_id,
-                                            sub_product_name,
-                                            sub_quantity,
-                                            current_sku_single,
-                                            raw_sku_combined,
-                                            sub_unit_price,
-                                            sub_total,
-                                            "فرعي"
-                                        ])
+                                        # تجنب إضافة منتجات فرعية مكررة أو بدون اسم
+                                        if sub_combined_sku and sub_quantity > 0:
+                                            final_rows.append([
+                                                order_id,
+                                                sub_name if sub_name else sub_combined_sku,
+                                                sub_quantity,
+                                                sub_single_sku,
+                                                sub_combined_sku,
+                                                sub_unit_price,
+                                                sub_total,
+                                                "فرعي"
+                                            ])
                             
                             processed_orders += 1
                             
@@ -195,13 +227,20 @@ def show():
                     result_df = result_df[result_df['المنتج'] != ""]
                     result_df = result_df[result_df['الكمية'] > 0]
                     
+                    # إزالة الصفوف المكررة تقريباً
+                    result_df = result_df.drop_duplicates(subset=['رقم الطلب', 'SKU مجمع (للمراجعة)'])
+                    
                     st.success(f"✅ تمت المعالجة بنجاح!")
                     st.info(f"📊 الإحصائيات: {processed_orders} طلب تمت معالجتها، {failed_orders} طلب فشل")
                     st.info(f"📦 عدد الصفوف المنتجة: {len(result_df)} (أساسي: {len(result_df[result_df['النوع'] == 'أساسي'])}, فرعي: {len(result_df[result_df['النوع'] == 'فرعي'])})")
                     
                     # عرض عينة من النتائج
                     st.subheader("📋 عينة من النتائج")
-                    st.dataframe(result_df.head(20), use_container_width=True)
+                    display_df = result_df.head(20).copy()
+                    display_df['الكمية'] = display_df['الكمية'].round(2)
+                    display_df['سعر الوحدة'] = display_df['سعر الوحدة'].round(2)
+                    display_df['الإجمالي'] = display_df['الإجمالي'].round(2)
+                    st.dataframe(display_df, use_container_width=True)
                     
                     # زر تحميل النتيجة
                     output = BytesIO()
@@ -224,9 +263,11 @@ def show():
                     with col2:
                         st.metric("عدد المنتجات الفريدة", result_df['SKU فردي'].nunique())
                     with col3:
-                        st.metric("إجمالي الكمية", f"{result_df['الكمية'].sum():,.2f}")
+                        total_qty = result_df['الكمية'].sum()
+                        st.metric("إجمالي الكمية", f"{total_qty:,.2f}")
                     with col4:
-                        st.metric("إجمالي القيمة", f"{result_df['الإجمالي'].sum():,.2f}")
+                        total_amount = result_df['الإجمالي'].sum()
+                        st.metric("إجمالي القيمة", f"{total_amount:,.2f}")
                     
                     # عرض المنتجات الأكثر مبيعاً
                     st.subheader("🏆 أكثر 10 منتجات مبيعاً")
@@ -234,6 +275,8 @@ def show():
                         'الكمية': 'sum',
                         'الإجمالي': 'sum'
                     }).reset_index().sort_values('الكمية', ascending=False).head(10)
+                    top_products['الكمية'] = top_products['الكمية'].round(2)
+                    top_products['الإجمالي'] = top_products['الإجمالي'].round(2)
                     st.dataframe(top_products, use_container_width=True)
                     
                 except Exception as e:
