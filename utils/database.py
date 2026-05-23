@@ -685,7 +685,7 @@ def update_username(old_username: str, new_username: str, password: str = None):
         conn.close()
 
 def get_old_orders(pharmacy_name: str = None, months: int = 6) -> pd.DataFrame:
-    """الحصول على الطلبات التي مر عليها أكثر من X أشهر"""
+    """الحصول على الطلبات التي مر عليها أكثر من X أشهر (مع استبعاد الملغي والمسترجع)"""
     conn = sqlite3.connect(DB_PATH)
     
     # حساب تاريخ الحد
@@ -704,6 +704,9 @@ def get_old_orders(pharmacy_name: str = None, months: int = 6) -> pd.DataFrame:
         AND order_date != '' 
         AND julianday('now') - julianday(order_date) > ?
         AND status = 'قيد المتابعة'
+        AND order_status NOT IN ('ملغي', 'مسترجع', 'محذوف')
+        AND order_status NOT LIKE '%ملغي%'
+        AND order_status NOT LIKE '%مسترجع%'
     """
     params = [months * 30]
     
@@ -722,10 +725,10 @@ def get_old_orders(pharmacy_name: str = None, months: int = 6) -> pd.DataFrame:
         conn.close()
 
 def get_old_orders_stats() -> dict:
-    """إحصائيات الطلبات القديمة"""
+    """إحصائيات الطلبات القديمة (مع استبعاد الملغي والمسترجع)"""
     df = get_old_orders()
     if df.empty:
-        return {"total": 0, "additions": 0, "returns": 0, "by_branch": {}}
+        return {"total": 0, "additions": 0, "returns": 0, "orphan_salla": 0, "orphan_abc": 0, "by_branch": {}}
     
     stats = {
         "total": len(df),
@@ -735,4 +738,6 @@ def get_old_orders_stats() -> dict:
         "orphan_abc": len(df[df["case_type"] == "orphan_abc"]),
         "by_branch": df.groupby("pharmacy_name").size().to_dict()
     }
+    return stats
+
     return stats
