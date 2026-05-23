@@ -375,6 +375,7 @@ def show():
             st.session_state.show_export = True
     
     # فلاتر
+    st.markdown("### 🔍 فلاتر البحث")
     col1, col2, col3 = st.columns(3)
     with col1:
         branch_options = ["الكل"] + sorted(df["pharmacy_name"].dropna().astype(str).unique().tolist())
@@ -385,7 +386,15 @@ def show():
         order_status_options = ["الكل", "تم التوصيل", "ملغي", "مسترجع", "بانتظار الدفع", "تم الاستلام من فرع"]
         selected_order_status = st.selectbox("📋 فلتر حالة الطلب", order_status_options)
     
-    # تطبيق الفلاتر
+    col4, col5, col6 = st.columns(3)
+    with col4:
+        search_order = st.text_input("🔢 رقم الطلب", placeholder="بحث برقم الطلب...")
+    with col5:
+        search_invoice = st.text_input("🧾 رقم الفاتورة", placeholder="بحث برقم الفاتورة...")
+    with col6:
+        search_sku = st.text_input("🏷️ SKU", placeholder="بحث بـ SKU...")
+    
+    # تطبيق جميع الفلاتر
     filtered_df = df.copy()
     if selected_branch != "الكل":
         filtered_df = filtered_df[filtered_df["pharmacy_name"] == selected_branch]
@@ -396,6 +405,12 @@ def show():
             filtered_df = filtered_df[filtered_df["order_status"].str.contains("تم الاستلام من فرع", na=False)]
         else:
             filtered_df = filtered_df[filtered_df["order_status"] == selected_order_status]
+    if search_order:
+        filtered_df = filtered_df[filtered_df["order_number"].astype(str).str.contains(search_order, na=False)]
+    if search_invoice:
+        filtered_df = filtered_df[filtered_df["invoice_number"].astype(str).str.contains(search_invoice, na=False)]
+    if search_sku:
+        filtered_df = filtered_df[filtered_df["sku"].astype(str).str.contains(search_sku, na=False)]
     
     # فصل البيانات
     active_mask_filtered = ~filtered_df["order_status"].apply(is_cancelled_or_returned_status)
