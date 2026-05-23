@@ -161,7 +161,7 @@ with st.sidebar:
             # ========== القسم الجديد - يظهر لـ admin و manager فقط ==========
             st.markdown("---")
             st.markdown("### 📦 تقارير إضافية")
-            if st.button("📦 تفصيلي المنتجات", use_container_width=True):
+            if st.button("📦 تفصيلي المنتجات من سلة", use_container_width=True):
                 st.session_state.page = "product_details"
                 st.rerun()
         
