@@ -624,3 +624,21 @@ def get_item_lock_status(item_key: str) -> bool:
     result = cur.fetchone()
     conn.close()
     return result[0] == 1 if result else False
+
+def update_username(old_username: str, new_username: str, password: str = None):
+    """تحديث اسم المستخدم"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    try:
+        if password:
+            cur.execute("UPDATE users SET username = ?, password = ? WHERE username = ?", 
+                       (new_username, password, old_username))
+        else:
+            cur.execute("UPDATE users SET username = ? WHERE username = ?", 
+                       (new_username, old_username))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
