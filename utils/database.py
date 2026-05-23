@@ -683,3 +683,56 @@ def update_username(old_username: str, new_username: str, password: str = None):
         return False
     finally:
         conn.close()
+
+def get_old_orders(pharmacy_name: str = None, months: int = 6) -> pd.DataFrame:
+    """الحصول على الطلبات التي مر عليها أكثر من X أشهر"""
+    conn = sqlite3.connect(DB_PATH)
+    
+    # حساب تاريخ الحد
+    from datetime import datetime, timedelta
+    cutoff_date = (datetime.now() - timedelta(days=months * 30)).strftime("%Y-%m-%d")
+    
+    query = """
+        SELECT order_number, invoice_number, sku, product_name, pharmacy_name, branch_number,
+               salla_qty, abc_qty, difference, case_type, case_label, case_reason, status,
+               performed_by, performed_at, customer_name, customer_phone, city, order_status,
+               order_date, invoice_date, profile_type, receipt_classification,
+               pharmacist_note, item_key, abc_pharmacist_name,
+               julianday('now') - julianday(order_date) as days_old
+        FROM reconciliation_items 
+        WHERE active = 1 
+        AND order_date != '' 
+        AND julianday('now') - julianday(order_date) > ?
+        AND status = 'قيد المتابعة'
+    """
+    params = [months * 30]
+    
+    if pharmacy_name:
+        query += " AND pharmacy_name = ?"
+        params.append(pharmacy_name)
+    
+    query += " ORDER BY days_old DESC"
+    
+    try:
+        df = pd.read_sql_query(query, conn, params=params)
+        return df
+    except Exception as e:
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+def get_old_orders_stats() -> dict:
+    """إحصائيات الطلبات القديمة"""
+    df = get_old_orders()
+    if df.empty:
+        return {"total": 0, "additions": 0, "returns": 0, "by_branch": {}}
+    
+    stats = {
+        "total": len(df),
+        "additions": len(df[df["case_type"] == "addition"]),
+        "returns": len(df[df["case_type"] == "return"]),
+        "orphan_salla": len(df[df["case_type"] == "orphan_salla"]),
+        "orphan_abc": len(df[df["case_type"] == "orphan_abc"]),
+        "by_branch": df.groupby("pharmacy_name").size().to_dict()
+    }
+    return stats
