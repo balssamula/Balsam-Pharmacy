@@ -44,6 +44,7 @@ st.markdown("""
         text-align: center;
         margin: 0.5rem;
     }
+    .stButton button { width: 100%; border-radius: 10px; }
     .pill {
         display: inline-block;
         padding: 0.28rem 0.75rem;
@@ -86,15 +87,16 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Session State
-for key, default_value in {
-    "logged_in": False,
-    "username": "",
-    "user_role": "",
-    "pharmacist_name": "",
-    "page": "dashboard",
-}.items():
-    if key not in st.session_state:
-        st.session_state[key] = default_value
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'username' not in st.session_state:
+    st.session_state.username = ""
+if 'user_role' not in st.session_state:
+    st.session_state.user_role = ""
+if 'pharmacist_name' not in st.session_state:
+    st.session_state.pharmacist_name = ""
+if 'page' not in st.session_state:
+    st.session_state.page = "dashboard"
 
 # Sidebar Login
 with st.sidebar:
@@ -121,10 +123,10 @@ with st.sidebar:
         
         # طلب اسم الصيدلي للصيادلة
         if st.session_state.user_role == "pharmacy" and not st.session_state.pharmacist_name:
-            pharmacist_input = st.text_input("👤 اسم الصيدلي", key="pharmacist_name_input")
-            if st.button("💾 حفظ الاسم", use_container_width=True):
-                if pharmacist_input.strip():
-                    st.session_state.pharmacist_name = pharmacist_input.strip()
+            name = st.text_input("👤 اسم الصيدلي")
+            if st.button("💾 حفظ"):
+                if name.strip():
+                    st.session_state.pharmacist_name = name.strip()
                     update_last_access(st.session_state.username, st.session_state.pharmacist_name)
                     st.success("✅ تم حفظ الاسم")
                     st.rerun()
@@ -155,6 +157,13 @@ with st.sidebar:
                 if st.button("👥 إدارة المستخدمين", use_container_width=True):
                     st.session_state.page = "users"
                     st.rerun()
+
+            # ========== القسم الجديد - يظهر لـ admin و manager فقط ==========
+            st.markdown("---")
+            st.markdown("### 📦 تقارير إضافية")
+            if st.button("📦 تفصيلي المنتجات", use_container_width=True):
+                st.session_state.page = "product_details"
+                st.rerun()
         
         st.markdown("---")
         if st.button("🚪 تسجيل خروج", use_container_width=True):
@@ -213,6 +222,10 @@ else:  # admin or manager
     elif page == "monitoring" and permissions and permissions.get("can_view_monitoring"):
         from pages import monitoring
         monitoring.show()
+    # ========== صفحة تفصيلي المنتجات - تظهر لـ admin و manager فقط ==========
+    elif page == "product_details" and st.session_state.user_role in ["admin", "manager"]:
+        from pages import product_details
+        product_details.show()
     else:
         if permissions and permissions.get("can_view_dashboard"):
             from pages import admin_dashboard
