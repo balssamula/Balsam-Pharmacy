@@ -10,7 +10,7 @@ from utils.database import (
     lock_session, unlock_session, activate_session, delete_session,
     fetch_active_items, get_all_last_logins, get_completed_items,
     reopen_case_by_item_key, hide_item_from_pharmacy, unhide_item_from_pharmacy,
-    lock_item, unlock_item, save_case_note,
+    lock_item, unlock_item, save_case_note, get_old_orders, get_old_orders_stats,
     get_manager_last_login, get_login_history
 )
 from utils.helpers import (
@@ -18,7 +18,6 @@ from utils.helpers import (
     get_tab_label, numeric_value
 )
 from utils.excel_processor import process_excel
-from utils.database import (..., get_old_orders, get_old_orders_stats)
 
 def export_to_excel(dataframes_dict: dict) -> bytes:
     output = BytesIO()
