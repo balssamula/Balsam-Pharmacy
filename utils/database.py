@@ -1,394 +1,552 @@
-import pandas as pd
-import numpy as np
+import os
 import sqlite3
 import uuid
-import re
-from datetime import datetime
-from utils.helpers import (
-    normalize_order_number, normalize_sku, normalize_text,
-    determine_branch, get_branch_number, is_gift_or_promotion, now_str
-)
-from utils.database import DB_PATH
+from datetime import datetime, timedelta
+import pandas as pd
 
-def find_column(df, possible_names):
-    """البحث عن عمود في DataFrame بأسماء محتملة"""
-    for name in possible_names:
-        if name in df.columns:
-            return name
-        clean_name = str(name).strip()
-        for col in df.columns:
-            if str(col).strip() == clean_name:
-                return col
-    return None
+DB_DIR = "data"
+DB_PATH = os.path.join(DB_DIR, "pharmacy_reconciliation.db")
+PHARMACY_COUNT = 17
 
-def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
-    """معالجة شيت سلة"""
-    df = df_salla.copy()
-    
-    # تحديد الأعمدة المطلوبة في شيت سلة
-    order_col = find_column(df, ['رقم الطلب', 'Order Number', 'order_number'])
-    sku_col = find_column(df, ['SKU', 'Sku', 'sku'])
-    product_col = find_column(df, ['اسم المنتج', 'Product Name', 'product_name'])
-    qty_col = find_column(df, ['الكمية', 'Quantity', 'qty'])
-    customer_col = find_column(df, ['اسم العميل', 'Customer Name', 'customer_name'])
-    phone_col = find_column(df, ['رقم الجوال', 'Phone', 'phone'])
-    city_col = find_column(df, ['المدينة', 'City', 'city'])
-    status_col = find_column(df, ['حالة الطلب', 'Order Status', 'order_status'])
-    date_col = find_column(df, ['تاريخ الطلب', 'Order Date', 'order_date'])
-    total_col = find_column(df, ['إجمالي الطلب', 'Total', 'total'])
-    discount_col = find_column(df, ['الخصم', 'Discount', 'discount'])
-    shipping_col = find_column(df, ['تكلفة الشحن', 'Shipping Cost', 'shipping_cost'])
-    payment_col = find_column(df, ['طريقة الدفع', 'Payment Method', 'payment_method'])
-    tax_col = find_column(df, ['الضريبة', 'Tax', 'tax'])
-    coupon_col = find_column(df, ['قيمة خصم الكوبون', 'Coupon Discount', 'coupon_discount'])
-    offer_col = find_column(df, ['قيمة خصم العروض الخاصة', 'Offer Discount', 'offer_discount'])
-    
-    # تطبيق الدوال
-    df["order_number"] = df[order_col].apply(normalize_order_number) if order_col else ""
-    df["sku"] = df[sku_col].apply(normalize_sku) if sku_col else ""
-    df["product_name"] = df[product_col].apply(normalize_text) if product_col else ""
-    df["quantity"] = pd.to_numeric(df[qty_col], errors="coerce").fillna(0) if qty_col else 0
-    df["customer_name"] = df[customer_col].apply(normalize_text) if customer_col else ""
-    df["customer_phone"] = df[phone_col].apply(normalize_text) if phone_col else ""
-    df["city"] = df[city_col].apply(normalize_text) if city_col else ""
-    df["order_status"] = df[status_col].apply(normalize_text) if status_col else ""
-    df["order_date"] = df[date_col].apply(normalize_text) if date_col else ""
-    df["total_amount"] = pd.to_numeric(df[total_col], errors="coerce").fillna(0) if total_col else 0
-    df["discount"] = pd.to_numeric(df[discount_col], errors="coerce").fillna(0) if discount_col else 0
-    df["shipping_cost"] = pd.to_numeric(df[shipping_col], errors="coerce").fillna(0) if shipping_col else 0
-    df["payment_method"] = df[payment_col].apply(normalize_text) if payment_col else ""
-    df["tax"] = pd.to_numeric(df[tax_col], errors="coerce").fillna(0) if tax_col else 0
-    df["coupon_discount"] = pd.to_numeric(df[coupon_col], errors="coerce").fillna(0) if coupon_col else 0
-    df["offer_discount"] = pd.to_numeric(df[offer_col], errors="coerce").fillna(0) if offer_col else 0
-    
-    # استبعاد عملاء الهدية والدعاية
-    df = df[~df["customer_name"].apply(is_gift_or_promotion)]
-    
-    # استبعاد الطلبات المحذوفة أو الفارغة
-    df = df[
-        (df["order_number"] != "")
-        & (df["sku"] != "")
-        & (df["quantity"] != 0)
-        & (df["order_status"] != "محذوف")
-    ].copy()
-    
-    # تحديد الفرع
-    branch_info = df.apply(lambda row: determine_branch(row["order_status"], row["city"]), axis=1)
-    df["pharmacy_name"] = branch_info.apply(lambda x: x[0])
-    df["branch_number"] = branch_info.apply(lambda x: x[1])
-    
-    # تجميع البيانات
-    grouped = df.groupby(["order_number", "sku"], as_index=False).agg({
-        "product_name": "first",
-        "quantity": "sum",
-        "customer_name": "first",
-        "customer_phone": "first",
-        "city": "first",
-        "order_status": "first",
-        "order_date": "first",
-        "total_amount": "first",
-        "pharmacy_name": "first",
-        "branch_number": "first",
-        "discount": "first",
-        "shipping_cost": "first",
-        "payment_method": "first",
-        "tax": "first",
-        "coupon_discount": "first",
-        "offer_discount": "first"
-    }).rename(columns={
-        "product_name": "salla_product_name",
-        "quantity": "salla_qty",
-        "pharmacy_name": "salla_pharmacy_name",
-        "branch_number": "salla_branch_number",
-    })
-    
-    return grouped
+def now_str():
+    utc_now = datetime.utcnow()
+    saudi_time = utc_now + timedelta(hours=3)
+    return saudi_time.strftime("%Y-%m-%d %H:%M:%S")
 
-def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
-    """معالجة شيت ABC حسب المواقع المحددة"""
-    df = df_abc.copy()
-    
-    # إزالة صفوف الإجمالي (subtotal)
-    df = df[~df.iloc[:, 0].astype(str).str.contains('SUBTOTAL', na=False, case=False)]
-    
-    # البحث عن الأعمدة بأسمائها أولاً
-    order_col = find_column(df, ['رقم الطلب', 'Order Number', 'order_number'])
-    sku_col = find_column(df, ['رقم الصنف', 'Item No.', 'Item Number', 'item_number'])
-    product_col = find_column(df, ['اسم الصنف', 'Product', 'product'])
-    qty_col = find_column(df, ['Net Sold Qty', 'Net Qty.', 'Net Sold Quantity'])
-    invoice_col = find_column(df, ['رقم الفاتورة', 'Receipt No.', 'receipt_no', 'invoice_number'])
-    date_col = find_column(df, ['التاريخ', 'Date', 'date', 'Sales Date'])
-    pharmacy_col = find_column(df, ['رقم الصيدلية', 'Branch', 'branch'])
-    pharmacist_col = find_column(df, ['الصيدلي', 'Username', 'username'])
-    profile_col = find_column(df, ['نوع البروفايل', 'Profile', 'profile'])
-    
-    # إذا لم يتم العثور على الأعمدة بأسمائها، نستخدم المواقع
-    if order_col is None and len(df.columns) > 30:
-        order_col = df.columns[30]  # العمود AE
-        invoice_col = df.columns[28]  # العمود AC
-        date_col = df.columns[29]  # العمود AD
-        profile_col = df.columns[0]  # العمود A
-        sku_col = df.columns[1]  # العمود B
-        product_col = df.columns[2]  # العمود C
-        qty_col = df.columns[9] if len(df.columns) > 9 else None  # العمود J
-        pharmacy_col = df.columns[37] if len(df.columns) > 37 else None  # العمود AL
-        pharmacist_col = df.columns[44] if len(df.columns) > 44 else None  # العمود AS
-    
-    if order_col is None:
-        raise ValueError("لم يتم العثور على عمود رقم الطلب في شيت ABC")
-    
-    # تطبيق الدوال
-    df["order_number"] = df[order_col].apply(normalize_order_number)
-    df["sku"] = df[sku_col].apply(normalize_sku) if sku_col else ""
-    df["abc_product_name"] = df[product_col].apply(normalize_text) if product_col else ""
-    df["abc_qty"] = pd.to_numeric(df[qty_col], errors="coerce").fillna(0) if qty_col else 0
-    df["invoice_number"] = df[invoice_col].apply(normalize_text) if invoice_col else ""
-    df["invoice_date"] = df[date_col].apply(normalize_text) if date_col else ""
-    df["abc_pharmacy_name"] = df[pharmacy_col].apply(normalize_text) if pharmacy_col else ""
-    df["abc_pharmacist_name"] = df[pharmacist_col].apply(normalize_text) if pharmacist_col else ""
-    df["profile_type"] = df[profile_col].apply(normalize_text) if profile_col else ""
-    
-    df["all_abc_pharmacies"] = df["abc_pharmacy_name"]
-    df["receipt_classification"] = ""
-    
-    # استبعاد FREE GIFTS
-    EXCLUDED_PROFILE = "FREE GIFTS FOR CUSTOMERS"
-    df = df[df["profile_type"] != EXCLUDED_PROFILE].copy() if "profile_type" in df.columns else df
-    
-    # استبعاد DELIVERY FEE
-    df = df[~df["abc_product_name"].str.upper().str.contains("DELIVERY FEE", na=False)] if "abc_product_name" in df.columns else df
-    
-    # استبعاد SKU غير الصالحة
-    df = df[~df["sku"].isin(["", "0", "1", "200", "16133"])].copy()
-    
-    # استبعاد البيانات غير الصالحة
-    df = df[
-        (df["sku"] != "")
-        & (df["order_number"] != "")
-    ].copy()
-    
-    if df.empty:
-        return pd.DataFrame()
-    
-    # تجميع البيانات
-    grouped = df.groupby(["order_number", "sku"], as_index=False).agg({
-        "abc_qty": "sum",
-        "invoice_number": "first",
-        "invoice_date": "first",
-        "abc_product_name": "first",
-        "abc_pharmacy_name": "first",
-        "abc_pharmacist_name": "first",
-        "profile_type": lambda x: " | ".join(sorted({normalize_text(v) for v in x if normalize_text(v)})),
-        "receipt_classification": lambda x: " | ".join(sorted({normalize_text(v) for v in x if normalize_text(v)})),
-        "all_abc_pharmacies": lambda x: " | ".join(sorted({normalize_text(v) for v in x if normalize_text(v)}))
-    })
-    
-    grouped["other_branch_details"] = grouped.apply(
-        lambda row: f"تم بيع نفس الطلب/الصنف في فروع أخرى: {row['all_abc_pharmacies']}" if " | " in row["all_abc_pharmacies"] else "",
-        axis=1
-    )
-    
-    return grouped
+def get_saudi_time():
+    utc_now = datetime.utcnow()
+    saudi_time = utc_now + timedelta(hours=3)
+    return saudi_time.strftime("%H:%M:%S %d-%m-%Y")
 
-def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame:
-    """تصنيف الحالات (إضافة/إرجاع/طلب بدون فاتورة/فاتورة بدون طلب)"""
-    salla_grouped = prepare_salla_frame(df_salla)
-    abc_grouped = prepare_abc_frame(df_abc)
-    
-    if salla_grouped.empty and abc_grouped.empty:
-        return pd.DataFrame()
-    
-    merged = pd.merge(salla_grouped, abc_grouped, on=["order_number", "sku"], how="outer", indicator=True)
-    
-    # تعبئة القيم المفقودة
-    for col in ["salla_qty", "abc_qty", "total_amount"]:
-        if col in merged.columns:
-            merged[col] = pd.to_numeric(merged[col], errors="coerce").fillna(0)
-        else:
-            merged[col] = 0
-    
-    # الأعمدة النصية
-    text_cols = [
-        "salla_product_name", "abc_product_name", "customer_name", "customer_phone", "city",
-        "order_status", "order_date", "invoice_number", "invoice_date", "salla_pharmacy_name",
-        "abc_pharmacy_name", "abc_pharmacist_name", "profile_type", "receipt_classification",
-        "all_abc_pharmacies", "other_branch_details", "payment_method"
-    ]
-    for col in text_cols:
-        if col not in merged.columns:
-            merged[col] = ""
-        merged[col] = merged[col].fillna("").astype(str)
-    
-    # تعبئة اسم المنتج
-    merged["product_name"] = merged["salla_product_name"]
-    merged.loc[merged["product_name"].eq(""), "product_name"] = merged.loc[merged["product_name"].eq(""), "abc_product_name"]
-    
-    # تعبئة اسم الصيدلية
-    merged["pharmacy_name"] = merged["salla_pharmacy_name"]
-    merged.loc[merged["pharmacy_name"].eq(""), "pharmacy_name"] = merged.loc[merged["pharmacy_name"].eq(""), "abc_pharmacy_name"]
-    
-    # حساب الفرق
-    merged["difference"] = merged["salla_qty"] - merged["abc_qty"]
-    merged["case_type"] = ""
-    merged["case_reason"] = ""
-    
-    # تصنيف الحالات
-    addition_mask = (merged["_merge"] == "both") & (merged["salla_qty"] > merged["abc_qty"]) & (merged["salla_qty"] > 0)
-    merged.loc[addition_mask, "case_type"] = "addition"
-    merged.loc[addition_mask, "case_reason"] = "كمية الطلب أعلى من كمية الفاتورة."
-    
-    return_mask = (merged["_merge"] == "both") & (merged["abc_qty"] > merged["salla_qty"])
-    merged.loc[return_mask, "case_type"] = "return"
-    merged.loc[return_mask, "case_reason"] = "كمية الفاتورة أعلى من كمية الطلب."
-    
-    orphan_salla_mask = (merged["_merge"] == "left_only") & (merged["salla_qty"] > 0)
-    merged.loc[orphan_salla_mask, "case_type"] = "orphan_salla"
-    merged.loc[orphan_salla_mask, "case_reason"] = "سطر طلب موجود في سلة ولم يُعثر على سطر مطابق له في ABC."
-    
-    orphan_abc_mask = (merged["_merge"] == "right_only") & (merged["abc_qty"] != 0)
-    merged.loc[orphan_abc_mask, "case_type"] = "orphan_abc"
-    merged.loc[orphan_abc_mask, "case_reason"] = "سطر فاتورة موجود في ABC ولم يُعثر على سطر مطابق له في سلة."
-    
-    result = merged[merged["case_type"] != ""].copy()
-    result["case_label"] = result["case_type"]
-    result["item_key"] = result.apply(lambda r: f"{r['pharmacy_name']}||{r['order_number']}||{r['sku']}||{r['case_type']}", axis=1)
-    
-    # الأعمدة المطلوبة للنتيجة
-    ordered_columns = [
-        "item_key", "order_number", "invoice_number", "sku", "product_name",
-        "salla_product_name", "abc_product_name", "pharmacy_name",
-        "salla_pharmacy_name", "abc_pharmacy_name", "abc_pharmacist_name",
-        "salla_qty", "abc_qty", "difference",
-        "case_type", "case_label", "case_reason", "customer_name",
-        "customer_phone", "city", "order_status", "order_date",
-        "invoice_date", "profile_type", "receipt_classification",
-        "all_abc_pharmacies", "other_branch_details", "total_amount",
-        "payment_method", "discount", "shipping_cost", "tax",
-        "coupon_discount", "offer_discount"
-    ]
-    
-    for col in ordered_columns:
-        if col not in result.columns:
-            result[col] = ""
-    
-    return result
+def pharmacy_names():
+    return [f"Balsam Alula Pharmacy {i:02d}" for i in range(1, PHARMACY_COUNT + 1)]
 
-def process_excel(uploaded_file, uploaded_by: str):
-    """معالجة ملف Excel وإدراج النتائج في قاعدة البيانات"""
-    df_salla = pd.read_excel(uploaded_file, sheet_name="سلة")
-    df_abc = pd.read_excel(uploaded_file, sheet_name="abc")
-    results = classify_cases(df_salla, df_abc)
-    
-    upload_batch_id = uuid.uuid4().hex
-    timestamp = now_str()
+def init_database():
+    os.makedirs(DB_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    
-    # إدراج بيانات الرفع
+
+    # Users table
     cur.execute("""
-        INSERT INTO uploads (upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
-            total_additions, total_returns, total_orphan_salla, total_orphan_abc, is_active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-    """, (upload_batch_id, uploaded_file.name, uploaded_by, timestamp, len(results),
-          int((results["case_type"] == "addition").sum()), int((results["case_type"] == "return").sum()),
-          int((results["case_type"] == "orphan_salla").sum()), int((results["case_type"] == "orphan_abc").sum())))
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL,
+            pharmacist_name TEXT DEFAULT '',
+            last_login TEXT DEFAULT '',
+            can_view_dashboard INTEGER DEFAULT 0,
+            can_view_balances INTEGER DEFAULT 0,
+            can_view_monitoring INTEGER DEFAULT 0,
+            can_manage_users INTEGER DEFAULT 0,
+            can_view_pharmacy_actions INTEGER DEFAULT 0,
+            is_active INTEGER DEFAULT 1
+        )
+    """)
+
+    # Last access table
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS last_access (
+            pharmacy_name TEXT PRIMARY KEY,
+            last_login TEXT DEFAULT '',
+            pharmacist_name TEXT DEFAULT ''
+        )
+    """)
+
+    # Uploads table
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS uploads (
+            upload_batch_id TEXT PRIMARY KEY,
+            session_name TEXT DEFAULT '',
+            file_name TEXT,
+            uploaded_by TEXT,
+            uploaded_at TEXT,
+            total_cases INTEGER DEFAULT 0,
+            total_additions INTEGER DEFAULT 0,
+            total_returns INTEGER DEFAULT 0,
+            total_orphan_salla INTEGER DEFAULT 0,
+            total_orphan_abc INTEGER DEFAULT 0,
+            total_post_cutoff INTEGER DEFAULT 0,
+            is_locked INTEGER DEFAULT 0,
+            locked_by TEXT DEFAULT '',
+            locked_at TEXT DEFAULT '',
+            is_active INTEGER DEFAULT 0
+        )
+    """)
+
+    # Reconciliation items table with all columns
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS reconciliation_items (
+            item_key TEXT PRIMARY KEY,
+            upload_batch_id TEXT,
+            order_number TEXT,
+            invoice_number TEXT,
+            sku TEXT,
+            product_name TEXT,
+            salla_product_name TEXT,
+            abc_product_name TEXT,
+            pharmacy_name TEXT,
+            salla_pharmacy_name TEXT,
+            abc_pharmacy_name TEXT,
+            abc_pharmacist_name TEXT,
+            branch_number TEXT,
+            salla_qty REAL DEFAULT 0,
+            abc_qty REAL DEFAULT 0,
+            difference REAL DEFAULT 0,
+            case_type TEXT,
+            case_label TEXT,
+            case_reason TEXT,
+            status TEXT DEFAULT 'قيد المتابعة',
+            performed_by TEXT DEFAULT '',
+            performed_at TEXT DEFAULT '',
+            customer_name TEXT DEFAULT '',
+            customer_phone TEXT DEFAULT '',
+            city TEXT DEFAULT '',
+            order_status TEXT DEFAULT '',
+            order_date TEXT DEFAULT '',
+            invoice_date TEXT DEFAULT '',
+            profile_type TEXT DEFAULT '',
+            receipt_classification TEXT DEFAULT '',
+            all_abc_pharmacies TEXT DEFAULT '',
+            other_branch_details TEXT DEFAULT '',
+            pharmacist_note TEXT DEFAULT '',
+            total_amount REAL DEFAULT 0,
+            first_seen_at TEXT,
+            last_seen_at TEXT,
+            active INTEGER DEFAULT 1,
+            hidden_from_pharmacy INTEGER DEFAULT 0,
+            payment_method TEXT DEFAULT '',
+            discount REAL DEFAULT 0,
+            shipping_cost REAL DEFAULT 0,
+            tax REAL DEFAULT 0,
+            coupon_discount REAL DEFAULT 0,
+            offer_discount REAL DEFAULT 0,
+            batch_no TEXT DEFAULT '',
+            expiry_date TEXT DEFAULT '',
+            sale_price REAL DEFAULT 0,
+            total_sale REAL DEFAULT 0,
+            cost_price REAL DEFAULT 0,
+            total_cost REAL DEFAULT 0,
+            vat REAL DEFAULT 0,
+            total_vat REAL DEFAULT 0,
+            total_after_vat REAL DEFAULT 0,
+            receipt_no TEXT DEFAULT '',
+            branch_city TEXT DEFAULT ''
+        )
+    """)
+
+    # Add missing columns for older databases
+    cur.execute("PRAGMA table_info(reconciliation_items)")
+    existing_columns = [row[1] for row in cur.fetchall()]
     
-    # إدراج العناصر
-    for _, row in results.iterrows():
+    new_columns = {
+        "payment_method": "TEXT DEFAULT ''",
+        "discount": "REAL DEFAULT 0",
+        "shipping_cost": "REAL DEFAULT 0",
+        "tax": "REAL DEFAULT 0",
+        "coupon_discount": "REAL DEFAULT 0",
+        "offer_discount": "REAL DEFAULT 0",
+        "batch_no": "TEXT DEFAULT ''",
+        "expiry_date": "TEXT DEFAULT ''",
+        "sale_price": "REAL DEFAULT 0",
+        "total_sale": "REAL DEFAULT 0",
+        "cost_price": "REAL DEFAULT 0",
+        "total_cost": "REAL DEFAULT 0",
+        "vat": "REAL DEFAULT 0",
+        "total_vat": "REAL DEFAULT 0",
+        "total_after_vat": "REAL DEFAULT 0",
+        "receipt_no": "TEXT DEFAULT ''",
+        "branch_city": "TEXT DEFAULT ''"
+    }
+    
+    for col_name, col_type in new_columns.items():
+        if col_name not in existing_columns:
+            try:
+                cur.execute(f"ALTER TABLE reconciliation_items ADD COLUMN {col_name} {col_type}")
+            except:
+                pass
+
+    # Insert default admin
+    cur.execute("SELECT * FROM users WHERE username = 'admin'")
+    if not cur.fetchone():
         cur.execute("""
-            INSERT OR REPLACE INTO reconciliation_items (
-                item_key, upload_batch_id, order_number, invoice_number, sku, product_name,
-                salla_product_name, abc_product_name, pharmacy_name, salla_pharmacy_name,
-                abc_pharmacy_name, abc_pharmacist_name, branch_number, salla_qty, abc_qty, difference,
-                case_type, case_label, case_reason, status, customer_name, customer_phone,
-                city, order_status, order_date, invoice_date, profile_type, receipt_classification,
-                all_abc_pharmacies, other_branch_details, pharmacist_note, total_amount,
-                first_seen_at, last_seen_at, active,
-                payment_method, discount, shipping_cost, tax, coupon_discount, offer_discount
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?)
-        """, (
-            row["item_key"], upload_batch_id, str(row["order_number"]), str(row.get("invoice_number", "")),
-            str(row["sku"]), str(row["product_name"])[:200], str(row.get("salla_product_name", ""))[:200],
-            str(row.get("abc_product_name", ""))[:200], str(row["pharmacy_name"]),
-            str(row.get("salla_pharmacy_name", "")), str(row.get("abc_pharmacy_name", "")),
-            str(row.get("abc_pharmacist_name", "")), str(row.get("branch_number", "")),
-            float(row["salla_qty"]), float(row["abc_qty"]), float(row["difference"]),
-            str(row["case_type"]), str(row["case_label"]), str(row.get("case_reason", ""))[:500],
-            "قيد المتابعة", str(row.get("customer_name", ""))[:100], str(row.get("customer_phone", "")),
-            str(row.get("city", "")), str(row.get("order_status", "")), str(row.get("order_date", "")),
-            str(row.get("invoice_date", "")), str(row.get("profile_type", "")), str(row.get("receipt_classification", "")),
-            str(row.get("all_abc_pharmacies", "")), str(row.get("other_branch_details", "")),
-            "", float(row.get("total_amount", 0)), timestamp, timestamp, 1,
-            str(row.get("payment_method", "")), float(row.get("discount", 0)), float(row.get("shipping_cost", 0)),
-            float(row.get("tax", 0)), float(row.get("coupon_discount", 0)), float(row.get("offer_discount", 0))
-        ))
-    
-    # تعطيل العناصر القديمة وتفعيل الجلسة الحالية
-    cur.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
-    cur.execute("UPDATE uploads SET is_active = 0")
-    cur.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
-    session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
-    cur.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
-    
+            INSERT INTO users (username, password, role, pharmacist_name, can_view_dashboard, 
+             can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
+            VALUES ('admin', 'admin123', 'admin', 'مدير النظام', 1, 1, 1, 1, 1, 1)
+        """)
+
+    # Insert default manager
+    cur.execute("SELECT * FROM users WHERE username = 'manager'")
+    if not cur.fetchone():
+        cur.execute("""
+            INSERT INTO users (username, password, role, pharmacist_name, can_view_dashboard, 
+             can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
+            VALUES ('manager', 'manager123', 'manager', 'مدير عام', 1, 1, 1, 0, 1, 1)
+        """)
+
+    # Insert default pharmacies
+    for index, name in enumerate(pharmacy_names(), start=1):
+        cur.execute("SELECT * FROM users WHERE username = ?", (name,))
+        if not cur.fetchone():
+            cur.execute("""
+                INSERT INTO users (username, password, role, pharmacist_name, can_view_dashboard, 
+                 can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
+                VALUES (?, ?, 'pharmacy', '', 0, 0, 0, 0, 1, 1)
+            """, (name, f"balsam{index}"))
+
     conn.commit()
     conn.close()
-    return results, upload_batch_id
 
-def update_balances(abc_file, salla_file):
-    """تحديث أرصدة الفروع بناءً على ملف ABC"""
+# باقي الدوال كما هي (get_user_permissions, update_user, etc.)
+def get_user_permissions(username: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT role, can_view_dashboard, can_view_balances, can_view_monitoring, 
+               can_manage_users, can_view_pharmacy_actions, pharmacist_name, is_active
+        FROM users WHERE username = ?
+    """, (username,))
+    result = cur.fetchone()
+    conn.close()
+    if result:
+        return {
+            "role": result[0],
+            "can_view_dashboard": bool(result[1]),
+            "can_view_balances": bool(result[2]),
+            "can_view_monitoring": bool(result[3]),
+            "can_manage_users": bool(result[4]),
+            "can_view_pharmacy_actions": bool(result[5]),
+            "pharmacist_name": result[6] or "",
+            "is_active": bool(result[7])
+        }
+    return None
+
+def update_user(username: str, password: str = None, pharmacist_name: str = None, role: str = None, is_active: bool = None):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    updates = []
+    params = []
+    if password:
+        updates.append("password = ?")
+        params.append(password)
+    if pharmacist_name:
+        updates.append("pharmacist_name = ?")
+        params.append(pharmacist_name)
+    if role:
+        updates.append("role = ?")
+        params.append(role)
+    if is_active is not None:
+        updates.append("is_active = ?")
+        params.append(1 if is_active else 0)
+    if updates:
+        params.append(username)
+        cur.execute(f"UPDATE users SET {', '.join(updates)} WHERE username = ?", params)
+    conn.commit()
+    conn.close()
+    return True
+
+def update_user_permissions(username: str, permissions: dict):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE users 
+        SET can_view_dashboard = ?, can_view_balances = ?, can_view_monitoring = ?, 
+            can_manage_users = ?, can_view_pharmacy_actions = ?, pharmacist_name = ?
+        WHERE username = ?
+    """, (
+        permissions.get("can_view_dashboard", 0),
+        permissions.get("can_view_balances", 0),
+        permissions.get("can_view_monitoring", 0),
+        permissions.get("can_manage_users", 0),
+        permissions.get("can_view_pharmacy_actions", 0),
+        permissions.get("pharmacist_name", ""),
+        username
+    ))
+    conn.commit()
+    conn.close()
+
+def add_user(username: str, password: str, role: str, pharmacist_name: str = ""):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
     try:
-        df_abc = pd.read_excel(abc_file, skiprows=4)
-        df_salla = pd.read_excel(salla_file)
-        
-        def get_abc_col(branch_num):
-            return pd.to_numeric(df_abc.iloc[:, branch_num + 1], errors='coerce').fillna(0)
-        
-        item_key = df_abc.iloc[:, 0]
-        
-        tabuk_calc = np.floor(((get_abc_col(8) + get_abc_col(10) + get_abc_col(11) + get_abc_col(12) +
-                               get_abc_col(14) + get_abc_col(15) + get_abc_col(16) + get_abc_col(17)) / 2) + get_abc_col(13))
-        
-        f9_calc = np.floor(((get_abc_col(1) + get_abc_col(3)) / 2) + get_abc_col(9))
-        
-        def create_map(values):
-            return dict(zip(item_key, values.astype(int)))
-        
-        maps = {
-            'tabuk': create_map(tabuk_calc),
-            'f9': create_map(f9_calc),
-            'f1': create_map(get_abc_col(1)), 'f2': create_map(get_abc_col(2)),
-            'f3': create_map(get_abc_col(3)), 'f4': create_map(get_abc_col(4)),
-            'f5': create_map(get_abc_col(5)), 'f6': create_map(get_abc_col(6)),
-            'f7': create_map(get_abc_col(7)), 'f8': create_map(get_abc_col(8)),
-            'f10': create_map(get_abc_col(10)), 'f11': create_map(get_abc_col(11)),
-            'f12': create_map(get_abc_col(12)), 'f14': create_map(get_abc_col(14)),
-            'f15': create_map(get_abc_col(15)), 'f16': create_map(get_abc_col(16)),
-            'f17': create_map(get_abc_col(17))
-        }
-        
-        df_updated = df_salla.copy()
-        salla_id_col = 3
-        
-        col_mapping = {
-            5: 'tabuk', 7: 'f8', 9: 'f9', 11: 'f11', 13: 'f15', 15: 'f16',
-            17: 'f10', 21: 'f12', 23: 'f14', 25: 'f1', 27: 'f2', 29: 'f3',
-            31: 'f4', 33: 'f5', 35: 'f6', 37: 'f7', 39: 'f17'
-        }
-        
-        for col_idx, map_name in col_mapping.items():
-            df_updated.iloc[:, col_idx] = df_updated.iloc[:, salla_id_col].map(maps[map_name]).fillna(0).astype(int)
-        
-        cols_to_check = list(col_mapping.keys())
-        old_data = df_salla.iloc[:, cols_to_check].apply(pd.to_numeric, errors='coerce').fillna(0).astype(int)
-        new_data = df_updated.iloc[:, cols_to_check]
-        
-        is_different = (new_data.values != old_data.values).any(axis=1)
-        has_balance = new_data.sum(axis=1) > 0
-        
-        df_final = df_updated[is_different & has_balance]
-        
-        return df_final, len(df_final)
+        cur.execute("""
+            INSERT INTO users (username, password, role, pharmacist_name, can_view_dashboard, 
+             can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
+            VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, 1)
+        """, (username, password, role, pharmacist_name))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+def delete_user(username: str):
+    if username in ["admin", "manager"]:
+        return False
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM users WHERE username = ?", (username,))
+    conn.commit()
+    conn.close()
+    return True
+
+def get_all_users():
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query("""
+        SELECT username, role, pharmacist_name, last_login, is_active,
+               can_view_dashboard, can_view_balances, can_view_monitoring, 
+               can_manage_users, can_view_pharmacy_actions
+        FROM users ORDER BY role, username
+    """, conn)
+    conn.close()
+    return df
+
+def update_last_access(pharmacy_name: str, pharmacist_name: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    current_time = now_str()
+    cur.execute(
+        "UPDATE users SET pharmacist_name = ?, last_login = ? WHERE username = ?",
+        (pharmacist_name, current_time, pharmacy_name),
+    )
+    cur.execute(
+        """
+        INSERT INTO last_access (pharmacy_name, last_login, pharmacist_name)
+        VALUES (?, ?, ?)
+        ON CONFLICT(pharmacy_name) DO UPDATE SET
+            last_login = excluded.last_login,
+            pharmacist_name = excluded.pharmacist_name
+        """,
+        (pharmacy_name, current_time, pharmacist_name),
+    )
+    conn.commit()
+    conn.close()
+
+def fetch_user(username: str, password: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT username, role, pharmacist_name FROM users WHERE username = ? AND password = ? AND is_active = 1",
+        (username, password),
+    )
+    user = cur.fetchone()
+    conn.close()
+    return user
+
+def get_all_last_logins() -> pd.DataFrame:
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        return pd.read_sql_query("""
+            SELECT pharmacy_name, last_login, pharmacist_name
+            FROM last_access
+            ORDER BY last_login DESC
+        """, conn)
+    finally:
+        conn.close()
+
+def get_latest_upload_summary():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
+                   total_additions, total_returns, total_orphan_salla, total_orphan_abc,
+                   total_post_cutoff, is_locked, session_name
+            FROM uploads WHERE is_active = 1 ORDER BY uploaded_at DESC LIMIT 1
+        """)
+        return cur.fetchone()
+    except:
+        return None
+    finally:
+        conn.close()
+
+def get_all_sessions() -> pd.DataFrame:
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        return pd.read_sql_query("""
+            SELECT upload_batch_id, session_name, file_name, uploaded_by, uploaded_at, 
+                   total_cases, total_additions, total_returns, total_orphan_salla, 
+                   total_orphan_abc, total_post_cutoff, is_locked, is_active
+            FROM uploads ORDER BY uploaded_at DESC
+        """, conn)
+    finally:
+        conn.close()
+
+def get_session_items(upload_batch_id: str) -> pd.DataFrame:
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        return pd.read_sql_query("""
+            SELECT order_number, sku, product_name, case_label, status, performed_by, pharmacy_name
+            FROM reconciliation_items WHERE upload_batch_id = ?
+        """, conn, params=(upload_batch_id,))
+    finally:
+        conn.close()
+
+def lock_session(upload_batch_id: str, locked_by: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE uploads SET is_locked = 1, locked_by = ?, locked_at = ? WHERE upload_batch_id = ?
+    """, (locked_by, now_str(), upload_batch_id))
+    conn.commit()
+    conn.close()
+
+def unlock_session(upload_batch_id: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE uploads SET is_locked = 0, locked_by = '', locked_at = '' WHERE upload_batch_id = ?
+    """, (upload_batch_id,))
+    conn.commit()
+    conn.close()
+
+def activate_session(upload_batch_id: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("UPDATE uploads SET is_active = 0")
+    cur.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
+    conn.commit()
+    conn.close()
+
+def delete_session(upload_batch_id: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM uploads WHERE upload_batch_id = ?", (upload_batch_id,))
+    cur.execute("DELETE FROM reconciliation_items WHERE upload_batch_id = ?", (upload_batch_id,))
+    conn.commit()
+    conn.close()
+
+def get_completed_items(pharmacy_name: str = None) -> pd.DataFrame:
+    conn = sqlite3.connect(DB_PATH)
+    query = """
+        SELECT order_number, invoice_number, sku, product_name, case_type, case_label,
+               performed_by, performed_at, status, item_key, pharmacy_name, branch_number,
+               salla_qty, abc_qty, difference, abc_pharmacist_name, order_status
+        FROM reconciliation_items WHERE active = 1 AND status = 'تم'
+    """
+    params = []
+    if pharmacy_name:
+        query += " AND pharmacy_name = ?"
+        params.append(pharmacy_name)
+    query += " ORDER BY performed_at DESC"
+    try:
+        return pd.read_sql_query(query, conn, params=params if params else None)
+    finally:
+        conn.close()
+
+def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) -> pd.DataFrame:
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT upload_batch_id FROM uploads WHERE is_active = 1 ORDER BY uploaded_at DESC LIMIT 1")
+    active_session = cur.fetchone()
+    if not active_session:
+        conn.close()
+        return pd.DataFrame()
+    active_batch_id = active_session[0]
+    
+    query = """
+        SELECT order_number, invoice_number, sku, product_name, pharmacy_name, branch_number,
+               salla_qty, abc_qty, 
+               (salla_qty - abc_qty) as difference,
+               case_type, case_label, case_reason, status,
+               performed_by, performed_at, customer_name, customer_phone, city, order_status,
+               order_date, invoice_date, total_amount, profile_type, receipt_classification,
+               pharmacist_note, item_key, abc_pharmacy_name, abc_pharmacist_name, hidden_from_pharmacy,
+               payment_method, discount, shipping_cost, tax, coupon_discount, offer_discount,
+               0 as is_locked
+        FROM reconciliation_items WHERE active = 1 AND upload_batch_id = ?
+    """
+    params = [active_batch_id]
+    
+    if pharmacy_name:
+        query += " AND pharmacy_name = ?"
+        params.append(pharmacy_name)
+        if not include_hidden:
+            query += " AND (hidden_from_pharmacy = 0 OR hidden_from_pharmacy IS NULL)"
+    
+    query += " ORDER BY case_type, order_number DESC, sku"
+    
+    try:
+        df = pd.read_sql_query(query, conn, params=params)
+        if 'difference' in df.columns:
+            df['difference'] = pd.to_numeric(df['difference'], errors='coerce').fillna(0)
+        # إضافة الأعمدة المفقودة بقيم افتراضية
+        for col in ['payment_method', 'discount', 'shipping_cost', 'tax', 'coupon_discount', 'offer_discount']:
+            if col not in df.columns:
+                df[col] = 0 if col in ['discount', 'shipping_cost', 'tax', 'coupon_discount', 'offer_discount'] else ''
+        return df
     except Exception as e:
-        return None, str(e)
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+def hide_item_from_pharmacy(item_key: str, hidden_by: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("UPDATE reconciliation_items SET hidden_from_pharmacy = 1 WHERE item_key = ?", (item_key,))
+    conn.commit()
+    conn.close()
+
+def unhide_item_from_pharmacy(item_key: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("UPDATE reconciliation_items SET hidden_from_pharmacy = 0 WHERE item_key = ?", (item_key,))
+    conn.commit()
+    conn.close()
+
+def save_case_note(order_number: str, sku: str, pharmacy_name: str, case_type: str, note: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE reconciliation_items SET pharmacist_note = ?
+        WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
+    """, (note, order_number, sku, pharmacy_name, case_type))
+    conn.commit()
+    conn.close()
+
+def mark_case_done(order_number: str, sku: str, pharmacy_name: str, case_type: str, performed_by: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE reconciliation_items SET status = 'تم', performed_by = ?, performed_at = ?
+        WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
+    """, (performed_by, now_str(), order_number, sku, pharmacy_name, case_type))
+    conn.commit()
+    conn.close()
+
+def reopen_case(order_number: str, sku: str, pharmacy_name: str, case_type: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE reconciliation_items SET status = 'قيد المتابعة', performed_by = '', performed_at = ''
+        WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
+    """, (order_number, sku, pharmacy_name, case_type))
+    conn.commit()
+    conn.close()
+
+def reopen_case_by_item_key(item_key: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("UPDATE reconciliation_items SET status = 'قيد المتابعة', performed_by = '', performed_at = '' WHERE item_key = ?", (item_key,))
+    conn.commit()
+    conn.close()
+
+def get_tab_completed_counts(pharmacy_name: str = None) -> dict:
+    conn = sqlite3.connect(DB_PATH)
+    query = """
+        SELECT case_type, COUNT(*) as completed
+        FROM reconciliation_items
+        WHERE active = 1 AND status = 'تم'
+    """
+    params = []
+    if pharmacy_name:
+        query += " AND pharmacy_name = ?"
+        params.append(pharmacy_name)
+    query += " GROUP BY case_type"
+    try:
+        df = pd.read_sql_query(query, conn, params=params if params else None)
+        return df.set_index('case_type')['completed'].to_dict()
+    except:
+        return {}
+    finally:
+        conn.close()
