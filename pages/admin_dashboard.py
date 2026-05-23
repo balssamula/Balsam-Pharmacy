@@ -471,18 +471,39 @@ def show():
         else:
             st.info("لا توجد طلبات مكتملة")
     
-    # ========== آخر دخول للصيدليات مع IP ==========
+    # ========== آخر دخول للصيدليات ==========
     st.markdown('<div class="section-title">👥 آخر دخول للصيدليات</div>', unsafe_allow_html=True)
     last_logins = get_all_last_logins()
     if not last_logins.empty:
+        # عرض كأعمدة
         cols = st.columns(4)
         for idx, (_, row) in enumerate(last_logins.head(8).iterrows()):
             with cols[idx % 4]:
+                # تحديد لون خلفية حسب آخر دخول
+                last_login = row['last_login']
+                if last_login and "لم يدخل" not in last_login:
+                    try:
+                        last_date = datetime.strptime(last_login[:10], "%Y-%m-%d")
+                        if (datetime.now() - last_date).days > 7:
+                            bg_color = "#fff3cd"  # أصفر فاتح للدخول القديم
+                        else:
+                            bg_color = "#f8f9fa"  # رمادي فاتح للدخول الحديث
+                    except:
+                        bg_color = "#f8f9fa"
+                else:
+                    bg_color = "#ffe5e5"  # أحمر فاتح لمن لم يدخل
+            
                 st.markdown(f"""
-                <div class="note-card">
+                <div style="background:{bg_color};border-radius:12px;padding:0.8rem;margin-bottom:0.8rem;border-right:3px solid #1f7a8c;">
                     <strong>🏥 {row['pharmacy_name'][-10:]}</strong><br>
-                    <span>👤 {row['pharmacist_name'] or 'غير مسجل'}</span><br>
-                    <span>📅 {row['last_login'][:16] if row['last_login'] else 'لم يدخل'}</span><br>
-                    <span>🌐 IP: {row['last_ip'] or 'غير معروف'}</span>
+                    👤 {row['pharmacist_name'] or 'غير مسجل'}<br>
+                    📅 {last_login[:16] if last_login and last_login != 'لم يدخل بعد' else 'لم يدخل بعد'}<br>
+                    🌐 IP: {row['last_ip'] or 'غير معروف'}
                 </div>
                 """, unsafe_allow_html=True)
+    
+        # عرض جدول كامل في expander
+        with st.expander("📋 عرض جميع الصيدليات"):
+            st.dataframe(last_logins[['pharmacy_name', 'pharmacist_name', 'last_login', 'last_ip']], use_container_width=True)
+    else:
+        st.info("لا توجد سجلات دخول للصيدليات بعد")
