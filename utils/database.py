@@ -196,7 +196,6 @@ def init_database():
     conn.commit()
     conn.close()
 
-# باقي الدوال كما هي (get_user_permissions, update_user, etc.)
 def get_user_permissions(username: str):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -219,6 +218,23 @@ def get_user_permissions(username: str):
             "is_active": bool(result[7])
         }
     return None
+
+def update_username(old_username: str, new_username: str, password: str = None):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    try:
+        if password:
+            cur.execute("UPDATE users SET username = ?, password = ? WHERE username = ?", 
+                       (new_username, password, old_username))
+        else:
+            cur.execute("UPDATE users SET username = ? WHERE username = ?", 
+                       (new_username, old_username))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
 
 def update_user(username: str, password: str = None, pharmacist_name: str = None, role: str = None, is_active: bool = None):
     conn = sqlite3.connect(DB_PATH)
@@ -470,7 +486,6 @@ def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) 
         df = pd.read_sql_query(query, conn, params=params)
         if 'difference' in df.columns:
             df['difference'] = pd.to_numeric(df['difference'], errors='coerce').fillna(0)
-        # إضافة الأعمدة المفقودة بقيم افتراضية
         for col in ['payment_method', 'discount', 'shipping_cost', 'tax', 'coupon_discount', 'offer_discount']:
             if col not in df.columns:
                 df[col] = 0 if col in ['discount', 'shipping_cost', 'tax', 'coupon_discount', 'offer_discount'] else ''
