@@ -179,45 +179,6 @@ def show():
     </div>
     """, unsafe_allow_html=True)
     
-    col1, col2 = st.columns([1, 6])
-    with col1:
-        if st.button("🔄 تحديث الصفحة", use_container_width=True):
-            st.rerun()
-    with col2:
-        if st.button("📥 تصدير إلى Excel", use_container_width=True):
-            st.session_state.show_export = True
-    
-    # ========== معلومات المدير العام ==========
-    st.markdown('<div class="section-title">👑 معلومات المدير العام</div>', unsafe_allow_html=True)
-    manager_info = get_manager_last_login()
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown(f"""
-        <div class="note-card">
-            <strong>👤 آخر دخول للمدير العام:</strong><br>
-            📅 {manager_info['last_login']}<br>
-            🌐 IP: {manager_info['last_ip']}
-        </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        login_history = get_login_history(10)
-        if not login_history.empty:
-            st.markdown("### 📋 آخر محاولات الدخول")
-            st.dataframe(login_history, use_container_width=True)
-    
-    st.markdown("---")
-    
-    with st.expander("📂 رفع ملف الطلبات والفواتير", expanded=True):
-        uploaded_file = st.file_uploader("اختر ملف Excel", type=["xlsx"])
-        if uploaded_file:
-            if st.button("🔄 معالجة الملف", use_container_width=True, type="primary"):
-                with st.spinner("جاري معالجة الملف..."):
-                    results, upload_batch_id = process_excel(uploaded_file, st.session_state.username)
-                if results is not None:
-                    st.success(f"✅ تمت المعالجة بنجاح!")
-                    st.balloons()
-                    st.rerun()
-    
     latest = get_latest_upload_summary()
     if latest:
         batch_id, file_name, uploaded_by, uploaded_at, total_cases, additions, returns, orphan_salla, orphan_abc, post_cutoff, is_locked, session_name = latest
@@ -394,7 +355,26 @@ def show():
     completed_df = get_completed_items()
     if selected_branch != "الكل":
         completed_df = completed_df[completed_df["pharmacy_name"] == selected_branch]
+
+    col1, col2 = st.columns([1, 6])
+    with col1:
+        if st.button("🔄 تحديث الصفحة", use_container_width=True):
+            st.rerun()
+    with col2:
+        if st.button("📥 تصدير إلى Excel", use_container_width=True):
+            st.session_state.show_export = True
     
+    with st.expander("📂 رفع ملف الطلبات والفواتير", expanded=True):
+        uploaded_file = st.file_uploader("اختر ملف Excel", type=["xlsx"])
+        if uploaded_file:
+            if st.button("🔄 معالجة الملف", use_container_width=True, type="primary"):
+                with st.spinner("جاري معالجة الملف..."):
+                    results, upload_batch_id = process_excel(uploaded_file, st.session_state.username)
+                if results is not None:
+                    st.success(f"✅ تمت المعالجة بنجاح!")
+                    st.balloons()
+                    st.rerun()
+                    
     # تصدير Excel
     if st.session_state.get('show_export', False):
         export_data = {
@@ -471,3 +451,23 @@ def show():
                     <span>📅 {row['last_login'][:16] if row['last_login'] else 'لم يدخل'}</span>
                 </div>
                 """, unsafe_allow_html=True)
+
+    # ========== معلومات المدير العام ==========
+    st.markdown('<div class="section-title">👑 معلومات المدير العام</div>', unsafe_allow_html=True)
+    manager_info = get_manager_last_login()
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"""
+        <div class="note-card">
+            <strong>👤 آخر دخول للمدير العام:</strong><br>
+            📅 {manager_info['last_login']}<br>
+            🌐 IP: {manager_info['last_ip']}
+        </div>
+        """, unsafe_allow_html=True)
+    with col2:
+        login_history = get_login_history(10)
+        if not login_history.empty:
+            st.markdown("### 📋 آخر محاولات الدخول")
+            st.dataframe(login_history, use_container_width=True)
+    
+    st.markdown("---")
