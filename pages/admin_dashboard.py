@@ -117,6 +117,68 @@ def styled_dataframe(input_df):
     })
     return display_df.style.apply(highlight_rows, axis=1)
 
+def render_old_items_table(df, title, is_orders=True):
+    """عرض جدول للعناصر القديمة (طلبات أو فواتير) مع تلوين أسود"""
+    if df.empty:
+        st.success(f"🎉 لا توجد {title} قديمة (أكثر من 6 أشهر)")
+        return
+    
+    def highlight_old_rows(row):
+        # الطلبات القديمة: خلفية سوداء ونص أبيض
+        order_date = row.get('order_date', '')
+        invoice_date = row.get('invoice_date', '')
+        
+        # تحديد التاريخ المناسب (تاريخ الطلب أو تاريخ الفاتورة)
+        check_date = invoice_date if not is_orders else order_date
+        
+        if check_date and check_date != '':
+            try:
+                from datetime import datetime
+                date_obj = datetime.strptime(str(check_date)[:10], "%Y-%m-%d")
+                from datetime import timedelta
+                if (datetime.now() - date_obj) > timedelta(days=180):
+                    return ['background-color: #1a1a1a; color: white; font-weight: bold'] * len(row)
+            except:
+                pass
+        
+        # الطلبات الملغية والمسترجعة
+        if is_cancelled_or_returned_status(row.get('order_status', '')):
+            return ['background-color: #ffe5e5; color: #333'] * len(row)
+        
+        return [''] * len(row)
+    
+    display_df = df.copy()
+    display_df = display_df.rename(columns={
+        "order_number": "رقم الطلب",
+        "invoice_number": "رقم الفاتورة",
+        "sku": "SKU",
+        "product_name": "المنتج",
+        "pharmacy_name": "الفرع",
+        "salla_qty": "كمية سلة",
+        "abc_qty": "كمية ABC",
+        "difference": "الفرق",
+        "case_label": "نوع الحالة",
+        "order_status": "حالة الطلب",
+        "order_date": "تاريخ الطلب",
+        "invoice_date": "تاريخ الفاتورة",
+        "days_old": "عدد الأيام"
+    })
+    
+    styled_df = display_df.style.apply(highlight_old_rows, axis=1)
+    st.dataframe(styled_df, use_container_width=True, height=400)
+    
+    # إحصائيات إضافية
+    st.markdown("---")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric(f"📊 إجمالي {title} القديمة", len(df))
+    with col2:
+        avg_days = df['days_old'].mean() if 'days_old' in df.columns else 0
+        st.metric("📅 متوسط عدد الأيام", f"{avg_days:.0f} يوم")
+    with col3:
+        max_days = df['days_old'].max() if 'days_old' in df.columns else 0
+        st.metric("⏰ أقدم عنصر", f"{max_days:.0f} يوم")
+
 def render_table_with_click(df, tab_name):
     if df.empty:
         st.success("لا توجد بيانات في هذا القسم.")
@@ -166,43 +228,6 @@ def render_table_with_click(df, tab_name):
                 if cols[4].button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
                     save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note)
                     st.rerun()
-
-def render_old_orders_table(df):
-    """عرض جدول الطلبات القديمة"""
-    if df.empty:
-        st.success("🎉 لا توجد طلبات قديمة")
-        return
-    
-    # إضافة فلتر إضافي لاستبعاد الملغي والمسترجع (للتأكيد)
-    df = df[~df["order_status"].isin(["ملغي", "مسترجع", "محذوف"])]
-    df = df[~df["order_status"].str.contains("ملغي|مسترجع", na=False)]
-    
-    if df.empty:
-        st.success("🎉 لا توجد طلبات قديمة (بعد استبعاد الملغي والمسترجع)")
-        return
-    
-    display_df = df.copy()
-    display_df = display_df.rename(columns={
-        "order_number": "رقم الطلب",
-        "invoice_number": "رقم الفاتورة",
-        "sku": "SKU",
-        "product_name": "المنتج",
-        "pharmacy_name": "الفرع",
-        "salla_qty": "كمية سلة",
-        "abc_qty": "كمية ABC",
-        "difference": "الفرق",
-        "case_label": "نوع الحالة",
-        "order_status": "حالة الطلب",
-        "order_date": "تاريخ الطلب",
-        "days_old": "عدد الأيام"
-    })
-    
-    st.dataframe(
-        display_df[["رقم الطلب", "رقم الفاتورة", "SKU", "المنتج", "الفرع", 
-                   "كمية سلة", "كمية ABC", "الفرق", "نوع الحالة", "حالة الطلب", 
-                   "تاريخ الطلب", "عدد الأيام"]].head(50),
-        use_container_width=True
-    )
 
 def show():
     st.markdown("""
@@ -430,8 +455,9 @@ def show():
     if selected_branch != "الكل":
         completed_df = completed_df[completed_df["pharmacy_name"] == selected_branch]
     
-    # الطلبات القديمة
-    old_stats = get_old_orders_stats()
+    # إحصائيات الطلبات والفواتير القديمة
+    old_orders_stats = get_old_orders_stats()
+    old_invoices_stats = get_old_invoices_stats()
     
     # تصدير Excel
     if st.session_state.get('show_export', False):
@@ -457,13 +483,13 @@ def show():
     .stTabs [data-baseweb="tab-list"] button:nth-child(2) { background-color: #ED7D31; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(3) { background-color: #70AD47; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(4) { background-color: #FFC000; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(5) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(5) { background-color: #9B59B6; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(6) { background-color: #3498DB; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(7) { background-color: #E74C3C; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(8) { background-color: #27AE60; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(9) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(9) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(9) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(10) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(11) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
         transform: translateY(-2px) !important;
         box-shadow: 0 4px 8px rgba(0,0,0,0.2) !important;
@@ -477,12 +503,8 @@ def show():
     }
     </style>
     """, unsafe_allow_html=True)
-
-    # إحصائيات الطلبات والفواتير القديمة
-    old_orders_stats = get_old_orders_stats()
-    old_invoices_stats = get_old_invoices_stats()
     
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
         f"📈 الإضافات ({len(additions_df)})",
         f"📉 الإرجاعات ({len(returns_df)})",
         f"📦 طلبات بدون فاتورة ({len(orphan_salla_df)})",
@@ -512,6 +534,7 @@ def show():
         render_table_with_click(cancelled_df, "cancelled")
     with tab8:
         render_table_with_click(completed_df, "completed")
+    
     with tab9:
         st.markdown("""
         <div style="background: linear-gradient(135deg, #1a1a1a, #333); padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">
@@ -519,7 +542,7 @@ def show():
             <p style="color: #ccc; margin: 0.5rem 0 0 0;">⚠️ الطلبات التي مر عليها أكثر من 6 أشهر تظهر بخلفية سوداء ونص أبيض</p>
         </div>
         """, unsafe_allow_html=True)
-    
+        
         if old_orders_stats["total"] > 0:
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -530,13 +553,22 @@ def show():
                 st.metric("➖ إرجاعات قديمة", old_orders_stats["returns"])
             with col4:
                 st.metric("📦 طلبات بدون فاتورة", old_orders_stats.get("orphan_salla", 0))
-        
+            
             months = st.slider("عدد الأشهر للبحث (طلبات)", min_value=3, max_value=24, value=6, step=3, key="old_orders_months")
             old_orders_df = get_old_orders(months=months)
-            render_old_orders_table(old_orders_df)
+            render_old_items_table(old_orders_df, "الطلبات", is_orders=True)
+            
+            if st.button("📥 تصدير الطلبات القديمة إلى Excel", use_container_width=True):
+                excel_data = export_to_excel({"الطلبات_القديمة": old_orders_df})
+                st.download_button(
+                    "📥 تحميل التقرير",
+                    data=excel_data,
+                    file_name=f"old_orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    use_container_width=True,
+                )
         else:
             st.success("🎉 لا توجد طلبات قديمة (أكثر من 6 أشهر)")
-
+    
     with tab10:
         st.markdown("""
         <div style="background: linear-gradient(135deg, #1a1a1a, #333); padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">
@@ -544,7 +576,7 @@ def show():
             <p style="color: #ccc; margin: 0.5rem 0 0 0;">⚠️ الفواتير التي مر عليها أكثر من 6 أشهر ولم تكتمل</p>
         </div>
         """, unsafe_allow_html=True)
-    
+        
         if old_invoices_stats["total"] > 0:
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -555,71 +587,18 @@ def show():
                 st.metric("➖ إرجاعات", old_invoices_stats["returns"])
             with col4:
                 st.metric("🧾 فواتير بدون طلب", old_invoices_stats.get("orphan_abc", 0))
-        
+            
             months_inv = st.slider("عدد الأشهر للبحث (فواتير)", min_value=3, max_value=24, value=6, step=3, key="old_invoices_months")
             old_invoices_df = get_old_invoices(months=months_inv)
-            render_old_orders_table(old_invoices_df)  # نفس الدالة تعمل لكليهما
+            render_old_items_table(old_invoices_df, "الفواتير", is_orders=False)
+            
+            if st.button("📥 تصدير الفواتير القديمة إلى Excel", use_container_width=True):
+                excel_data = export_to_excel({"الفواتير_القديمة": old_invoices_df})
+                st.download_button(
+                    "📥 تحميل التقرير",
+                    data=excel_data,
+                    file_name=f"old_invoices_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    use_container_width=True,
+                )
         else:
-            st.success("🎉 لا توجد فواتير قديمة (أكثر من 6 أشهر)")
-
-    with tab11:
-        st.markdown("### 📊 إحصائيات قديمة")
-        st.markdown("---")
-    
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("#### 📅 الطلبات القديمة")
-            st.markdown(f"""
-            - **إجمالي الطلبات القديمة:** {old_orders_stats['total']}
-            - **إضافات قديمة:** {old_orders_stats['additions']}
-            - **إرجاعات قديمة:** {old_orders_stats['returns']}
-            - **طلبات بدون فاتورة:** {old_orders_stats.get('orphan_salla', 0)}
-            """)
-        
-            if old_orders_stats['by_branch']:
-                st.markdown("#### 🏥 التوزيع حسب الفرع")
-                for branch, count in old_orders_stats['by_branch'].items():
-                    st.markdown(f"- {branch[-10:]}: {count} طلب")
-    
-        with col2:
-            st.markdown("#### 🧾 الفواتير القديمة")
-            st.markdown(f"""
-            - **إجمالي الفواتير القديمة:** {old_invoices_stats['total']}
-            - **إضافات:** {old_invoices_stats['additions']}
-            - **إرجاعات:** {old_invoices_stats['returns']}
-            - **فواتير بدون طلب:** {old_invoices_stats.get('orphan_abc', 0)}
-            """)
-        
-            if old_invoices_stats['by_branch']:
-                st.markdown("#### 🏥 التوزيع حسب الفرع")
-                for branch, count in old_invoices_stats['by_branch'].items():
-                    st.markdown(f"- {branch[-10:]}: {count} فاتورة")
-    
-        # عرض إجمالي قديم
-        st.markdown("---")
-        total_old = old_orders_stats['total'] + old_invoices_stats['total']
-        if total_old > 0:
-            st.warning(f"⚠️ إجمالي العناصر القديمة (طلبات + فواتير): {total_old}")
-        else:
-            st.success("🎉 لا توجد عناصر قديمة (طلبات أو فواتير)")
-    
-    # آخر دخول للصيدليات
-    st.markdown('<div class="section-title">👥 آخر دخول للصيدليات</div>', unsafe_allow_html=True)
-    last_logins = get_all_last_logins()
-    if not last_logins.empty:
-        cols = st.columns(4)
-        for idx, (_, row) in enumerate(last_logins.head(8).iterrows()):
-            with cols[idx % 4]:
-                st.markdown(f"""
-                <div class="note-card">
-                    <strong>🏥 {row['pharmacy_name'][-10:]}</strong><br>
-                    <span>👤 {row['pharmacist_name'] or 'غير مسجل'}</span><br>
-                    <span>📅 {row['last_login'][:16] if row['last_login'] else 'لم يدخل'}</span><br>
-                    <span>🌐 IP: {row['last_ip'] or 'غير معروف'}</span>
-                </div>
-                """, unsafe_allow_html=True)
-        
-        with st.expander("📋 عرض جميع الصيدليات"):
-            st.dataframe(last_logins[['pharmacy_name', 'pharmacist_name', 'last_login', 'last_ip']], use_container_width=True)
-    else:
-        st.info("لا توجد سجلات دخول للصيدليات بعد")
+            st.success("🎉 لا توجد فواتير قديمة (أكثر من 6 أش
