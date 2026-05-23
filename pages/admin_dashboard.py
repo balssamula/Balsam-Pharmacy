@@ -19,12 +19,6 @@ from utils.helpers import (
 )
 from utils.excel_processor import process_excel
 
-# تهيئة حالة العرض
-if 'show_sessions' not in st.session_state:
-    st.session_state.show_sessions = True
-if 'show_comparison' not in st.session_state:
-    st.session_state.show_comparison = True
-
 def export_to_excel(dataframes_dict: dict) -> bytes:
     output = BytesIO()
     tab_colors = {
@@ -179,6 +173,39 @@ def show():
     </div>
     """, unsafe_allow_html=True)
     
+    # معلومات المدير العام في أعلى الصفحة
+    manager_info = get_manager_last_login()
+    login_history = get_login_history(10)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"""
+        <div class="note-card">
+            <strong>👑 آخر دخول للمدير العام:</strong><br>
+            📅 {manager_info['last_login']}<br>
+            🌐 IP: {manager_info['last_ip']}<br>
+            👤 {manager_info['pharmacist_name']}
+        </div>
+        """, unsafe_allow_html=True)
+    with col2:
+        if not login_history.empty:
+            st.markdown("### 📋 آخر محاولات الدخول")
+            st.dataframe(login_history, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # رفع ملف الطلبات والفواتير
+    with st.expander("📂 رفع ملف الطلبات والفواتير", expanded=True):
+        uploaded_file = st.file_uploader("اختر ملف Excel", type=["xlsx"])
+        if uploaded_file:
+            if st.button("🔄 معالجة الملف", use_container_width=True, type="primary"):
+                with st.spinner("جاري معالجة الملف..."):
+                    results, upload_batch_id = process_excel(uploaded_file, st.session_state.username)
+                if results is not None:
+                    st.success(f"✅ تمت المعالجة بنجاح!")
+                    st.balloons()
+                    st.rerun()
+    
     latest = get_latest_upload_summary()
     if latest:
         batch_id, file_name, uploaded_by, uploaded_at, total_cases, additions, returns, orphan_salla, orphan_abc, post_cutoff, is_locked, session_name = latest
@@ -193,16 +220,8 @@ def show():
         </div>
         """, unsafe_allow_html=True)
     
-    # ========== إدارة الجلسات السابقة ==========
-    col1, col2 = st.columns([1, 5])
-    with col1:
-        btn_label = "🙈 إخفاء الجلسات" if st.session_state.show_sessions else "👁️ إظهار الجلسات"
-        if st.button(btn_label, use_container_width=True):
-            st.session_state.show_sessions = not st.session_state.show_sessions
-            st.rerun()
-
-    if st.session_state.show_sessions:
-        st.markdown('<div class="section-title">📋 إدارة الجلسات السابقة</div>', unsafe_allow_html=True)
+    # إدارة الجلسات السابقة داخل expander
+    with st.expander("📋 إدارة الجلسات السابقة", expanded=False):
         sessions_df = get_all_sessions()
         if not sessions_df.empty:
             for _, session in sessions_df.iterrows():
@@ -245,19 +264,11 @@ def show():
                             delete_session(session['upload_batch_id'])
                             st.rerun()
             st.markdown("---")
-    else:
-        st.info("📂 إدارة الجلسات مخفية. اضغط على زر 'إظهار الجلسات' لعرضها.")
+        else:
+            st.info("لا توجد جلسات سابقة")
     
-    # ========== مقارنة الجلسات ==========
-    col1, col2 = st.columns([1, 5])
-    with col1:
-        btn_label2 = "🙈 إخفاء المقارنة" if st.session_state.show_comparison else "👁️ إظهار المقارنة"
-        if st.button(btn_label2, use_container_width=True):
-            st.session_state.show_comparison = not st.session_state.show_comparison
-            st.rerun()
-
-    if st.session_state.show_comparison:
-        st.markdown('<div class="section-title">🔄 مقارنة الجلسات</div>', unsafe_allow_html=True)
+    # مقارنة الجلسات داخل expander
+    with st.expander("🔄 مقارنة الجلسات", expanded=False):
         sessions_list = get_all_sessions()
         if not sessions_list.empty:
             session_options = {f"{row['session_name']} ({row['uploaded_at'][:16]})": row['upload_batch_id'] 
@@ -278,17 +289,17 @@ def show():
                 excel_data = export_to_excel({"مقارنة_الجلسات": st.session_state.comparison_result})
                 st.download_button("📥 تحميل تقرير المقارنة", data=excel_data, 
                     file_name=f"session_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
-    else:
-        st.info("📊 قسم مقارنة الجلسات مخفي. اضغط على زر 'إظهار المقارنة' لعرضه.")
+        else:
+            st.info("لا توجد جلسات للمقارنة")
     
     if st.session_state.get('view_session_id'):
-        st.markdown(f'<div class="section-title">📄 عرض الجلسة المحددة</div>', unsafe_allow_html=True)
-        session_items = get_session_items(st.session_state.view_session_id)
-        if not session_items.empty:
-            st.dataframe(session_items, use_container_width=True)
-        if st.button("إغلاق العرض", use_container_width=True):
-            del st.session_state.view_session_id
-            st.rerun()
+        with st.expander("📄 عرض الجلسة المحددة", expanded=True):
+            session_items = get_session_items(st.session_state.view_session_id)
+            if not session_items.empty:
+                st.dataframe(session_items, use_container_width=True)
+            if st.button("إغلاق العرض", use_container_width=True):
+                del st.session_state.view_session_id
+                st.rerun()
     
     # ========== جلب البيانات النشطة ==========
     df = fetch_active_items(include_hidden=True)
@@ -296,7 +307,7 @@ def show():
         st.info("📂 لا توجد بيانات فعالة بعد. ارفع ملف Excel من الأعلى لبدء التحليل.")
         return
     
-    # إحصائيات سريعة - استبعاد الملغي والمسترجع
+    # إحصائيات سريعة
     active_mask = ~df["order_status"].apply(is_cancelled_or_returned_status)
     active_df = df[active_mask]
     
@@ -315,6 +326,15 @@ def show():
         st.metric("⏰ فواتير بعد آخر طلب", len(active_df[active_df["case_type"] == "post_cutoff_abc"]))
     with col7:
         st.metric("✅ تم إنجازها", len(df[df["status"] == "تم"]))
+    
+    # أزرار التحديث والتصدير
+    col1, col2 = st.columns([1, 6])
+    with col1:
+        if st.button("🔄 تحديث الصفحة", use_container_width=True):
+            st.rerun()
+    with col2:
+        if st.button("📥 تصدير إلى Excel", use_container_width=True):
+            st.session_state.show_export = True
     
     # فلاتر
     col1, col2, col3 = st.columns(3)
@@ -339,7 +359,7 @@ def show():
         else:
             filtered_df = filtered_df[filtered_df["order_status"] == selected_order_status]
     
-    # فصل البيانات - استبعاد الملغي والمسترجع من التبويبات الرئيسية
+    # فصل البيانات
     active_mask_filtered = ~filtered_df["order_status"].apply(is_cancelled_or_returned_status)
     payment_mask = filtered_df["order_status"].apply(is_pending_payment_status)
     cancelled_mask = filtered_df["order_status"].apply(is_cancelled_or_returned_status)
@@ -355,26 +375,7 @@ def show():
     completed_df = get_completed_items()
     if selected_branch != "الكل":
         completed_df = completed_df[completed_df["pharmacy_name"] == selected_branch]
-
-    col1, col2 = st.columns([1, 6])
-    with col1:
-        if st.button("🔄 تحديث الصفحة", use_container_width=True):
-            st.rerun()
-    with col2:
-        if st.button("📥 تصدير إلى Excel", use_container_width=True):
-            st.session_state.show_export = True
     
-    with st.expander("📂 رفع ملف الطلبات والفواتير", expanded=True):
-        uploaded_file = st.file_uploader("اختر ملف Excel", type=["xlsx"])
-        if uploaded_file:
-            if st.button("🔄 معالجة الملف", use_container_width=True, type="primary"):
-                with st.spinner("جاري معالجة الملف..."):
-                    results, upload_batch_id = process_excel(uploaded_file, st.session_state.username)
-                if results is not None:
-                    st.success(f"✅ تمت المعالجة بنجاح!")
-                    st.balloons()
-                    st.rerun()
-                    
     # تصدير Excel
     if st.session_state.get('show_export', False):
         export_data = {
@@ -399,20 +400,17 @@ def show():
     .stTabs [data-baseweb="tab-list"] button:nth-child(2) { background-color: #ED7D31; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(3) { background-color: #70AD47; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(4) { background-color: #FFC000; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(5) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(6) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(7) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(8) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
-    /* التبويب النشط */
+    .stTabs [data-baseweb="tab-list"] button:nth-child(5) { background-color: #9B59B6; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(6) { background-color: #3498DB; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(7) { background-color: #E74C3C; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(8) { background-color: #27AE60; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
         transform: translateY(-2px) !important;
         box-shadow: 0 4px 8px rgba(0,0,0,0.2) !important;
     }
-    /* التبويب غير النشط */
     .stTabs [data-baseweb="tab-list"] button[aria-selected="false"] {
         opacity: 0.85 !important;
     }
-    /* تأثير hover */
     .stTabs [data-baseweb="tab-list"] button:hover {
         transform: translateY(-2px) !important;
         opacity: 1 !important;
@@ -465,23 +463,3 @@ def show():
                     <span>📅 {row['last_login'][:16] if row['last_login'] else 'لم يدخل'}</span>
                 </div>
                 """, unsafe_allow_html=True)
-
-    # ========== معلومات المدير العام ==========
-    st.markdown('<div class="section-title">👑 معلومات المدير العام</div>', unsafe_allow_html=True)
-    manager_info = get_manager_last_login()
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown(f"""
-        <div class="note-card">
-            <strong>👤 آخر دخول للمدير العام:</strong><br>
-            📅 {manager_info['last_login']}<br>
-            🌐 IP: {manager_info['last_ip']}
-        </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        login_history = get_login_history(10)
-        if not login_history.empty:
-            st.markdown("### 📋 آخر محاولات الدخول")
-            st.dataframe(login_history, use_container_width=True)
-    
-    st.markdown("---")
