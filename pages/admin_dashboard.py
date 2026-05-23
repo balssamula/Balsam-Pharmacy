@@ -18,6 +18,7 @@ from utils.helpers import (
     get_tab_label, numeric_value
 )
 from utils.excel_processor import process_excel
+from utils.database import (..., get_old_orders, get_old_orders_stats)
 
 def export_to_excel(dataframes_dict: dict) -> bytes:
     output = BytesIO()
@@ -426,6 +427,7 @@ def show():
     .stTabs [data-baseweb="tab-list"] button:nth-child(6) { background-color: #3498DB; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(7) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(8) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(9) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
         transform: translateY(-2px) !important;
         box-shadow: 0 4px 8px rgba(0,0,0,0.2) !important;
@@ -448,7 +450,8 @@ def show():
         f"⏰ فواتير بعد آخر طلب ({len(post_cutoff_df)})",
         f"💰 بانتظار الدفع ({len(payment_df)})",
         f"⚠️ ملغي/مسترجع ({len(cancelled_df)})",
-        f"✅ تم الانتهاء ({len(completed_df)})"
+        f"✅ تم الانتهاء ({len(completed_df)})",
+        f"📅 طلبات قديمة (>6 أشهر)"
     ])
     
     with tab1:
@@ -470,7 +473,76 @@ def show():
             render_table_with_click(completed_df, "completed")
         else:
             st.info("لا توجد طلبات مكتملة")
+    with tab9:
+    st.markdown("### 📅 الطلبات التي مر عليها أكثر من 6 أشهر ولم تكتمل")
     
+    # إضافة إحصائيات
+    old_stats = get_old_orders_stats()
+    if old_stats["total"] > 0:
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("📊 إجمالي الطلبات القديمة", old_stats["total"])
+        with col2:
+            st.metric("➕ إضافات قديمة", old_stats["additions"])
+        with col3:
+            st.metric("➖ إرجاعات قديمة", old_stats["returns"])
+        with col4:
+            st.metric("📦 طلبات بدون فاتورة", old_stats.get("orphan_salla", 0))
+        
+        # إضافة خيار عدد الأشهر
+        months = st.slider("عدد الأشهر للبحث", min_value=3, max_value=24, value=6, step=3)
+        
+        # جلب الطلبات القديمة
+        old_orders_df = get_old_orders(months=months)
+        
+        if not old_orders_df.empty:
+            # عرض جدول الطلبات القديمة
+            display_df = old_orders_df.copy()
+            display_df = display_df.rename(columns={
+                "order_number": "رقم الطلب",
+                "invoice_number": "رقم الفاتورة",
+                "sku": "SKU",
+                "product_name": "المنتج",
+                "pharmacy_name": "الفرع",
+                "salla_qty": "كمية سلة",
+                "abc_qty": "كمية ABC",
+                "difference": "الفرق",
+                "case_label": "نوع الحالة",
+                "order_status": "حالة الطلب",
+                "order_date": "تاريخ الطلب",
+                "days_old": "عدد الأيام"
+            })
+            
+            # تلوين الصفوف حسب عدد الأيام
+            def color_days(val):
+                if val > 365:
+                    return 'background-color: #ffcccc'
+                elif val > 180:
+                    return 'background-color: #ffe0cc'
+                return ''
+            
+            st.dataframe(
+                display_df[["رقم الطلب", "رقم الفاتورة", "SKU", "المنتج", "الفرع", 
+                           "كمية سلة", "كمية ABC", "الفرق", "نوع الحالة", "حالة الطلب", 
+                           "تاريخ الطلب", "عدد الأيام"]].head(50),
+                use_container_width=True
+            )
+            
+            # زر تصدير الطلبات القديمة
+            if st.button("📥 تصدير الطلبات القديمة إلى Excel", use_container_width=True):
+                excel_data = export_to_excel({"الطلبات_القديمة": display_df})
+                st.download_button(
+                    "📥 تحميل التقرير",
+                    data=excel_data,
+                    file_name=f"old_orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
+        else:
+            st.success(f"🎉 لا توجد طلبات قديمة (أكثر من {months} أشهر)")
+    else:
+        st.success("🎉 لا توجد طلبات قديمة (أكثر من 6 أشهر)")
+        
     # ========== آخر دخول للصيدليات ==========
     st.markdown('<div class="section-title">👥 آخر دخول للصيدليات</div>', unsafe_allow_html=True)
 
