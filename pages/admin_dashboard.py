@@ -601,4 +601,65 @@ def show():
                     use_container_width=True,
                 )
         else:
-            st.success("🎉 لا توجد فواتير قديمة (أكثر من 6 أش
+            st.success("🎉 لا توجد فواتير قديمة (أكثر من 6 أشهر)")
+    
+    with tab11:
+        st.markdown("### 📊 إحصائيات العناصر القديمة")
+        st.markdown("---")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("#### 📅 الطلبات القديمة")
+            st.markdown(f"""
+            - **إجمالي الطلبات القديمة:** {old_orders_stats['total']}
+            - **إضافات قديمة:** {old_orders_stats['additions']}
+            - **إرجاعات قديمة:** {old_orders_stats['returns']}
+            - **طلبات بدون فاتورة:** {old_orders_stats.get('orphan_salla', 0)}
+            """)
+            
+            if old_orders_stats['by_branch']:
+                st.markdown("#### 🏥 التوزيع حسب الفرع")
+                for branch, count in old_orders_stats['by_branch'].items():
+                    st.markdown(f"- {branch[-10:]}: {count} طلب")
+        
+        with col2:
+            st.markdown("#### 🧾 الفواتير القديمة")
+            st.markdown(f"""
+            - **إجمالي الفواتير القديمة:** {old_invoices_stats['total']}
+            - **إضافات:** {old_invoices_stats['additions']}
+            - **إرجاعات:** {old_invoices_stats['returns']}
+            - **فواتير بدون طلب:** {old_invoices_stats.get('orphan_abc', 0)}
+            """)
+            
+            if old_invoices_stats['by_branch']:
+                st.markdown("#### 🏥 التوزيع حسب الفرع")
+                for branch, count in old_invoices_stats['by_branch'].items():
+                    st.markdown(f"- {branch[-10:]}: {count} فاتورة")
+        
+        st.markdown("---")
+        total_old = old_orders_stats['total'] + old_invoices_stats['total']
+        if total_old > 0:
+            st.warning(f"⚠️ إجمالي العناصر القديمة (طلبات + فواتير): {total_old}")
+        else:
+            st.success("🎉 لا توجد عناصر قديمة (طلبات أو فواتير)")
+    
+    # آخر دخول للصيدليات
+    st.markdown('<div class="section-title">👥 آخر دخول للصيدليات</div>', unsafe_allow_html=True)
+    last_logins = get_all_last_logins()
+    if not last_logins.empty:
+        cols = st.columns(4)
+        for idx, (_, row) in enumerate(last_logins.head(8).iterrows()):
+            with cols[idx % 4]:
+                st.markdown(f"""
+                <div class="note-card">
+                    <strong>🏥 {row['pharmacy_name'][-10:]}</strong><br>
+                    <span>👤 {row['pharmacist_name'] or 'غير مسجل'}</span><br>
+                    <span>📅 {row['last_login'][:16] if row['last_login'] else 'لم يدخل'}</span><br>
+                    <span>🌐 IP: {row['last_ip'] or 'غير معروف'}</span>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        with st.expander("📋 عرض جميع الصيدليات"):
+            st.dataframe(last_logins[['pharmacy_name', 'pharmacist_name', 'last_login', 'last_ip']], use_container_width=True)
+    else:
+        st.info("لا توجد سجلات دخول للصيدليات بعد")
