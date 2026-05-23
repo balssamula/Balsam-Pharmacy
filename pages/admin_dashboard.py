@@ -53,8 +53,7 @@ def export_to_excel(dataframes_dict: dict) -> bytes:
                         if row % 2 == 0:
                             cell.fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
                         cell.alignment = Alignment(horizontal="center", vertical="center")
-                        column_title = str(worksheet.cell(row=1, column=col).value).strip()
-                        if column_title == "الفرق":
+                        if worksheet.cell(row=1, column=col).value == "الفرق":
                             diff_value = cell.value
                             if diff_value:
                                 if diff_value > 0:
@@ -305,49 +304,66 @@ def show():
         )
         st.session_state.show_export = False
     
-    # ========== تلوين التبويبات - التبويبات الرئيسية مميزة ==========
+    # ========== CSS متوافق مع الإصدارات الحديثة من Streamlit ==========
     st.markdown("""
-     <style>
-     /* التبويبات الرئيسية بألوان مميزة وخلفية متوافقة */ 
-     button[data-baseweb="tab"]:nth-child(1) { 
-         background-color: #4472C4 !important; 
-         color: white !important; 
-         border-radius: 10px 10px 0 0 !important;
-         font-weight: bold !important;
-     }
-     button[data-baseweb="tab"]:nth-child(2) { 
-         background-color: #ED7D31 !important; 
-         color: white !important; 
-         border-radius: 10px 10px 0 0 !important;
-         font-weight: bold !important;
-     }
-     button[data-baseweb="tab"]:nth-child(3) { 
-         background-color: #70AD47 !important; 
-         color: white !important; 
-         border-radius: 10px 10px 0 0 !important;
-         font-weight: bold !important;
-     }
-     button[data-baseweb="tab"]:nth-child(4) { 
-         background-color: #FFC000 !important; 
-         color: white !important; 
-         border-radius: 10px 10px 0 0 !important;
-         font-weight: bold !important;
-     }
- 
-     /* تأثيرات التبويب النشط وغير النشط عند التحويم */
-     button[data-baseweb="tab"][aria-selected="true"] { 
-         opacity: 1 !important; 
-         transform: translateY(-2px);
-         transition: all 0.2s ease;
-     }
-     button[data-baseweb="tab"][aria-selected="false"] { 
-         opacity: 0.8 !important; 
-     }
-     </style>
-     """, unsafe_allow_html=True)
+    <style>
+    /* استهداف أزرار التبويبات بشكل عام */
+    .stTabs [data-baseweb="tab-list"] button {
+        border-radius: 10px 10px 0 0 !important;
+        padding: 0.5rem 1rem !important;
+        font-weight: bold !important;
+        margin: 0 2px !important;
+        transition: all 0.2s ease !important;
+    }
+    /* التبويبات الرئيسية بألوان مميزة */
+    .stTabs [data-baseweb="tab-list"] button:nth-child(1) {
+        background-color: #4472C4 !important;
+        color: white !important;
+        border: 2px solid #4472C4 !important;
+    }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(2) {
+        background-color: #ED7D31 !important;
+        color: white !important;
+        border: 2px solid #ED7D31 !important;
+    }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(3) {
+        background-color: #70AD47 !important;
+        color: white !important;
+        border: 2px solid #70AD47 !important;
+    }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(4) {
+        background-color: #FFC000 !important;
+        color: white !important;
+        border: 2px solid #FFC000 !important;
+    }
+    /* باقي التبويبات بلون رمادي */
+    .stTabs [data-baseweb="tab-list"] button:nth-child(5),
+    .stTabs [data-baseweb="tab-list"] button:nth-child(6),
+    .stTabs [data-baseweb="tab-list"] button:nth-child(7),
+    .stTabs [data-baseweb="tab-list"] button:nth-child(8) {
+        background-color: #6c757d !important;
+        color: white !important;
+        border: 2px solid #6c757d !important;
+    }
+    /* التبويب النشط */
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2) !important;
+    }
+    /* التبويب غير النشط */
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="false"] {
+        opacity: 0.85 !important;
+    }
+    /* تأثير hover */
+    .stTabs [data-baseweb="tab-list"] button:hover {
+        transform: translateY(-2px) !important;
+        opacity: 1 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
-    # إنشاء التبويبات مع أسماء واضحة
-    tabs = st.tabs([
+    # إنشاء التبويبات
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         f"📈 الإضافات ({len(additions_df)})",
         f"📉 الإرجاعات ({len(returns_df)})",
         f"📦 طلبات بدون فاتورة ({len(orphan_salla_df)})",
@@ -358,54 +374,37 @@ def show():
         f"✅ تم الانتهاء ({len(completed_df)})"
     ])
     
-    # ========== دالة تنسيق الجدول مع تظليل الصفوف ==========
+    # ========== دالة تنسيق الجدول مع تظليل الصفوف (تصحيح التسميات) ==========
     def styled_dataframe(input_df):
         if input_df.empty:
             return None
         
         def highlight_rows(row):
-            # قراءة الحقول بالأسماء العربية المحدثة بدقة مع إزالة المسافات
-            حالة_التنفيذ = str(row.get('الحالة', '')).strip()
-            نوع_الحالة = str(row.get('نوع الحالة', '')).strip()
-            حالة_الطلب = str(row.get('حالة الطلب', '')).strip()
-        
-            # 1. إذا اكتمل الإجراء بواسطة الصيدلي (أخضر فاتح)
-            if حالة_التنفيذ == "تم":
-                return ['background-color: #d4edda; color: #155724; font-weight: 500;'] * len(row)
-            
-            # 2. إذا كان الطلب ملغياً أو مسترجعاً من العميل (أحمر فاتح جداً)
-            if any(word in حالة_الطلب for word in ["ملغي", "مسترجع"]):
-                return ['background-color: #f8d7da; color: #721c24;'] * len(row)
-            
-            # 3. إذا كان الطلب بانتظار الدفع (أصفر خفيف)
-            if "بانتظار الدفع" in حالة_الطلب:
-                return ['background-color: #fff3cd; color: #856404;'] * len(row)
-            
-            # 4. التمييز اللوني للحالات النشطة قيد المتابعة
-            if نوع_الحالة == "إرجاع":
-                return ['background-color: #ffe0df; color: #491217;'] * len(row) # برتقالي محمر خفيف
-            elif نوع_الحالة == "إضافة":
-                return ['background-color: #dff1ff; color: #084298;'] * len(row) # أزرق مريح
-            
+            # استخدام الأسماء الإنجليزية لأن البيانات الأصلية بالإنجليزية
+            if row.get('status') == "تم":
+                if row.get('case_type') == "addition":
+                    return ['background-color: #d4edda'] * len(row)
+                elif row.get('case_type') == "return":
+                    return ['background-color: #f8d7da'] * len(row)
+                else:
+                    return ['background-color: #d1ecf1'] * len(row)
+            # تظليل الصفوف التي تحتوي على "بانتظار الدفع"
+            if row.get('order_status') and "بانتظار الدفع" in str(row.get('order_status')):
+                return ['background-color: #fff4d6'] * len(row)
             return [''] * len(row)
-
-        # إجراء الـ Rename وتوحيد الأسماء أولاً
+        
+        # لا نقوم بتغيير أسماء الأعمدة قبل التلوين، نستخدم البيانات الأصلية
+        # فقط للعرض نقوم بترجمة الأعمدة
         display_df = input_df.copy()
         display_df = display_df.rename(columns={
-            "order_number": "رقم الطلب", 
-            "invoice_number": "رقم الفاتورة", 
-            "sku": "SKU",
-            "product_name": "المنتج", 
-            "pharmacy_name": "الفرع", 
-            "salla_qty": "كمية سلة",
-            "abc_qty": "كمية ABC", 
-            "difference": "الفرق", 
-            "case_label": "نوع الحالة",
-            "status": "الحالة",
-            "order_status": "حالة الطلب"
+            "order_number": "رقم الطلب", "invoice_number": "رقم الفاتورة",
+            "sku": "SKU", "product_name": "المنتج", "pharmacy_name": "الفرع",
+            "salla_qty": "كمية سلة", "abc_qty": "كمية ABC",
+            "difference": "الفرق", "order_status": "حالة الطلب",
+            "case_label": "نوع الحالة", "status": "الحالة"
         })
-    
-        return display_df.style.apply(highlight_rows, axis=1)
+        # تطبيق التلوين على البيانات الأصلية ثم العرض
+        return display_df.style.apply(lambda row: highlight_rows(input_df.loc[row.name]), axis=1)
     
     # ========== دالة عرض الجدول مع النقر ==========
     def render_table_with_click(df, tab_name):
@@ -451,6 +450,7 @@ def show():
                             unhide_item_from_pharmacy(item_key)
                         else:
                             hide_item_from_pharmacy(item_key, st.session_state.username)
+                        st.rerun()
                     
                     # زر القفل/الفتح
                     is_locked = row.get('is_item_locked', 0) == 1
@@ -459,33 +459,36 @@ def show():
                             unlock_item(item_key)
                         else:
                             lock_item(item_key, st.session_state.username)
+                        st.rerun()
                     
                     # زر إعادة الفتح (للمكتمل فقط)
                     if row['status'] == "تم":
                         if cols[2].button("🔄 إعادة فتح", key=f"reopen_{tab_name}_{selected_idx}", use_container_width=True):
                             reopen_case_by_item_key(item_key)
+                            st.rerun()
                     
                     # حفظ الملحوظة
                     note = cols[3].text_input("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=f"note_{tab_name}_{selected_idx}")
                     if cols[4].button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
                         save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note)
+                        st.success("✅ تم حفظ الملحوظة")
+                        st.rerun()
     
-    # عرض التبويبات
-    with tabs[0]:
+    with tab1:
         render_table_with_click(additions_df, "additions")
-    with tabs[1]:
+    with tab2:
         render_table_with_click(returns_df, "returns")
-    with tabs[2]:
+    with tab3:
         render_table_with_click(orphan_salla_df, "orphan_salla")
-    with tabs[3]:
+    with tab4:
         render_table_with_click(orphan_abc_df, "orphan_abc")
-    with tabs[4]:
+    with tab5:
         render_table_with_click(post_cutoff_df, "post_cutoff")
-    with tabs[5]:
+    with tab6:
         render_table_with_click(payment_df, "payment")
-    with tabs[6]:
+    with tab7:
         render_table_with_click(cancelled_df, "cancelled")
-    with tabs[7]:
+    with tab8:
         if not completed_df.empty:
             render_table_with_click(completed_df, "completed")
         else:
