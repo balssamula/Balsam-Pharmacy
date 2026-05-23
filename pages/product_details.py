@@ -14,21 +14,27 @@ def extract_single_sku(combined_sku):
     
     sku_str = str(combined_sku).strip()
     
-    # إزالة أي أرقام بعد * (مثل 14373*6 -> 14373)
     if '*' in sku_str:
         sku_str = sku_str.split('*')[0].strip()
-    
-    # إذا كان هناك عدة SKU مفصولة بـ - أو +، نأخذ أول واحد
     if '-' in sku_str:
         sku_str = sku_str.split('-')[0].strip()
     if '+' in sku_str:
         sku_str = sku_str.split('+')[0].strip()
     
-    # إزالة أي أحرف غير رقمية (مع الحفاظ على الحروف للSKU التي تحتوي على حروف)
+    # إزالة أي أحرف غير رقمية
     if sku_str.replace('.', '').isdigit():
         sku_str = re.sub(r'[^0-9]', '', sku_str)
     
     return sku_str
+
+def safe_float_convert(value):
+    """تحويل آمن إلى float"""
+    if pd.isna(value):
+        return 0.0
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return 0.0
 
 def show():
     st.markdown("""
@@ -40,10 +46,9 @@ def show():
     
     st.info("""
     **📌 تعليمات استخدام هذه الصفحة:**
-    1. قم برفع ملف `orders.xlsx` (يحتوي على أعمدة: رقم الطلب، skus_json، الخصم، تكلفة الشحن، طريقة الدفع، الضريبة، تاريخ الطلب، قيمة خصم الكوبون، قيمة خصم العروض الخاصة)
+    1. قم برفع ملف `orders.xlsx` (يحتوي على أعمدة: رقم الطلب، skus_json، الخصم، تكلفة الشحن، طريقة الدفع، الضريبة، تاريخ الطلب)
     2. قم برفع ملف `products.xlsx` (يحتوي على عمودي 'SKU' و 'ProductName')
-    3. سيتم معالجة البيانات واستخراج تفاصيل المنتجات الرئيسية والفرعية
-    4. يتم البحث عن اسم المنتج باستخدام SKU المجمع بعد استخراج SKU الفردي
+    3. سيتم معالجة البيانات واستخراج تفاصيل المنتجات
     """)
     
     col1, col2 = st.columns(2)
@@ -74,7 +79,6 @@ def show():
                     
                     # التحقق من وجود الأعمدة المطلوبة
                     required_order_cols = ['رقم الطلب', 'skus_json']
-                    optional_order_cols = ['الخصم', 'تكلفة الشحن', 'طريقة الدفع', 'الضريبة', 'تاريخ الطلب', 'قيمة خصم الكوبون', 'قيمة خصم العروض الخاصة']
                     required_product_cols = ['SKU', 'ProductName']
                     
                     missing_order = [col for col in required_order_cols if col not in df_orders.columns]
@@ -87,7 +91,7 @@ def show():
                         st.error(f"❌ الأعمدة المفقودة في ملف المنتجات: {missing_product}")
                         st.stop()
                     
-                    # إنشاء قاموس المنتجات للبحث السريع
+                    # إنشاء قاموس المنتجات
                     product_map = {}
                     for _, row in df_products.iterrows():
                         sku = str(row['SKU']).strip()
@@ -96,18 +100,18 @@ def show():
                         name = str(row['ProductName']).strip()
                         product_map[sku] = name
                     
-                    # إنشاء قاموس لبيانات الطلبات الإضافية
+                    # إنشاء قاموس لبيانات الطلبات مع تحويل الأرقام
                     order_info_map = {}
                     for _, row in df_orders.iterrows():
                         order_id = row['رقم الطلب']
                         order_info_map[order_id] = {
-                            'الخصم': row.get('الخصم', 0),
-                            'تكلفة الشحن': row.get('تكلفة الشحن', 0),
-                            'طريقة الدفع': row.get('طريقة الدفع', 'غير محدد'),
-                            'الضريبة': row.get('الضريبة', 0),
+                            'الخصم': safe_float_convert(row.get('الخصم', 0)),
+                            'تكلفة الشحن': safe_float_convert(row.get('تكلفة الشحن', 0)),
+                            'طريقة الدفع': str(row.get('طريقة الدفع', 'غير محدد')),
+                            'الضريبة': safe_float_convert(row.get('الضريبة', 0)),
                             'تاريخ الطلب': row.get('تاريخ الطلب', ''),
-                            'قيمة خصم الكوبون': row.get('قيمة خصم الكوبون', 0),
-                            'قيمة خصم العروض الخاصة': row.get('قيمة خصم العروض الخاصة', 0)
+                            'قيمة خصم الكوبون': safe_float_convert(row.get('قيمة خصم الكوبون', 0)),
+                            'قيمة خصم العروض الخاصة': safe_float_convert(row.get('قيمة خصم العروض الخاصة', 0))
                         }
                     
                     final_rows = []
@@ -126,13 +130,12 @@ def show():
                                 json_data = skus_json
                             
                             for item in json_data:
-                                # تحديد SKU المجمع
                                 combined_sku = ""
                                 quantity = 0
                                 unit_price = 0
                                 product_name = ""
                                 
-                                # البحث عن SKU في positions المختلفة
+                                # البحث عن SKU
                                 for pos in range(len(item)):
                                     val = str(item[pos]) if item[pos] is not None else ""
                                     if re.match(r'^[\d\*\-]+$', val) and len(val) > 2:
@@ -158,16 +161,13 @@ def show():
                                 if len(item) > 0 and isinstance(item[0], str) and not re.match(r'^[\d\*\-]+$', item[0]):
                                     product_name = item[0]
                                 
-                                # استخراج SKU الفردي
                                 single_sku = extract_single_sku(combined_sku)
                                 
-                                # جلب اسم المنتج من قاموس المنتجات
                                 if single_sku and single_sku in product_map:
                                     product_name = product_map[single_sku]
                                 
                                 total = quantity * unit_price if quantity and unit_price else 0
                                 
-                                # إضافة المنتج الأساسي مع البيانات الإضافية
                                 if combined_sku:
                                     final_rows.append({
                                         'رقم الطلب': order_id,
@@ -234,14 +234,19 @@ def show():
                     # إنشاء DataFrame النهائي
                     result_df = pd.DataFrame(final_rows)
                     
-                    # تنظيف البيانات
+                    # تنظيف البيانات وتحويل الأعمدة الرقمية
+                    numeric_cols = ['الكمية', 'سعر الوحدة', 'الإجمالي', 'الخصم', 'تكلفة الشحن', 'الضريبة', 'قيمة خصم الكوبون', 'قيمة خصم العروض الخاصة']
+                    for col in numeric_cols:
+                        if col in result_df.columns:
+                            result_df[col] = result_df[col].apply(safe_float_convert)
+                    
                     result_df = result_df[result_df['المنتج'].notna()]
                     result_df = result_df[result_df['المنتج'] != ""]
                     result_df = result_df[result_df['الكمية'] > 0]
                     result_df = result_df.drop_duplicates(subset=['رقم الطلب', 'SKU مجمع (للمراجعة)'])
                     
-                    # تحويل تاريخ الطلب إلى datetime
-                    result_df['تاريخ الطلب'] = pd.to_datetime(result_df['تاريخ الطلب'], errors='coerce')
+                    if 'تاريخ الطلب' in result_df.columns:
+                        result_df['تاريخ الطلب'] = pd.to_datetime(result_df['تاريخ الطلب'], errors='coerce')
                     
                     st.success(f"✅ تمت المعالجة بنجاح!")
                     st.info(f"📊 الإحصائيات: {processed_orders} طلب تمت معالجتها، {failed_orders} طلب فشل")
@@ -260,7 +265,6 @@ def show():
                         st.subheader("📋 جدول البيانات التفصيلي")
                         st.dataframe(result_df, use_container_width=True)
                         
-                        # زر تحميل
                         output = BytesIO()
                         result_df.to_excel(output, index=False)
                         output.seek(0)
@@ -273,7 +277,7 @@ def show():
                         )
                     
                     with tab2:
-                        st.subheader("📊 إحصائيات وتحليلات متقدمة")
+                        st.subheader("📊 إحصائيات وتحليلات")
                         
                         col1, col2, col3, col4 = st.columns(4)
                         with col1:
@@ -291,7 +295,6 @@ def show():
                         
                         col1, col2, col3 = st.columns(3)
                         with col1:
-                            # إجمالي الخصومات
                             total_discount = result_df['الخصم'].sum() + result_df['قيمة خصم الكوبون'].sum() + result_df['قيمة خصم العروض الخاصة'].sum()
                             st.metric("إجمالي الخصومات", f"{total_discount:,.2f} ₴")
                         with col2:
@@ -303,7 +306,6 @@ def show():
                         
                         st.markdown("---")
                         
-                        # أكثر 10 منتجات مبيعاً
                         st.subheader("🏆 أكثر 10 منتجات مبيعاً")
                         top_products = result_df.groupby(['SKU فردي', 'المنتج']).agg({
                             'الكمية': 'sum',
@@ -311,7 +313,6 @@ def show():
                         }).reset_index().sort_values('الكمية', ascending=False).head(10)
                         st.dataframe(top_products, use_container_width=True)
                         
-                        # تحليل المنتجات حسب النوع
                         st.subheader("📦 توزيع المنتجات حسب النوع")
                         type_stats = result_df.groupby('النوع').agg({
                             'الكمية': 'sum',
@@ -322,39 +323,37 @@ def show():
                     with tab3:
                         st.subheader("📈 الرسوم البيانية التفاعلية")
                         
-                        # 1. المبيعات اليومية
-                        st.markdown("### 📅 المبيعات اليومية")
-                        daily_sales = result_df.groupby(result_df['تاريخ الطلب'].dt.date).agg({
-                            'الإجمالي': 'sum',
-                            'الكمية': 'sum'
-                        }).reset_index()
-                        daily_sales = daily_sales.sort_values('تاريخ الطلب')
+                        if 'تاريخ الطلب' in result_df.columns and not result_df['تاريخ الطلب'].isna().all():
+                            st.markdown("### 📅 المبيعات اليومية")
+                            daily_sales = result_df.groupby(result_df['تاريخ الطلب'].dt.date).agg({
+                                'الإجمالي': 'sum'
+                            }).reset_index()
+                            daily_sales = daily_sales.sort_values('تاريخ الطلب')
+                            
+                            fig1 = px.line(daily_sales, x='تاريخ الطلب', y='الإجمالي', 
+                                          title='المبيعات اليومية',
+                                          labels={'الإجمالي': 'المبيعات (₴)', 'تاريخ الطلب': 'التاريخ'})
+                            st.plotly_chart(fig1, use_container_width=True)
                         
-                        fig1 = px.line(daily_sales, x='تاريخ الطلب', y='الإجمالي', 
-                                      title='المبيعات اليومية',
-                                      labels={'الإجمالي': 'المبيعات (₴)', 'تاريخ الطلب': 'التاريخ'})
-                        st.plotly_chart(fig1, use_container_width=True)
-                        
-                        # 2. توزيع المبيعات حسب المنتج
                         st.markdown("### 🏷️ أفضل 10 منتجات من حيث المبيعات")
-                        top_10 = result_df.groupby('المنتج')['الإجمالي'].sum().sort_values(ascending=False).head(10)
-                        fig2 = px.bar(x=top_10.values, y=top_10.index, orientation='h',
-                                     title='أفضل 10 منتجات من حيث المبيعات',
-                                     labels={'x': 'المبيعات (₴)', 'y': 'المنتج'})
-                        st.plotly_chart(fig2, use_container_width=True)
+                        top_10 = result_df.groupby('المنتج')['الإجمالي'].sum().sort_values(ascending=False).head(10).reset_index()
+                        if not top_10.empty:
+                            fig2 = px.bar(top_10, x='الإجمالي', y='المنتج', orientation='h',
+                                         title='أفضل 10 منتجات من حيث المبيعات',
+                                         labels={'الإجمالي': 'المبيعات (₴)', 'المنتج': 'المنتج'})
+                            st.plotly_chart(fig2, use_container_width=True)
                         
-                        # 3. توزيع المبيعات حسب النوع
                         st.markdown("### 📊 توزيع المبيعات (أساسي vs فرعي)")
-                        type_sales = result_df.groupby('النوع')['الإجمالي'].sum()
-                        fig3 = px.pie(values=type_sales.values, names=type_sales.index, 
-                                     title='نسبة المبيعات حسب النوع',
-                                     hole=0.4)
-                        st.plotly_chart(fig3, use_container_width=True)
+                        type_sales = result_df.groupby('النوع')['الإجمالي'].sum().reset_index()
+                        if not type_sales.empty:
+                            fig3 = px.pie(type_sales, values='الإجمالي', names='النوع', 
+                                         title='نسبة المبيعات حسب النوع',
+                                         hole=0.4)
+                            st.plotly_chart(fig3, use_container_width=True)
                     
                     with tab4:
-                        st.subheader("💰 تحليل المبيعات المتقدم")
+                        st.subheader("💰 تحليل المبيعات")
                         
-                        # إجمالي الإيرادات
                         total_revenue = result_df['الإجمالي'].sum()
                         total_quantity = result_df['الكمية'].sum()
                         avg_unit_price = total_revenue / total_quantity if total_quantity > 0 else 0
@@ -369,26 +368,25 @@ def show():
                         
                         st.markdown("---")
                         
-                        # تحليل الخصومات
                         st.markdown("### 📉 تحليل الخصومات")
-                        discount_cols = ['الخصم', 'قيمة خصم الكوبون', 'قيمة خصم العروض الخاصة']
-                        discount_summary = {}
-                        for col in discount_cols:
-                            discount_summary[col] = result_df[col].sum()
-                        
-                        discount_df = pd.DataFrame(list(discount_summary.items()), columns=['نوع الخصم', 'القيمة'])
+                        discount_df = pd.DataFrame({
+                            'نوع الخصم': ['خصم الطلب', 'خصم الكوبون', 'خصم العروض الخاصة'],
+                            'القيمة': [
+                                result_df['الخصم'].sum(),
+                                result_df['قيمة خصم الكوبون'].sum(),
+                                result_df['قيمة خصم العروض الخاصة'].sum()
+                            ]
+                        })
                         fig4 = px.bar(discount_df, x='نوع الخصم', y='القيمة',
                                      title='قيمة الخصومات حسب النوع',
                                      labels={'القيمة': 'القيمة (₴)', 'نوع الخصم': 'نوع الخصم'})
                         st.plotly_chart(fig4, use_container_width=True)
                         
-                        # تحليل الضرائب
                         st.markdown("### 🧾 تحليل الضرائب")
                         total_tax = result_df['الضريبة'].sum()
                         tax_percentage = (total_tax / total_revenue) * 100 if total_revenue > 0 else 0
                         st.metric("إجمالي الضرائب", f"{total_tax:,.2f} ₴", delta=f"{tax_percentage:.2f}% من الإيرادات")
                         
-                        # شحن مجاني
                         st.markdown("### 🚚 تحليل الشحن")
                         free_shipping = len(result_df[result_df['تكلفة الشحن'] == 0]['رقم الطلب'].unique())
                         total_orders = result_df['رقم الطلب'].nunique()
@@ -397,7 +395,6 @@ def show():
                     with tab5:
                         st.subheader("🏷️ تحليل طرق الدفع")
                         
-                        # توزيع طرق الدفع
                         payment_stats = result_df.groupby('طريقة الدفع').agg({
                             'الإجمالي': 'sum',
                             'رقم الطلب': 'nunique'
@@ -407,24 +404,23 @@ def show():
                         
                         st.dataframe(payment_stats, use_container_width=True)
                         
-                        # رسم بياني لطرق الدفع
                         fig5 = px.pie(payment_stats, values='إجمالي المبيعات', names='طريقة الدفع',
                                      title='نسبة المبيعات حسب طريقة الدفع',
                                      hole=0.3)
                         st.plotly_chart(fig5, use_container_width=True)
                         
-                        # تحليل زمني لطرق الدفع
-                        st.markdown("### 📅 تطور طرق الدفع عبر الزمن")
-                        payment_over_time = result_df.groupby([result_df['تاريخ الطلب'].dt.date, 'طريقة الدفع']).agg({
-                            'الإجمالي': 'sum'
-                        }).reset_index()
-                        payment_over_time = payment_over_time.sort_values('تاريخ الطلب')
-                        
-                        fig6 = px.line(payment_over_time, x='تاريخ الطلب', y='الإجمالي', color='طريقة الدفع',
-                                      title='تطور المبيعات حسب طريقة الدفع',
-                                      labels={'الإجمالي': 'المبيعات (₴)', 'تاريخ الطلب': 'التاريخ'})
-                        st.plotly_chart(fig6, use_container_width=True)
-                        
+                        if 'تاريخ الطلب' in result_df.columns and not result_df['تاريخ الطلب'].isna().all():
+                            st.markdown("### 📅 تطور طرق الدفع عبر الزمن")
+                            payment_over_time = result_df.groupby([result_df['تاريخ الطلب'].dt.date, 'طريقة الدفع']).agg({
+                                'الإجمالي': 'sum'
+                            }).reset_index()
+                            payment_over_time = payment_over_time.sort_values('تاريخ الطلب')
+                            
+                            fig6 = px.line(payment_over_time, x='تاريخ الطلب', y='الإجمالي', color='طريقة الدفع',
+                                          title='تطور المبيعات حسب طريقة الدفع',
+                                          labels={'الإجمالي': 'المبيعات (₴)', 'تاريخ الطلب': 'التاريخ'})
+                            st.plotly_chart(fig6, use_container_width=True)
+                
                 except Exception as e:
                     st.error(f"❌ حدث خطأ أثناء المعالجة: {str(e)}")
                     st.exception(e)
