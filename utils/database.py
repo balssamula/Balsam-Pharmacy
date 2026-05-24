@@ -894,3 +894,52 @@ def get_available_branches(current_branch: str = None) -> list:
     if current_branch:
         branches = [b for b in branches if b != current_branch]
     return branches
+
+# ========== دوال الكشف عن المكررات ==========
+
+def check_duplicate_across_branches(order_number: str, sku: str, current_pharmacy: str) -> list:
+    """التحقق من وجود نفس SKU ورقم الطلب في فروع أخرى"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    try:
+        cur.execute("""
+            SELECT DISTINCT pharmacy_name, status, case_type, order_date, invoice_date
+            FROM reconciliation_items 
+            WHERE order_number = ? AND sku = ? AND pharmacy_name != ? AND active = 1
+        """, (order_number, sku, current_pharmacy))
+        
+        results = cur.fetchall()
+        return [{"pharmacy": r[0], "status": r[1], "case_type": r[2], 
+                 "order_date": r[3], "invoice_date": r[4]} for r in results]
+    except Exception as e:
+        print(f"Error checking duplicates: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def get_all_duplicate_items(pharmacy_name: str = None) -> pd.DataFrame:
+    """الحصول على جميع العناصر المكررة عبر الفروع"""
+    conn = sqlite3.connect(DB_PATH)
+    
+    query = """
+        SELECT order_number, sku, product_name, pharmacy_name, 
+               COUNT(*) OVER (PARTITION BY order_number, sku) as duplicate_count,
+               order_date, invoice_date, case_type, status
+        FROM reconciliation_items 
+        WHERE active = 1
+    """
+    
+    if pharmacy_name:
+        query += f" AND pharmacy_name = '{pharmacy_name}'"
+    
+    try:
+        df = pd.read_sql_query(query, conn)
+        # تصفية العناصر التي لها أكثر من نسخة
+        df = df[df['duplicate_count'] > 1]
+        return df
+    except Exception as e:
+        return pd.DataFrame()
+    finally:
+        conn.close()
