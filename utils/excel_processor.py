@@ -99,11 +99,11 @@ def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
         "product_name": "salla_product_name",
         "quantity": "salla_qty",
         "pharmacy_name": "salla_pharmacy_name",
-        "branch_number": "salla_branch_number",  # هذا العمود موجود الآن في قاعدة البيانات
+        "branch_number": "salla_branch_number",  # نحتفظ بهذا العمود
     })
     
     return grouped
-
+    
 def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     """معالجة شيت ABC - مع الحفاظ على تعدد الفروع"""
     df = df_abc.copy()
