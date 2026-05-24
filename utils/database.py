@@ -13,7 +13,6 @@ PHARMACY_COUNT = 17
 def get_client_ip():
     """الحصول على عنوان IP الخاص بالجهاز"""
     try:
-        # محاولة الحصول على IP من خدمة خارجية
         response = requests.get('https://api.ipify.org', timeout=5)
         if response.status_code == 200:
             return response.text
@@ -21,7 +20,6 @@ def get_client_ip():
         pass
     
     try:
-        # محاولة الحصول على IP المحلي
         hostname = socket.gethostname()
         return socket.gethostbyname(hostname)
     except:
@@ -45,7 +43,7 @@ def init_database():
     conn = sqlite3.connect(DB_PATH, timeout=60.0)
     cur = conn.cursor()
 
-    # Users table
+    # جدول المستخدمين
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY,
@@ -63,13 +61,12 @@ def init_database():
         )
     """)
 
-    # Add last_ip column if not exists
     cur.execute("PRAGMA table_info(users)")
     existing_columns = [row[1] for row in cur.fetchall()]
     if "last_ip" not in existing_columns:
         cur.execute("ALTER TABLE users ADD COLUMN last_ip TEXT DEFAULT ''")
 
-    # Login history table
+    # جدول سجل الدخول
     cur.execute("""
         CREATE TABLE IF NOT EXISTS login_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,7 +78,7 @@ def init_database():
         )
     """)
 
-    # Last access table
+    # جدول آخر وصول
     cur.execute("""
         CREATE TABLE IF NOT EXISTS last_access (
             pharmacy_name TEXT PRIMARY KEY,
@@ -90,7 +87,7 @@ def init_database():
         )
     """)
 
-    # Uploads table
+    # جدول المرفوعات والملفات
     cur.execute("""
         CREATE TABLE IF NOT EXISTS uploads (
             upload_batch_id TEXT PRIMARY KEY,
@@ -111,7 +108,7 @@ def init_database():
         )
     """)
 
-    # Reconciliation items table
+    # جدول الحالات والمطابقات الرئيسي
     cur.execute("""
         CREATE TABLE IF NOT EXISTS reconciliation_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -164,32 +161,32 @@ def init_database():
             item_locked_at TEXT DEFAULT ''
         )
     """)
-    
-    # Insert default admin
+ 
+    # إدراج المسؤول الرئيسي الافتراضي بأمان
     cur.execute("SELECT * FROM users WHERE username = 'admin'")
     if not cur.fetchone():
         cur.execute("""
             INSERT INTO users (username, password, role, pharmacist_name, can_view_dashboard, 
-             can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
+                               can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
             VALUES ('admin', 'admin123', 'admin', 'مدير النظام', 1, 1, 1, 1, 1, 1)
         """)
 
-    # Insert default manager
+    # إدراج المدير العام الافتراضي بأمان
     cur.execute("SELECT * FROM users WHERE username = 'manager'")
     if not cur.fetchone():
         cur.execute("""
             INSERT INTO users (username, password, role, pharmacist_name, can_view_dashboard, 
-             can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
-            VALUES ('manager', 'manager123', 'manager', 'مدير عام', 1, 1, 1, 0, 1, 1)
+                               can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
+            VALUES ('manager', 'manager123', 'manager', 'مدير عام', 1, 0, 1, 1, 1, 1)
         """)
 
-    # Insert default pharmacies
+    # تأسيس حسابات الفروع التلقائية
     for index, name in enumerate(pharmacy_names(), start=1):
         cur.execute("SELECT * FROM users WHERE username = ?", (name,))
         if not cur.fetchone():
             cur.execute("""
                 INSERT INTO users (username, password, role, pharmacist_name, can_view_dashboard, 
-                 can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
+                                   can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
                 VALUES (?, ?, 'pharmacy', '', 0, 0, 0, 0, 1, 1)
             """, (name, f"balsam{index}"))
 
