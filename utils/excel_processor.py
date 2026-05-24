@@ -294,36 +294,23 @@ def process_excel(uploaded_file, uploaded_by: str):
           int((results["case_type"] == "orphan_salla").sum()), int((results["case_type"] == "orphan_abc").sum())))
     
     # إدراج العناصر
-    for _, row in results.iterrows():
-        cur.execute("""
-            INSERT OR REPLACE INTO reconciliation_items (
-                item_key, upload_batch_id, order_number, invoice_number, sku, product_name,
-                salla_product_name, abc_product_name, pharmacy_name, salla_pharmacy_name,
-                abc_pharmacy_name, abc_pharmacist_name, branch_number, salla_qty, abc_qty, difference,
-                case_type, case_label, case_reason, status, customer_name, customer_phone,
-                city, order_status, order_date, invoice_date, profile_type, receipt_classification,
-                all_abc_pharmacies, other_branch_details, pharmacist_note, total_amount,
-                first_seen_at, last_seen_at, active,
-                payment_method, discount, shipping_cost, tax, coupon_discount, offer_discount
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?)
-        """, (
-            row["item_key"], upload_batch_id, str(row["order_number"]), str(row.get("invoice_number", "")),
-            str(row["sku"]), str(row["product_name"])[:200], str(row.get("salla_product_name", ""))[:200],
-            str(row.get("abc_product_name", ""))[:200], str(row["pharmacy_name"]),
-            str(row.get("salla_pharmacy_name", "")), str(row.get("abc_pharmacy_name", "")),
-            str(row.get("abc_pharmacist_name", "")), str(row.get("branch_number", "")),
-            float(row["salla_qty"]), float(row["abc_qty"]), float(row["difference"]),
-            str(row["case_type"]), str(row["case_label"]), str(row.get("case_reason", ""))[:500],
-            "قيد المتابعة", str(row.get("customer_name", ""))[:100], str(row.get("customer_phone", "")),
-            str(row.get("city", "")), str(row.get("order_status", "")), str(row.get("order_date", "")),
-            str(row.get("invoice_date", "")), str(row.get("profile_type", "")), str(row.get("receipt_classification", "")),
-            str(row.get("all_abc_pharmacies", "")), str(row.get("other_branch_details", "")),
-            "", float(row.get("total_amount", 0)), timestamp, timestamp, 1,
-            str(row.get("payment_method", "")), float(row.get("discount", 0)), float(row.get("shipping_cost", 0)),
-            float(row.get("tax", 0)), float(row.get("coupon_discount", 0)), float(row.get("offer_discount", 0))
-        ))
+        insert_df = results.copy()
+    insert_df['upload_batch_id'] = upload_batch_id
+    insert_df['status'] = 'قيد Mتابعة'
+    insert_df['pharmacist_note'] = ''
+    insert_df['first_seen_at'] = timestamp
+    insert_df['last_seen_at'] = timestamp
+    insert_df['active'] = 1
+    insert_df['hidden_from_pharmacy'] = 0
+    insert_df['is_item_locked'] = 0
+    
+    # فتح موصل آمن وقصير جداً مع تفعيل خيارات المهلة الممتدة
+    db_conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    try:
+        # الكتابة في جدول reconciliation_items دفعة واحدة في جزء من الثانية
+        insert_df.to_sql('reconciliation_items', db_conn, if_exists='append', index=False)
+    finally:
+        db_conn.close()
     
     # تعطيل العناصر القديمة وتفعيل الجلسة الحالية
     cur.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
