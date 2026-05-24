@@ -42,7 +42,7 @@ def pharmacy_names():
 
 def init_database():
     os.makedirs(DB_DIR, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=60.0)
     cur = conn.cursor()
 
     # Users table
@@ -433,8 +433,8 @@ def get_latest_upload_summary():
     try:
         cur.execute("""
             SELECT upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
-                   total_additions, total_returns, total_orphan_salla, total_orphan_abc,
-                   total_post_cutoff, is_locked, session_name
+                    total_additions, total_returns, total_orphan_salla, total_orphan_abc,
+                    total_post_cutoff, is_locked, session_name
             FROM uploads WHERE is_active = 1 ORDER BY uploaded_at DESC LIMIT 1
         """)
         return cur.fetchone()
