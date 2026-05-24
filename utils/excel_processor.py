@@ -99,7 +99,7 @@ def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
         "product_name": "salla_product_name",
         "quantity": "salla_qty",
         "pharmacy_name": "salla_pharmacy_name",
-        "branch_number": "salla_branch_number",  # نحتفظ بهذا العمود
+        "branch_number": "salla_branch_number",
     })
     
     return grouped
