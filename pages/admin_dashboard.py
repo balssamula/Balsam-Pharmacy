@@ -497,21 +497,46 @@ def show():
     cancelled_df = exclude_old_items(cancelled_df)
     completed_df = exclude_old_items(completed_df)
     
-    if st.session_state.get('show_export', False):
-        export_data = {
-            "الإضافات": additions_df, "الإرجاعات": returns_df,
-            "طلبات_بدون_فاتورة": orphan_salla_df, "فواتير_بدون_طلب": orphan_abc_df,
-            "فواتير_بعد_آخر_طلب": post_cutoff_df, "بانتظار_الدفع": payment_df,
-            "ملغي_ومسترجع": cancelled_df, "تم_الانتهاء": completed_df
-        }
-        excel_data = export_to_excel(export_data)
-        st.download_button(
-            "📥 تحميل التقرير",
-            data=excel_data,
-            file_name=f"balsam_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            use_container_width=True,
-        )
-        st.session_state.show_export = False
+    # تصدير Excel - يشمل جميع التبويبات بما فيها القديمة
+if st.session_state.get('show_export', False):
+    # جلب البيانات القديمة للتصدير
+    old_orders_export = get_old_orders(pharmacy_name=selected_branch_name, months=6)
+    old_invoices_export = get_old_invoices(pharmacy_name=selected_branch_name, months=6)
+    
+    export_data = {
+        "الإضافات": additions_df,
+        "الإرجاعات": returns_df,
+        "طلبات_بدون_فاتورة": orphan_salla_df,
+        "فواتير_بدون_طلب": orphan_abc_df,
+        "فواتير_بعد_آخر_طلب": post_cutoff_df,
+        "بانتظار_الدفع": payment_df,
+        "ملغي_ومسترجع": cancelled_df,
+        "تم_الانتهاء": completed_df,
+        "الطلبات_القديمة": old_orders_export,
+        "الفواتير_القديمة": old_invoices_export,
+        "إحصائيات_قديمة": pd.DataFrame({
+            "المقياس": ["إجمالي الطلبات القديمة", "إضافات قديمة", "إرجاعات قديمة", "طلبات بدون فاتورة",
+                        "إجمالي الفواتير القديمة", "إضافات فواتير", "إرجاعات فواتير", "فواتير بدون طلب"],
+            "القيمة": [
+                len(old_orders_export),
+                len(old_orders_export[old_orders_export["case_type"] == "addition"]) if not old_orders_export.empty else 0,
+                len(old_orders_export[old_orders_export["case_type"] == "return"]) if not old_orders_export.empty else 0,
+                len(old_orders_export[old_orders_export["case_type"] == "orphan_salla"]) if not old_orders_export.empty else 0,
+                len(old_invoices_export),
+                len(old_invoices_export[old_invoices_export["case_type"] == "addition"]) if not old_invoices_export.empty else 0,
+                len(old_invoices_export[old_invoices_export["case_type"] == "return"]) if not old_invoices_export.empty else 0,
+                len(old_invoices_export[old_invoices_export["case_type"] == "orphan_abc"]) if not old_invoices_export.empty else 0
+            ]
+        })
+    }
+    excel_data = export_to_excel(export_data)
+    st.download_button(
+        "📥 تحميل التقرير",
+        data=excel_data,
+        file_name=f"balsam_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        use_container_width=True,
+    )
+    st.session_state.show_export = False
     
     st.markdown("""
     <style>
