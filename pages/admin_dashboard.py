@@ -389,7 +389,8 @@ def show():
     with col2:
         if st.button("📥 تصدير إلى Excel", use_container_width=True):
             st.session_state.show_export = True
-    
+
+    # ========== 6 فلاتر ==========
     col1, col2, col3 = st.columns(3)
     with col1:
         branch_options = ["الكل"] + sorted(df["pharmacy_name"].dropna().astype(str).unique().tolist())
@@ -400,7 +401,7 @@ def show():
         order_status_options = ["الكل", "تم التوصيل", "ملغي", "مسترجع", "بانتظار الدفع", "تم الاستلام من فرع"]
         selected_order_status = st.selectbox("📋 فلتر حالة الطلب", order_status_options)
 
-        col4, col5, col6 = st.columns(3)
+    col4, col5, col6 = st.columns(3)
     with col4:
         search_order = st.text_input("🔢 رقم الطلب", placeholder="بحث برقم الطلب...")
     with col5:
