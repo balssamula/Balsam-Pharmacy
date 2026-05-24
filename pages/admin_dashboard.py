@@ -15,7 +15,8 @@ from utils.database import (
     lock_item, unlock_item, save_case_note,
     get_manager_last_login, get_login_history,
     get_old_orders, get_old_orders_stats,
-    get_old_invoices, get_old_invoices_stats
+    get_old_invoices, get_old_invoices_stats,
+    move_item_to_branch, get_available_branches
 )
 from utils.helpers import (
     is_cancelled_or_returned_status, is_pending_payment_status,
@@ -112,11 +113,11 @@ def styled_dataframe(input_df):
             
         # 2. تمييز الحالات داخل التبويبات المدمجة
         if case_type in ['orphan_salla', 'orphan_abc']:
-            return ['background-color: #fff3cd; color: #856404;'] * len(row)  # تمييز الحالات المفقودة باللون الأصفر الخفيف
+            return ['background-color: #fff3cd; color: #856404;'] * len(row)
         elif case_type == 'return':
-            return ['background-color: #ffe0df; color: #491217;'] * len(row)  # إرجاع عادي
+            return ['background-color: #ffe0df; color: #491217;'] * len(row)
         elif case_type == 'addition':
-            return ['background-color: #dff1ff; color: #084298;'] * len(row)  # إضافة عادية
+            return ['background-color: #dff1ff; color: #084298;'] * len(row)
             
         return [''] * len(row)
     
@@ -147,10 +148,12 @@ def styled_dataframe(input_df):
     })
     return display_df.style.apply(highlight_rows, axis=1)
 
-def render_table_with_click(df, tab_name):
+def render_table_with_click(df, tab_name, allow_move: bool = True):
+    """عرض جدول مع إمكانية تحديد الصف وإظهار إجراءات منبثقة"""
     if df.empty:
         st.success("لا توجد بيانات في هذا القسم.")
         return
+    
     styled_df = styled_dataframe(df)
     if styled_df is not None:
         event = st.dataframe(
@@ -160,40 +163,86 @@ def render_table_with_click(df, tab_name):
             selection_mode="single-row",
             on_select="rerun"
         )
+        
         if event.selection.rows:
             selected_idx = event.selection.rows[0]
             if 0 <= selected_idx < len(df):
                 row = df.iloc[selected_idx]
                 item_key = row.get('item_key', '')
+                
                 st.markdown(f"""
                 <div style="background:#f0f2f6;border-radius:10px;padding:1rem;margin-top:1rem;border-right:4px solid #1f7a8c;">
                     <h4 style="margin:0 0 0.5rem 0;">🛠️ إجراءات الصف المحدد</h4>
                     <p><strong>📋 رقم الطلب:</strong> {row['order_number']} | 
                     <strong>🏷️ SKU:</strong> {row['sku']} | 
                     <strong>📦 المنتج:</strong> {row['product_name'][:50]}</p>
+                    <p><strong>🏥 الفرع الحالي:</strong> {row.get('pharmacy_name', 'غير محدد')}</p>
                 </div>
                 """, unsafe_allow_html=True)
-                cols = st.columns(5)
+                
+                # الأزرار والإجراءات
+                cols = st.columns(6 if allow_move else 5)
+                col_idx = 0
+                
+                # زر الإخفاء/الإظهار
                 is_hidden = row.get('hidden_from_pharmacy', 0) == 1
-                if cols[0].button("🙈 إخفاء من الصيدلية" if not is_hidden else "👁️ إظهار للصيدلية", key=f"hide_{tab_name}_{selected_idx}", use_container_width=True):
+                if cols[col_idx].button("🙈 إخفاء من الصيدلية" if not is_hidden else "👁️ إظهار للصيدلية", key=f"hide_{tab_name}_{selected_idx}", use_container_width=True):
                     if is_hidden:
                         unhide_item_from_pharmacy(item_key)
                     else:
                         hide_item_from_pharmacy(item_key, st.session_state.username)
                     st.rerun()
+                col_idx += 1
+                
+                # زر القفل/الفتح
                 is_locked = row.get('is_item_locked', 0) == 1
-                if cols[1].button("🔒 قفل التعديل" if not is_locked else "🔓 فتح التعديل", key=f"lock_{tab_name}_{selected_idx}", use_container_width=True):
+                if cols[col_idx].button("🔒 قفل التعديل" if not is_locked else "🔓 فتح التعديل", key=f"lock_{tab_name}_{selected_idx}", use_container_width=True):
                     if is_locked:
                         unlock_item(item_key)
                     else:
                         lock_item(item_key, st.session_state.username)
                     st.rerun()
+                col_idx += 1
+                
+                # زر إعادة الفتح (للحالات المكتملة)
                 if row['status'] == "تم":
-                    if cols[2].button("🔄 إعادة فتح", key=f"reopen_{tab_name}_{selected_idx}", use_container_width=True):
+                    if cols[col_idx].button("🔄 إعادة فتح", key=f"reopen_{tab_name}_{selected_idx}", use_container_width=True):
                         reopen_case_by_item_key(item_key)
                         st.rerun()
-                note = cols[3].text_input("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=f"note_{tab_name}_{selected_idx}")
-                if cols[4].button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
+                col_idx += 1
+                
+                # زر نقل العنصر إلى فرع آخر
+                if allow_move and row['status'] != "تم":
+                    current_branch = row.get('pharmacy_name', '')
+                    branches = get_available_branches(current_branch)
+                    
+                    if branches:
+                        selected_branch = cols[col_idx].selectbox(
+                            "🏥 نقل إلى فرع",
+                            branches,
+                            key=f"move_branch_{tab_name}_{selected_idx}",
+                            label_visibility="collapsed",
+                            placeholder="اختر الفرع المستهدف"
+                        )
+                        col_idx += 1
+                        
+                        if cols[col_idx].button("🚚 نقل", key=f"move_{tab_name}_{selected_idx}", use_container_width=True):
+                            if move_item_to_branch(item_key, selected_branch, st.session_state.username):
+                                st.success(f"✅ تم نقل العنصر إلى {selected_branch}")
+                                st.rerun()
+                            else:
+                                st.error("❌ فشل نقل العنصر (قد يكون موجوداً بالفعل في الفرع المستهدف)")
+                        col_idx += 1
+                    else:
+                        cols[col_idx].write("⚠️ لا توجد فروع أخرى")
+                        col_idx += 1
+                        col_idx += 1  # تخطي زر النقل
+                
+                # حقل الملحوظة
+                note = cols[col_idx].text_input("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=f"note_{tab_name}_{selected_idx}")
+                col_idx += 1
+                
+                if cols[col_idx].button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
                     save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note)
                     st.rerun()
 
@@ -212,7 +261,6 @@ def render_old_items_table(df, title, is_orders=True):
         
         if check_date and check_date != '':
             try:
-                from datetime import datetime
                 date_obj = datetime.strptime(str(check_date)[:10], "%Y-%m-%d")
                 from datetime import timedelta
                 if (datetime.now() - date_obj) > timedelta(days=180):
@@ -481,10 +529,6 @@ def show():
     payment_mask = filtered_df["order_status"].apply(is_pending_payment_status)
     cancelled_mask = filtered_df["order_status"].apply(is_cancelled_or_returned_status)
     
-    post_cutoff_df = filtered_df[(filtered_df["case_type"] == "post_cutoff_abc") & active_mask_filtered]
-    payment_df = filtered_df[payment_mask]
-    cancelled_df = filtered_df[cancelled_mask]
-    
     completed_df = get_completed_items()
     if selected_branch != "الكل":
         completed_df = completed_df[completed_df["pharmacy_name"] == selected_branch]
@@ -508,10 +552,36 @@ def show():
             result_temp = result_temp[~result_temp['invoice_number'].astype(str).isin(old_invoice_numbers)]
         return result_temp
     
-    post_cutoff_df = exclude_old_items(post_cutoff_df)
-    payment_df = exclude_old_items(payment_df)
-    cancelled_df = exclude_old_items(cancelled_df)
-    completed_df = exclude_old_items(completed_df)
+    # ========== حساب الإحصائيات الصحيحة للتبويبات ==========
+    additions_merged_df = filtered_df[filtered_df['case_type'].isin(['addition', 'orphan_salla']) & active_mask_filtered].copy()
+    additions_merged_df = exclude_old_items(additions_merged_df)
+    total_additions_merged = len(additions_merged_df)
+    completed_additions_merged = len(additions_merged_df[additions_merged_df["status"] == "تم"])
+    
+    returns_merged_df = filtered_df[filtered_df['case_type'].isin(['return', 'orphan_abc']) & active_mask_filtered].copy()
+    returns_merged_df = exclude_old_items(returns_merged_df)
+    total_returns_merged = len(returns_merged_df)
+    completed_returns_merged = len(returns_merged_df[returns_merged_df["status"] == "تم"])
+    
+    post_cutoff_filtered = filtered_df[(filtered_df["case_type"] == "post_cutoff_abc") & active_mask_filtered].copy()
+    post_cutoff_filtered = exclude_old_items(post_cutoff_filtered)
+    total_post_cutoff = len(post_cutoff_filtered)
+    completed_post_cutoff = len(post_cutoff_filtered[post_cutoff_filtered["status"] == "تم"])
+    
+    payment_filtered = filtered_df[payment_mask & active_mask_filtered].copy()
+    payment_filtered = exclude_old_items(payment_filtered)
+    total_payment = len(payment_filtered)
+    
+    cancelled_filtered = filtered_df[cancelled_mask].copy()
+    cancelled_filtered = exclude_old_items(cancelled_filtered)
+    total_cancelled = len(cancelled_filtered)
+    
+    completed_filtered = completed_df.copy()
+    completed_filtered = exclude_old_items(completed_filtered)
+    total_completed = len(completed_filtered)
+    
+    old_orders_filtered = get_old_orders(pharmacy_name=selected_branch_name, months=6)
+    old_invoices_filtered = get_old_invoices(pharmacy_name=selected_branch_name, months=6)
     
     # ========== تصدير Excel ==========
     if st.session_state.get('show_export', False):
@@ -544,27 +614,13 @@ def show():
         stats_data.append(["إجمالي العناصر القديمة", len(old_orders_for_export) + len(old_invoices_for_export)])
         stats_df = pd.DataFrame(stats_data, columns=["المقياس", "القيمة"])
         
-        # تجهيز البيانات للتصدير
-        additions_merged = filtered_df[filtered_df['case_type'].isin(['addition', 'orphan_salla'])].copy()
-        returns_merged = filtered_df[filtered_df['case_type'].isin(['return', 'orphan_abc'])].copy()
-        
-        additions_merged = exclude_old_items(additions_merged)
-        returns_merged = exclude_old_items(returns_merged)
-        
-        additions_merged['نوع التفصيلي'] = additions_merged['case_type'].map({
-            'addition': 'إضافة عادية', 'orphan_salla': 'طلب بدون فاتورة'
-        })
-        returns_merged['نوع التفصيلي'] = returns_merged['case_type'].map({
-            'return': 'إرجاع عادي', 'orphan_abc': 'فاتورة بدون طلب'
-        })
-        
         export_data = {
-            "01_الإضافات_والطلبات_بدون_فاتورة": additions_merged,
-            "02_الإرجاعات_والفواتير_بدون_طلب": returns_merged,
-            "03_فواتير_بعد_آخر_طلب": post_cutoff_df,
-            "04_بانتظار_الدفع": payment_df,
-            "05_ملغي_ومسترجع": cancelled_df,
-            "06_تم_الانتهاء": completed_df,
+            "01_الإضافات_والطلبات_بدون_فاتورة": additions_merged_df,
+            "02_الإرجاعات_والفواتير_بدون_طلب": returns_merged_df,
+            "03_فواتير_بعد_آخر_طلب": post_cutoff_filtered,
+            "04_بانتظار_الدفع": payment_filtered,
+            "05_ملغي_ومسترجع": cancelled_filtered,
+            "06_تم_الانتهاء": completed_filtered,
             "07_الطلبات_القديمة": old_orders_for_export,
             "08_الفواتير_القديمة": old_invoices_for_export,
             "09_إحصائيات_قديمة": stats_df
@@ -582,7 +638,7 @@ def show():
     <style>
     .stTabs [data-baseweb="tab-list"] button:nth-child(1) { background-color: #4472C4; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(2) { background-color: #ED7D31; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(3) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(3) { background-color: #9B59B6; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(4) { background-color: #3498DB; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(5) { background-color: #E74C3C; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(6) { background-color: #27AE60; color: white; border-radius: 10px 10px 0 0; }
@@ -594,58 +650,17 @@ def show():
     .stTabs [data-baseweb="tab-list"] button:hover { transform: translateY(-2px) !important; opacity: 1 !important; }
     </style>
     """, unsafe_allow_html=True)
-
-    # ========== حساب الإحصائيات الصحيحة للتبويبات ==========
-    # استبعاد الملغي والمسترجع من البيانات النشطة
-    active_mask_filtered = ~filtered_df["order_status"].apply(is_cancelled_or_returned_status)
-
-    # حساب أعداد التبويب المدمج الأول (إضافات + طلبات بدون فاتورة)
-    additions_merged_df = filtered_df[
-        filtered_df['case_type'].isin(['addition', 'orphan_salla']) & active_mask_filtered
-    ].copy()
-    additions_merged_df = exclude_old_items(additions_merged_df)
-    total_additions_merged = len(additions_merged_df)
-    completed_additions_merged = len(additions_merged_df[additions_merged_df["status"] == "تم"])
-
-    # حساب أعداد التبويب المدمج الثاني (إرجاعات + فواتير بدون طلب)
-    returns_merged_df = filtered_df[
-        filtered_df['case_type'].isin(['return', 'orphan_abc']) & active_mask_filtered
-    ].copy()
-    returns_merged_df = exclude_old_items(returns_merged_df)
-    total_returns_merged = len(returns_merged_df)
-    completed_returns_merged = len(returns_merged_df[returns_merged_df["status"] == "تم"])
-
-    # حساب أعداد التبويبات الأخرى مع استبعاد الملغي والمسترجع
-    post_cutoff_filtered = filtered_df[
-        (filtered_df["case_type"] == "post_cutoff_abc") & active_mask_filtered
-    ].copy()
-    post_cutoff_filtered = exclude_old_items(post_cutoff_filtered)
-    total_post_cutoff = len(post_cutoff_filtered)
-    completed_post_cutoff = len(post_cutoff_filtered[post_cutoff_filtered["status"] == "تم"])
-
-    payment_filtered = filtered_df[payment_mask & active_mask_filtered].copy()
-    payment_filtered = exclude_old_items(payment_filtered)
-    total_payment = len(payment_filtered)
-    completed_payment = len(payment_filtered[payment_filtered["status"] == "تم"])
-
-    cancelled_filtered = filtered_df[cancelled_mask].copy()
-    cancelled_filtered = exclude_old_items(cancelled_filtered)
-    total_cancelled = len(cancelled_filtered)
-
-    completed_filtered = completed_df.copy()
-    completed_filtered = exclude_old_items(completed_filtered)
-    total_completed = len(completed_filtered)
-
-    # ========== التبويبات المدمجة الجديدة مع الأعداد ==========
+    
+    # ========== التبويبات المدمجة الجديدة ==========
     tab_additions, tab_returns, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices, tab_old_stats = st.tabs([
         f"📥 الإضافات والطلبات المفقودة ({completed_additions_merged}/{total_additions_merged})" if total_additions_merged > 0 else "📥 الإضافات والطلبات المفقودة (0)",
         f"📤 الإرجاعات والفواتير المعلقة ({completed_returns_merged}/{total_returns_merged})" if total_returns_merged > 0 else "📤 الإرجاعات والفواتير المعلقة (0)",
         f"⏰ فواتير بعد آخر طلب ({completed_post_cutoff}/{total_post_cutoff})" if total_post_cutoff > 0 else f"⏰ فواتير بعد آخر طلب ({total_post_cutoff})",
-        f"💰 بانتظار الدفع ({completed_payment}/{total_payment})" if total_payment > 0 else f"💰 بانتظار الدفع ({total_payment})",
+        f"💰 بانتظار الدفع ({total_payment})",
         f"⚠️ ملغي/مسترجع ({total_cancelled})",
         f"✅ تم الانتهاء ({total_completed})",
-        "📅 طلبات قديمة",
-        "🧾 فواتير قديمة",
+        f"📅 طلبات قديمة ({len(old_orders_filtered)})",
+        f"🧾 فواتير قديمة ({len(old_invoices_filtered)})",
         "📊 إحصائيات قديمة"
     ])
     
@@ -654,12 +669,11 @@ def show():
         <div style="background: linear-gradient(135deg, #0f4c5c10, #1f7a8c10); padding: 0.75rem; border-radius: 12px; margin-bottom: 1rem;">
             <p style="margin: 0; font-weight: 500;">📥 <strong>الطلبات التي تحتاج إلى إضافة أو معالجة نقص الفواتير</strong><br>
             <span style="font-size: 0.85rem;">🔵 الإضافات العادية: كمية الطلب أعلى من الفاتورة | 🟡 الطلبات بدون فاتورة: طلب موجود في سلة وغير موجود في ABC</span>
-        </p></div>
+            </p>
+        </div>
         """, unsafe_allow_html=True)
         
-        # استخدام DataFrame المعد مسبقاً مع استبعاد القديم والملغي
         if not additions_merged_df.empty:
-            st.dataframe(styled_dataframe(additions_merged_df), use_container_width=True)
             col1, col2, col3 = st.columns(3)
             with col1:
                 normal_additions = len(additions_merged_df[additions_merged_df['case_type'] == 'addition'])
@@ -668,21 +682,22 @@ def show():
                 orphan_salla_count = len(additions_merged_df[additions_merged_df['case_type'] == 'orphan_salla'])
                 st.metric("🛒 الطلبات بدون فاتورة", orphan_salla_count)
             with col3:
-                completed_in_tab = len(additions_merged_df[additions_merged_df["status"] == "تم"])
-                st.metric("✅ المنجز في هذا التبويب", f"{completed_in_tab}/{len(additions_merged_df)}")
+                st.metric("✅ المنجز", f"{completed_additions_merged}/{total_additions_merged}")
+            st.markdown("---")
+            render_table_with_click(additions_merged_df, "additions_merged", allow_move=True)
         else:
             st.success("🎉 لا توجد طلبات إضافات أو طلبات بدون فاتورة حالياً.")
-
+    
     with tab_returns:
         st.markdown("""
         <div style="background: linear-gradient(135deg, #dc354510, #e74c3c10); padding: 0.75rem; border-radius: 12px; margin-bottom: 1rem;">
             <p style="margin: 0; font-weight: 500;">📤 <strong>الفواتير التي تحتاج إلى إرجاع أو معالجة نقص الطلبات</strong><br>
             <span style="font-size: 0.85rem;">🔴 الإرجاعات العادية: كمية الفاتورة أعلى من الطلب | 🟡 الفواتير بدون طلب: فاتورة موجودة في ABC وغير موجودة في سلة</span>
-        </p></div>
+            </p>
+        </div>
         """, unsafe_allow_html=True)
-    
+        
         if not returns_merged_df.empty:
-            st.dataframe(styled_dataframe(returns_merged_df), use_container_width=True)
             col1, col2, col3 = st.columns(3)
             with col1:
                 normal_returns = len(returns_merged_df[returns_merged_df['case_type'] == 'return'])
@@ -691,28 +706,29 @@ def show():
                 orphan_abc_count = len(returns_merged_df[returns_merged_df['case_type'] == 'orphan_abc'])
                 st.metric("📄 الفواتير بدون طلب", orphan_abc_count)
             with col3:
-                completed_in_tab = len(returns_merged_df[returns_merged_df["status"] == "تم"])
-                st.metric("✅ المنجز في هذا التبويب", f"{completed_in_tab}/{len(returns_merged_df)}")
+                st.metric("✅ المنجز", f"{completed_returns_merged}/{total_returns_merged}")
+            st.markdown("---")
+            render_table_with_click(returns_merged_df, "returns_merged", allow_move=True)
         else:
             st.success("🎉 لا توجد طلبات إرجاعات أو فواتير بدون طلب حالياً.")
-
+    
     with tab_post_cutoff:
-        render_table_with_click(post_cutoff_filtered, "post_cutoff")
-
+        render_table_with_click(post_cutoff_filtered, "post_cutoff", allow_move=True)
+    
     with tab_payment:
-        render_table_with_click(payment_filtered, "payment")
-
+        render_table_with_click(payment_filtered, "payment", allow_move=False)
+    
     with tab_cancelled:
-        render_table_with_click(cancelled_filtered, "cancelled")
-
+        render_table_with_click(cancelled_filtered, "cancelled", allow_move=False)
+    
     with tab_completed:
-        render_table_with_click(completed_filtered, "completed")
+        render_table_with_click(completed_filtered, "completed", allow_move=False)
     
     with tab_old_orders:
         st.markdown("""
         <div style="background: linear-gradient(135deg, #1a1a1a, #333); padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">
             <h3 style="color: white; margin: 0;">📅 الطلبات القديمة (أكثر من 6 أشهر)</h3>
-            <p style="color: #ccc; margin: 0.5rem 0 0 0;">⚠️ الطلبات التي مر عليها أكثر من 6 أشهر (الملغية والمسترجعة غير مستبعدة)</p>
+            <p style="color: #ccc; margin: 0.5rem 0 0 0;">⚠️ الطلبات التي مر عليها أكثر من 6 أشهر والموجودة في سلة ولكن لم تكتمل</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -720,18 +736,25 @@ def show():
             st.info(f"🏥 عرض الطلبات القديمة للفرع: {selected_branch}")
         
         months_orders = st.slider("عدد الأشهر للبحث (طلبات)", min_value=3, max_value=24, value=6, step=3, key="old_orders_months")
-        old_orders_filtered = get_old_orders(pharmacy_name=selected_branch_name, months=months_orders)
-        render_old_items_table(old_orders_filtered, "الطلبات", is_orders=True)
+        old_orders_filtered_dynamic = get_old_orders(pharmacy_name=selected_branch_name, months=months_orders)
         
-        if not old_orders_filtered.empty and st.button("📥 تصدير الطلبات القديمة إلى Excel", use_container_width=True, key="export_old_orders"):
-            excel_data = export_to_excel({"الطلبات_القديمة": old_orders_filtered})
-            st.download_button("📥 تحميل التقرير", data=excel_data, file_name=f"old_orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", use_container_width=True)
+        if not old_orders_filtered_dynamic.empty:
+            st.warning(f"⚠️ يوجد {len(old_orders_filtered_dynamic)} طلب قديم (أكثر من {months_orders} أشهر)")
+            render_table_with_click(old_orders_filtered_dynamic, "old_orders", allow_move=True)
+            
+            if st.button("📥 تصدير الطلبات القديمة إلى Excel", use_container_width=True, key="export_old_orders"):
+                excel_data = export_to_excel({"الطلبات_القديمة": old_orders_filtered_dynamic})
+                st.download_button("📥 تحميل التقرير", data=excel_data, 
+                                  file_name=f"old_orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", 
+                                  use_container_width=True)
+        else:
+            st.success(f"🎉 لا توجد طلبات قديمة (أكثر من {months_orders} أشهر)")
     
     with tab_old_invoices:
         st.markdown("""
         <div style="background: linear-gradient(135deg, #1a1a1a, #333); padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">
             <h3 style="color: white; margin: 0;">🧾 الفواتير القديمة (أكثر من 6 أشهر)</h3>
-            <p style="color: #ccc; margin: 0.5rem 0 0 0;">⚠️ الفواتير التي مر عليها أكثر من 6 أشهر (الملغية والمسترجعة غير مستبعدة)</p>
+            <p style="color: #ccc; margin: 0.5rem 0 0 0;">⚠️ الفواتير التي مر عليها أكثر من 6 أشهر والموجودة في ABC ولكن لم تكتمل</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -739,12 +762,19 @@ def show():
             st.info(f"🏥 عرض الفواتير القديمة للفرع: {selected_branch}")
         
         months_invoices = st.slider("عدد الأشهر للبحث (فواتير)", min_value=3, max_value=24, value=6, step=3, key="old_invoices_months")
-        old_invoices_filtered = get_old_invoices(pharmacy_name=selected_branch_name, months=months_invoices)
-        render_old_items_table(old_invoices_filtered, "الفواتير", is_orders=False)
+        old_invoices_filtered_dynamic = get_old_invoices(pharmacy_name=selected_branch_name, months=months_invoices)
         
-        if not old_invoices_filtered.empty and st.button("📥 تصدير الفواتير القديمة إلى Excel", use_container_width=True, key="export_old_invoices"):
-            excel_data = export_to_excel({"الفواتير_القديمة": old_invoices_filtered})
-            st.download_button("📥 تحميل التقرير", data=excel_data, file_name=f"old_invoices_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", use_container_width=True)
+        if not old_invoices_filtered_dynamic.empty:
+            st.warning(f"⚠️ يوجد {len(old_invoices_filtered_dynamic)} فاتورة قديمة (أكثر من {months_invoices} أشهر)")
+            render_table_with_click(old_invoices_filtered_dynamic, "old_invoices", allow_move=True)
+            
+            if st.button("📥 تصدير الفواتير القديمة إلى Excel", use_container_width=True, key="export_old_invoices"):
+                excel_data = export_to_excel({"الفواتير_القديمة": old_invoices_filtered_dynamic})
+                st.download_button("📥 تحميل التقرير", data=excel_data, 
+                                  file_name=f"old_invoices_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", 
+                                  use_container_width=True)
+        else:
+            st.success(f"🎉 لا توجد فواتير قديمة (أكثر من {months_invoices} أشهر)")
     
     with tab_old_stats:
         st.markdown("### 📊 إحصائيات العناصر القديمة")
@@ -769,7 +799,7 @@ def show():
             if selected_branch == "الكل" and not old_orders_stats_data.empty:
                 st.markdown("#### 🏥 التوزيع حسب الفرع")
                 for branch, count in old_orders_stats_data.groupby("pharmacy_name").size().items():
-                    st.markdown(f"- {branch[-10:]}: {count} طلب")
+                    st.markdown(f"- {branch}: {count} طلب")
         
         with col2:
             st.markdown("#### 🧾 الفواتير القديمة")
@@ -783,7 +813,7 @@ def show():
             if selected_branch == "الكل" and not old_invoices_stats_data.empty:
                 st.markdown("#### 🏥 التوزيع حسب الفرع")
                 for branch, count in old_invoices_stats_data.groupby("pharmacy_name").size().items():
-                    st.markdown(f"- {branch[-10:]}: {count} فاتورة")
+                    st.markdown(f"- {branch}: {count} فاتورة")
         
         st.markdown("---")
         total_old = len(old_orders_stats_data) + len(old_invoices_stats_data)
