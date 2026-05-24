@@ -371,11 +371,34 @@ def show():
                 use_container_width=True
             )
 
+    # ========== جلب الفواتير القديمة أولاً لاستخدامها في الاستبعاد ==========
+    old_invoices_df_all = get_old_invoices(pharmacy_name=pharmacy_name, months=6)
+    old_orders_df_all = get_old_orders(pharmacy_name=pharmacy_name, months=6)
+    
+    # إنشاء قائمة بأرقام الفواتير والطلبات القديمة لاستبعادها
+    old_invoice_numbers = set(old_invoices_df_all['invoice_number'].astype(str).tolist()) if not old_invoices_df_all.empty else set()
+    old_order_numbers = set(old_orders_df_all['order_number'].astype(str).tolist()) if not old_orders_df_all.empty else set()
+    
+    def exclude_old_invoices(df_temp):
+        """استبعاد الفواتير القديمة من DataFrame"""
+        if df_temp.empty:
+            return df_temp
+        result_temp = df_temp.copy()
+        # استبعاد الفواتير القديمة (حسب رقم الفاتورة)
+        if 'invoice_number' in result_temp.columns:
+            result_temp = result_temp[~result_temp['invoice_number'].astype(str).isin(old_invoice_numbers)]
+        # استبعاد الطلبات القديمة (حسب رقم الطلب)
+        if 'order_number' in result_temp.columns:
+            result_temp = result_temp[~result_temp['order_number'].astype(str).isin(old_order_numbers)]
+        return result_temp
+
     df = fetch_active_items(pharmacy_name, include_hidden=False)
     
     if df.empty:
         st.info("📭 لا توجد حالات نشطة لهذا الفرع حاليًا.")
         completed_df = get_completed_items(pharmacy_name)
+        completed_df = exclude_old_invoices(completed_df)
+        
         if not completed_df.empty:
             st.markdown("---")
             st.markdown('<div class="section-title">✅ الطلبات المكتملة</div>', unsafe_allow_html=True)
@@ -409,8 +432,11 @@ def show():
         is_locked = df['is_locked'].iloc[0] == 1
     allow_actions = not is_locked
 
-    active_mask = ~df["order_status"].apply(is_cancelled_or_returned_status)
-    active_df = df[active_mask]
+    # ========== استبعاد الفواتير والطلبات القديمة من البيانات النشطة ==========
+    df_filtered = exclude_old_invoices(df)
+    
+    active_mask = ~df_filtered["order_status"].apply(is_cancelled_or_returned_status)
+    active_df = df_filtered[active_mask]
     
     total = len(active_df)
     additions = len(active_df[active_df["case_type"] == "addition"])
@@ -418,7 +444,7 @@ def show():
     orphan_salla = len(active_df[active_df["case_type"] == "orphan_salla"])
     orphan_abc = len(active_df[active_df["case_type"] == "orphan_abc"])
     post_cutoff = len(active_df[active_df["case_type"] == "post_cutoff_abc"])
-    completed = len(df[df["status"] == "تم"])
+    completed = len(df_filtered[df_filtered["status"] == "تم"])
     
     col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
     with col1:
@@ -436,31 +462,32 @@ def show():
     with col7:
         st.metric("✅ تم إنجازها", completed)
 
-    # تجهيز البيانات للتبويبات
-    branch_add_df = df[df['case_type'].isin(['addition', 'orphan_salla']) & active_mask].copy()
+    # ========== تجهيز البيانات للتبويبات مع استبعاد القديم ==========
+    branch_add_df = df_filtered[df_filtered['case_type'].isin(['addition', 'orphan_salla']) & active_mask].copy()
     total_additions_merged = len(branch_add_df)
     completed_additions_merged = len(branch_add_df[branch_add_df["status"] == "تم"])
     pending_additions_merged = total_additions_merged - completed_additions_merged
     
-    branch_ret_df = df[df['case_type'].isin(['return', 'orphan_abc']) & active_mask].copy()
+    branch_ret_df = df_filtered[df_filtered['case_type'].isin(['return', 'orphan_abc']) & active_mask].copy()
     total_returns_merged = len(branch_ret_df)
     completed_returns_merged = len(branch_ret_df[branch_ret_df["status"] == "تم"])
     pending_returns_merged = total_returns_merged - completed_returns_merged
     
-    post_cutoff_df = df[(df["case_type"] == "post_cutoff_abc") & active_mask].copy()
+    post_cutoff_df = df_filtered[(df_filtered["case_type"] == "post_cutoff_abc") & active_mask].copy()
     total_post_cutoff = len(post_cutoff_df)
     completed_post_cutoff = len(post_cutoff_df[post_cutoff_df["status"] == "تم"])
     
-    payment_df = df[df["order_status"].apply(is_pending_payment_status) & active_mask].copy()
+    payment_df = df_filtered[df_filtered["order_status"].apply(is_pending_payment_status) & active_mask].copy()
     total_payment = len(payment_df)
     
-    cancelled_df = df[df["order_status"].apply(is_cancelled_or_returned_status)].copy()
+    cancelled_df = df_filtered[df_filtered["order_status"].apply(is_cancelled_or_returned_status)].copy()
     total_cancelled = len(cancelled_df)
     
     completed_df = get_completed_items(pharmacy_name)
+    completed_df = exclude_old_invoices(completed_df)
     total_completed = len(completed_df)
     
-    # جلب الفواتير القديمة
+    # جلب الفواتير القديمة للتبويب المنفصل (بدون استبعاد)
     old_invoices_df = get_old_invoices(pharmacy_name=pharmacy_name, months=6)
     old_orders_df = get_old_orders(pharmacy_name=pharmacy_name, months=6)
     
@@ -470,8 +497,8 @@ def show():
     
     # تصدير Excel
     if st.session_state.get('show_export_pharmacy', False):
-        additions_merged = df[df['case_type'].isin(['addition', 'orphan_salla'])].copy()
-        returns_merged = df[df['case_type'].isin(['return', 'orphan_abc'])].copy()
+        additions_merged = df_filtered[df_filtered['case_type'].isin(['addition', 'orphan_salla'])].copy()
+        returns_merged = df_filtered[df_filtered['case_type'].isin(['return', 'orphan_abc'])].copy()
         
         additions_merged['نوع التفصيلي'] = additions_merged['case_type'].map({
             'addition': 'إضافة عادية', 'orphan_salla': 'طلب بدون فاتورة'
@@ -617,7 +644,6 @@ def show():
         if not old_invoices_dynamic.empty:
             render_old_invoices_pharmacy(old_invoices_dynamic, pharmacy_name, pharmacist_name)
             
-            # زر تصدير الفواتير القديمة
             if st.button("📥 تصدير الفواتير القديمة إلى Excel", use_container_width=True):
                 excel_data = export_to_excel({"الفواتير_القديمة": old_invoices_dynamic}, pharmacy_name)
                 st.download_button(
