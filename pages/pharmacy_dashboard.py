@@ -117,24 +117,47 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
     order_date = row.get('order_date', '')
     unique_key = f"{case_type}_{row.get('order_number', '')}_{row.get('sku', '')}_{idx}"
     
-    # التحقق من وجود مكررات في فروع أخرى
+    # ========== التحقق من وجود مكررات في فروع أخرى ==========
     order_number = str(row.get('order_number', ''))
     sku = str(row.get('sku', ''))
-    duplicates = check_duplicate_across_branches(order_number, sku, pharmacy_name)
     
     duplicate_warning = ""
-    if duplicates:
-        duplicate_warning = f"""
-        <div style="background:#fff3cd; border-right:4px solid #ffc107; padding:0.5rem; margin-top:0.5rem; border-radius:8px;">
-            <span style="color:#856404;">⚠️ <strong>تنبيه:</strong> هذا المنتج (SKU: {sku}) موجود أيضاً في الفروع التالية:</span><br>
-        """
-        for dup in duplicates:
-            duplicate_warning += f"""
-            <span style="font-size:0.85rem;">• {dup['pharmacy']} (الحالة: {dup['status']}, نوع: {dup['case_type']})</span><br>
+    try:
+        duplicates = check_duplicate_across_branches(order_number, sku, pharmacy_name)
+        
+        if duplicates:
+            duplicate_warning = f"""
+            <div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px;">
+                <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+                    <span style="font-size:1.2rem;">⚠️</span>
+                    <span style="color:#856404; font-weight:bold;">تنبيه: يوجد نفس المنتج (SKU: {sku}) في فروع أخرى</span>
+                </div>
+                <div style="margin-right:1.5rem;">
             """
-        duplicate_warning += "</div>"
+            for dup in duplicates:
+                dup_pharmacy = dup.get('pharmacy', 'غير معروف')
+                dup_status = dup.get('status', 'غير معروف')
+                dup_case = dup.get('case_type', 'غير معروف')
+                dup_invoice = dup.get('invoice_date', '')
+                
+                duplicate_warning += f"""
+                <div style="font-size:0.85rem; margin-bottom:0.4rem; padding:0.3rem 0; border-bottom:1px dashed #ffe0a3;">
+                    🏥 <strong>{dup_pharmacy}</strong> | الحالة: {dup_status} | النوع: {dup_case}
+                    {f' | تاريخ الفاتورة: {dup_invoice[:16]}' if dup_invoice else ''}
+                </div>
+                """
+            duplicate_warning += """
+                </div>
+                <div style="margin-top:0.5rem; font-size:0.8rem; color:#856404;">
+                    💡 يرجى مراجعة هذه الفروع لتجنب ازدواجية المعالجة
+                </div>
+            </div>
+            """
+    except Exception as e:
+        # في حالة الخطأ، لا نعرض التنبيه
+        pass
 
-    # عرض تصميم البطاقة مع تاريخ الفاتورة والتنبيهات
+    # عرض تصميم البطاقة مع التنبيه
     st.markdown(f"""
     <div style="background:#f8f9fa; border-radius:16px; padding:1.2rem; margin-bottom:0.8rem; border-right:5px solid #1f7a8c; box-shadow:0 4px 12px rgba(0,0,0,0.03);">
         <div style="display:flex; justify-content:space-between; margin-bottom:0.8rem; align-items:center;">
@@ -517,25 +540,37 @@ def show():
     
     # تصدير Excel
     if st.session_state.get('show_export_pharmacy', False):
-        additions_merged = df_filtered[df_filtered['case_type'].isin(['addition', 'orphan_salla'])].copy()
-        returns_merged = df_filtered[df_filtered['case_type'].isin(['return', 'orphan_abc'])].copy()
+        # استخدام df_filtered بدلاً من df الأصلي
+        additions_merged = df_filtered[df_filtered['case_type'].isin(['addition', 'orphan_salla']) & active_mask].copy()
+        returns_merged = df_filtered[df_filtered['case_type'].isin(['return', 'orphan_abc']) & active_mask].copy()
         
+        # إضافة عمود توضيحي
         additions_merged['نوع التفصيلي'] = additions_merged['case_type'].map({
-            'addition': 'إضافة عادية', 'orphan_salla': 'طلب بدون فاتورة'
+            'addition': 'إضافة عادية', 
+            'orphan_salla': 'طلب بدون فاتورة'
         })
         returns_merged['نوع التفصيلي'] = returns_merged['case_type'].map({
-            'return': 'إرجاع عادي', 'orphan_abc': 'فاتورة بدون طلب'
+            'return': 'إرجاع عادي', 
+            'orphan_abc': 'فاتورة بدون طلب'
         })
         
+        # استبعاد الملغي والمسترجع من بيانات التصدير
+        additions_merged = additions_merged[~additions_merged["order_status"].apply(is_cancelled_or_returned_status)]
+        returns_merged = returns_merged[~returns_merged["order_status"].apply(is_cancelled_or_returned_status)]
+        
+        # استبعاد القديم أيضاً
+        additions_merged = exclude_old_invoices(additions_merged)
+        returns_merged = exclude_old_invoices(returns_merged)
+        
         export_data = {
-            "الإضافات_والطلبات_بدون_فاتورة": additions_merged,
-            "الإرجاعات_والفواتير_بدون_طلب": returns_merged,
-            "فواتير_بعد_آخر_طلب": post_cutoff_df,
-            "بانتظار_الدفع": payment_df,
-            "ملغي_ومسترجع": cancelled_df,
-            "تم_الانتهاء": completed_df,
-            "الطلبات_القديمة": old_orders_df,
-            "الفواتير_القديمة": old_invoices_df
+            "01_الإضافات_والطلبات_بدون_فاتورة": additions_merged,
+            "02_الإرجاعات_والفواتير_بدون_طلب": returns_merged,
+            "03_فواتير_بعد_آخر_طلب": post_cutoff_df,
+            "04_بانتظار_الدفع": payment_df,
+            "05_ملغي_ومسترجع": cancelled_df,
+            "06_تم_الانتهاء": completed_df,
+            "07_الطلبات_القديمة": old_orders_df,
+            "08_الفواتير_القديمة": old_invoices_df
         }
         excel_data = export_to_excel(export_data, pharmacy_name)
         st.download_button(
