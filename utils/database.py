@@ -112,7 +112,8 @@ def init_database():
     """)
 
     # Reconciliation items table
-    cur.execute("""
+    # تعديل سطر التأسيس الافتراضي في database.py (صفحة 8) ليكون صريحاً وثابتاً
+    cur.execute("ALTER TABLE reconciliation_items ADD COLUMN status TEXT DEFAULT 'قيد المتابعة'")
         CREATE TABLE IF NOT EXISTS reconciliation_items (
             item_key TEXT PRIMARY KEY,
             upload_batch_id TEXT,
@@ -162,7 +163,6 @@ def init_database():
             item_locked_by TEXT DEFAULT '',
             item_locked_at TEXT DEFAULT ''
         )
-    """)
 
     # Insert default admin
     cur.execute("SELECT * FROM users WHERE username = 'admin'")
