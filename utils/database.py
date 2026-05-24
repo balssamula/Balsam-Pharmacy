@@ -903,15 +903,33 @@ def check_duplicate_across_branches(order_number: str, sku: str, current_pharmac
     cur = conn.cursor()
     
     try:
+        # البحث عن جميع السجلات النشطة بنفس order_number و sku في فروع أخرى
         cur.execute("""
-            SELECT DISTINCT pharmacy_name, status, case_type, order_date, invoice_date
+            SELECT DISTINCT 
+                pharmacy_name, 
+                status, 
+                case_type, 
+                order_date, 
+                invoice_date,
+                invoice_number,
+                order_number
             FROM reconciliation_items 
-            WHERE order_number = ? AND sku = ? AND pharmacy_name != ? AND active = 1
+            WHERE order_number = ? 
+                AND sku = ? 
+                AND pharmacy_name != ? 
+                AND active = 1
         """, (order_number, sku, current_pharmacy))
         
         results = cur.fetchall()
-        return [{"pharmacy": r[0], "status": r[1], "case_type": r[2], 
-                 "order_date": r[3], "invoice_date": r[4]} for r in results]
+        return [{
+            "pharmacy": r[0], 
+            "status": r[1], 
+            "case_type": r[2], 
+            "order_date": r[3], 
+            "invoice_date": r[4],
+            "invoice_number": r[5],
+            "order_number": r[6]
+        } for r in results]
     except Exception as e:
         print(f"Error checking duplicates: {e}")
         return []
