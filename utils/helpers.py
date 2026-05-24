@@ -99,7 +99,7 @@ def determine_branch(order_status: str, city: str) -> tuple[str, str]:
     normalized_city = normalize_city(city)
     delivered_statuses = ["تم التوصيل", "ملغي", "مسترجع", "محذوف"]
     if any(status in normalize_text(order_status) for status in delivered_statuses):
-        if normalized_city in {"AL ULA", "ALULA", "AL-ULA"}:
+        if normalized_city in {"AL ULA", "ALULA", "AL-ULA", "العلا", "علا"}:
             return "Balsam Alula Pharmacy 09", "09"
         return "Balsam Alula Pharmacy 13", "13"
 
