@@ -112,11 +112,10 @@ def init_database():
     """)
 
     # Reconciliation items table
-    # تعديل سطر التأسيس الافتراضي في database.py (صفحة 8) ليكون صريحاً وثابتاً
     cur.execute("""
         CREATE TABLE IF NOT EXISTS reconciliation_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            item_key TEXT PRIMARY KEY,
+            item_key TEXT UNIQUE,
             upload_batch_id TEXT,
             order_number TEXT,
             invoice_number TEXT,
