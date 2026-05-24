@@ -10,6 +10,33 @@ DB_DIR = "data"
 DB_PATH = os.path.join(DB_DIR, "pharmacy_reconciliation.db")
 PHARMACY_COUNT = 17
 
+def upgrade_database():
+    """ترقية قاعدة البيانات لإضافة الأعمدة الجديدة"""
+    conn = sqlite3.connect(DB_PATH, timeout=60.0)
+    cur = conn.cursor()
+    
+    try:
+        # التحقق من وجود عمود salla_branch_number
+        cur.execute("PRAGMA table_info(reconciliation_items)")
+        columns = [row[1] for row in cur.fetchall()]
+        
+        if 'salla_branch_number' not in columns:
+            print("Adding column salla_branch_number to reconciliation_items")
+            cur.execute("ALTER TABLE reconciliation_items ADD COLUMN salla_branch_number TEXT DEFAULT ''")
+        
+        if 'branch_number' not in columns:
+            print("Adding column branch_number to reconciliation_items")
+            cur.execute("ALTER TABLE reconciliation_items ADD COLUMN branch_number TEXT DEFAULT ''")
+        
+        conn.commit()
+        print("Database upgrade completed successfully")
+        
+    except Exception as e:
+        print(f"Error upgrading database: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+        
 def get_client_ip():
     """الحصول على عنوان IP الخاص بالجهاز"""
     try:
@@ -175,6 +202,8 @@ def init_database():
 
     conn.commit()
     conn.close()
+
+    upgrade_database()
 
 def record_login_history(username: str, role: str, ip_address: str = None, user_agent: str = None):
     """تسجيل محاولة الدخول"""
