@@ -149,11 +149,11 @@ def styled_dataframe(input_df):
     return display_df.style.apply(highlight_rows, axis=1)
 
 def render_table_with_click(df, tab_name, allow_move: bool = True):
-    """عرض جدول مع إمكانية تحديد الصف وإظهار إجراءات منبثقة"""
+    """عرض جدول مع إمكانية تحديد الصف وإظهار إجراءات ديناميكية آمنة بدون خطأ IndexError"""
     if df.empty:
         st.success("لا توجد بيانات في هذا القسم.")
         return
-    
+ 
     styled_df = styled_dataframe(df)
     if styled_df is not None:
         event = st.dataframe(
@@ -161,101 +161,110 @@ def render_table_with_click(df, tab_name, allow_move: bool = True):
             use_container_width=True,
             height=400,
             selection_mode="single-row",
-            on_select="rerun"
+            on_select="ignore" # تعديل لتلافي تجميد السيرفر اللانهائي السابق
         )
-        
-        if event.selection.rows:
+ 
+        if event and event.selection and event.selection.rows:
             selected_idx = event.selection.rows[0]
             if 0 <= selected_idx < len(df):
                 row = df.iloc[selected_idx]
                 item_key = row.get('item_key', '')
-                
+ 
                 st.markdown(f"""
                 <div style="background:#f0f2f6;border-radius:10px;padding:1rem;margin-top:1rem;border-right:4px solid #1f7a8c;">
                     <h4 style="margin:0 0 0.5rem 0;">🛠️ إجراءات الصف المحدد</h4>
-                    <p><strong>📋 رقم الطلب:</strong> {row['order_number']} | 
+                    <p><strong>📋 رقم الطلب:</strong> {row.get('order_number', row.get('invoice_number', 'غير محدد'))} | 
                     <strong>🏷️ SKU:</strong> {row['sku']} | 
-                    <strong>📦 المنتج:</strong> {row['product_name'][:50]}</p>
-                    <p><strong>🏥 الفرع الحالي:</strong> {row.get('pharmacy_name', 'غير محدد')}</p>
+                    <strong>📦 المنتج:</strong> {row['product_name'][:60]}</p>
                 </div>
                 """, unsafe_allow_html=True)
+ 
+                # حساب الأعمدة ديناميكياً لتلافي خطأ IndexError تماماً
+                available_actions = []
+                available_actions.append("hide_show")
+                available_actions.append("lock_unlock")
                 
-                # تحديد عدد الأعمدة بناءً على allow_move
-                if allow_move:
-                    cols = st.columns([1, 1, 1, 2, 1, 1])  # 6 أعمدة
-                else:
-                    cols = st.columns([1, 1, 1, 2, 1])  # 5 أعمدة
+                if row.get('status') == "تم":
+                    available_actions.append("reopen")
                 
-                col_idx = 0
-                
-                # زر الإخفاء/الإظهار
-                is_hidden = row.get('hidden_from_pharmacy', 0) == 1
-                if cols[col_idx].button("🙈 إخفاء" if not is_hidden else "👁️ إظهار", key=f"hide_{tab_name}_{selected_idx}", use_container_width=True):
-                    if is_hidden:
-                        unhide_item_from_pharmacy(item_key)
-                    else:
-                        hide_item_from_pharmacy(item_key, st.session_state.username)
-                    st.rerun()
-                col_idx += 1
-                
-                # زر القفل/الفتح
-                is_locked = row.get('is_item_locked', 0) == 1
-                if cols[col_idx].button("🔒 قفل" if not is_locked else "🔓 فتح", key=f"lock_{tab_name}_{selected_idx}", use_container_width=True):
-                    if is_locked:
-                        unlock_item(item_key)
-                    else:
-                        lock_item(item_key, st.session_state.username)
-                    st.rerun()
-                col_idx += 1
-                
-                # زر إعادة الفتح (للحالات المكتملة فقط)
-                if row['status'] == "تم":
-                    if cols[col_idx].button("🔄 إعادة فتح", key=f"reopen_{tab_name}_{selected_idx}", use_container_width=True):
+                if allow_move and row.get('status') != "تم":
+                    available_actions.append("move_select")
+                    available_actions.append("move_btn")
+                    
+                available_actions.append("note_input")
+                available_actions.append("save_btn")
+ 
+                # إنشاء الأعمدة بناءً على العدد الفعلي المطلوب بدقة
+                cols = st.columns(len(available_actions))
+                c_idx = 0
+ 
+                # 1. زر الإخفاء والإظهار
+                if "hide_show" in available_actions:
+                    is_hidden = row.get('hidden_from_pharmacy', 0) == 1
+                    btn_label = "🙈 إخفاء" if not is_hidden else "👁️ إظهار"
+                    if cols[c_idx].button(btn_label, key=f"hide_{tab_name}_{selected_idx}", use_container_width=True):
+                        from utils.database import hide_item_from_pharmacy, unhide_item_from_pharmacy
+                        if is_hidden: unhide_item_from_pharmacy(item_key)
+                        else: hide_item_from_pharmacy(item_key, st.session_state.username)
+                        st.rerun()
+                    c_idx += 1
+ 
+                # 2. زر القفل والفتح
+                if "lock_unlock" in available_actions:
+                    is_locked = row.get('is_item_locked', 0) == 1
+                    btn_lock_label = "🔒 قفل" if not is_locked else "🔓 فتح"
+                    if cols[c_idx].button(btn_lock_label, key=f"lock_{tab_name}_{selected_idx}", use_container_width=True):
+                        from utils.database import lock_item, unlock_item
+                        if is_locked: unlock_item(item_key)
+                        else: lock_item(item_key, st.session_state.username)
+                        st.rerun()
+                    c_idx += 1
+ 
+                # 3. زر إعادة الفتح
+                if "reopen" in available_actions:
+                    if cols[c_idx].button("🔄 إعادة فتح", key=f"reopen_{tab_name}_{selected_idx}", use_container_width=True):
+                        from utils.database import reopen_case_by_item_key
                         reopen_case_by_item_key(item_key)
                         st.rerun()
-                col_idx += 1
-                
-                # زر نقل العنصر إلى فرع آخر (فقط إذا كان allow_move=True)
-                if allow_move and row['status'] != "تم":
+                    c_idx += 1
+ 
+                # 4. قائمة الفروع لنقل العناصر
+                if "move_select" in available_actions:
+                    from utils.database import get_available_branches
                     current_branch = row.get('pharmacy_name', '')
                     branches = get_available_branches(current_branch)
-                    
-                    if branches:
-                        # قائمة منسدلة لاختيار الفرع
-                        selected_branch = cols[col_idx].selectbox(
-                            "🏥",
-                            branches,
-                            key=f"move_branch_{tab_name}_{selected_idx}",
-                            label_visibility="collapsed",
-                            placeholder="الفرع المستهدف"
-                        )
-                        col_idx += 1
-                        
-                        # زر النقل
-                        if cols[col_idx].button("🚚 نقل", key=f"move_{tab_name}_{selected_idx}", use_container_width=True):
-                            if move_item_to_branch(item_key, selected_branch, st.session_state.username):
-                                st.success(f"✅ تم نقل العنصر إلى {selected_branch}")
-                                st.rerun()
-                            else:
-                                st.error("❌ فشل نقل العنصر")
-                        col_idx += 1
-                    else:
-                        cols[col_idx].write("⚠️ لا توجد فروع")
-                        col_idx += 1
-                        col_idx += 1  # تخطي زر النقل
-                else:
-                    # إذا كان allow_move=False أو الحالة مكتملة، نتخطى أعمدة النقل
-                    if allow_move:
-                        col_idx += 2  # تخطي عمودي selectbox و button
-                
-                # حقل الملحوظة
-                note = cols[col_idx].text_input("📝", value=row.get('pharmacist_note', ''), key=f"note_{tab_name}_{selected_idx}", label_visibility="collapsed", placeholder="ملحوظة")
-                col_idx += 1
-                
-                # زر حفظ الملحوظة
-                if cols[col_idx].button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
-                    save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note)
-                    st.rerun()
+                    selected_branch = cols[c_idx].selectbox(
+                        "🏥 الفرع المستهدف", branches, 
+                        key=f"move_branch_{tab_name}_{selected_idx}", 
+                        label_visibility="collapsed"
+                    )
+                    c_idx += 1
+ 
+                # 5. زر التأكيد على النقل
+                if "move_btn" in available_actions:
+                    if cols[c_idx].button("🚚 نقل", key=f"move_{tab_name}_{selected_idx}", use_container_width=True):
+                        from utils.database import move_item_to_branch
+                        if move_item_to_branch(item_key, selected_branch, st.session_state.username):
+                            st.success(f"✅ تم نقل العنصر إلى {selected_branch}")
+                            st.rerun()
+                    c_idx += 1
+ 
+                # 6. حقل النص للملاحظة
+                if "note_input" in available_actions:
+                    note = cols[c_idx].text_input(
+                        "📝 ملحوظة", value=row.get('pharmacist_note', '') or '', 
+                        key=f"note_input_{tab_name}_{selected_idx}", 
+                        label_visibility="collapsed", placeholder="اكتب ملحوظة..."
+                    )
+                    c_idx += 1
+ 
+                # 7. زر حفظ الملاحظة الفعلي
+                if "save_btn" in available_actions:
+                    if cols[c_idx].button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
+                        from utils.database import save_case_note
+                        save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note)
+                        st.toast("✅ تم حفظ الملاحظة!", icon="💾")
+                        st.rerun()
 
 def render_old_items_table(df, title, is_orders=True):
     if df.empty:
