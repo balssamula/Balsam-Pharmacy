@@ -170,6 +170,44 @@ def render_table_with_click(df, tab_name, allow_move: bool = True):
                 row = df.iloc[selected_idx]
                 item_key = row.get('item_key', '')
                 
+                # ========== التحقق من وجود مكررات ==========
+                order_number = str(row.get('order_number', ''))
+                sku = str(row.get('sku', ''))
+                current_pharmacy = row.get('pharmacy_name', '')
+                
+                duplicate_warning = ""
+                try:
+                    from utils.database import check_duplicate_across_branches
+                    duplicates = check_duplicate_across_branches(order_number, sku, current_pharmacy)
+                    
+                    if duplicates:
+                        duplicate_warning = f"""
+                        <div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem;">
+                            <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+                                <span style="font-size:1.2rem;">⚠️</span>
+                                <span style="color:#856404; font-weight:bold;">تنبيه: يوجد نفس المنتج (SKU: {sku}) في فروع أخرى</span>
+                            </div>
+                            <div style="margin-right:1.5rem;">
+                        """
+                        for dup in duplicates:
+                            dup_pharmacy = dup.get('pharmacy', 'غير معروف')
+                            dup_status = dup.get('status', 'غير معروف')
+                            dup_case = dup.get('case_type', 'غير معروف')
+                            dup_invoice = dup.get('invoice_date', '')
+                            
+                            duplicate_warning += f"""
+                            <div style="font-size:0.85rem; margin-bottom:0.4rem; padding:0.3rem 0; border-bottom:1px dashed #ffe0a3;">
+                                🏥 <strong>{dup_pharmacy}</strong> | الحالة: {dup_status} | النوع: {dup_case}
+                                {f' | تاريخ الفاتورة: {dup_invoice[:16]}' if dup_invoice else ''}
+                            </div>
+                            """
+                        duplicate_warning += """
+                            </div>
+                        </div>
+                        """
+                except Exception as e:
+                    pass
+                
                 st.markdown(f"""
                 <div style="background:#f0f2f6;border-radius:10px;padding:1rem;margin-top:1rem;border-right:4px solid #1f7a8c;">
                     <h4 style="margin:0 0 0.5rem 0;">🛠️ إجراءات الصف المحدد</h4>
@@ -177,6 +215,7 @@ def render_table_with_click(df, tab_name, allow_move: bool = True):
                     <strong>🏷️ SKU:</strong> {row['sku']} | 
                     <strong>📦 المنتج:</strong> {row['product_name'][:50]}</p>
                     <p><strong>🏥 الفرع الحالي:</strong> {row.get('pharmacy_name', 'غير محدد')}</p>
+                    {duplicate_warning}
                 </div>
                 """, unsafe_allow_html=True)
                 
