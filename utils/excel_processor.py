@@ -294,7 +294,7 @@ def process_excel(uploaded_file, uploaded_by: str):
           int((results["case_type"] == "orphan_salla").sum()), int((results["case_type"] == "orphan_abc").sum())))
     
     # إدراج العناصر
-        insert_df = results.copy()
+    insert_df = results.copy()
     insert_df['upload_batch_id'] = upload_batch_id
     insert_df['status'] = 'قيد Mتابعة'
     insert_df['pharmacist_note'] = ''
