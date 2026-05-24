@@ -170,16 +170,7 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
     
-    # ========== التعديل الأساسي: إلغاء التجميع حسب الفرع ==========
-    # بدلاً من تجميع كل شيء، نحتفظ بكل صف على حدة مع إضافة معلومات الفروع المتعددة
-    df["other_branch_details"] = ""
-    df["all_branches_list"] = df["abc_pharmacy_name"]
-    
-    # إضافة عمود للتمييز (للتجميع لاحقاً مع الحفاظ على تعدد الفروع)
-    df["branch_key"] = df["order_number"] + "||" + df["sku"] + "||" + df["abc_pharmacy_name"]
-    
-    # تجميع خفيف مع الحفاظ على تعدد الفروع (نحتفظ بكل فرع كسطر منفصل)
-    # لكن ندمج البيانات المتكررة داخل نفس الفرع
+    # تجميع البيانات مع الحفاظ على تعدد الفروع (تجميع حسب order_number, sku, والفرع)
     grouped = df.groupby(["order_number", "sku", "abc_pharmacy_name"], as_index=False).agg({
         "abc_qty": "sum",
         "invoice_number": "first",
@@ -193,6 +184,7 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     
     return grouped
 
+
 def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame:
     """تصنيف الحالات مع الحفاظ على تعدد الفروع"""
     salla_grouped = prepare_salla_frame(df_salla)
@@ -201,8 +193,7 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     if salla_grouped.empty and abc_grouped.empty:
         return pd.DataFrame()
     
-    # دمج مع الحفاظ على تعدد الفروع (نستخدم left join على order_number و sku فقط)
-    # ثم نكرر الصفوف من سلة لكل فرع في ABC
+    # دمج مع الحفاظ على تعدد الفروع
     merged = pd.merge(salla_grouped, abc_grouped, on=["order_number", "sku"], how="outer", indicator=True)
     
     # تعبئة القيم المفقودة
@@ -228,13 +219,14 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     merged["product_name"] = merged["salla_product_name"]
     merged.loc[merged["product_name"].eq(""), "product_name"] = merged.loc[merged["product_name"].eq(""), "abc_product_name"]
     
-    # تعبئة اسم الصيدلية - الأهم: الحفاظ على اسم الفرع من ABC إذا كان موجوداً
+    # تعبئة اسم الصيدلية - الحفاظ على اسم الفرع
+    # نعطي الأولوية لاسم الفرع من ABC إذا كان موجوداً
     merged["pharmacy_name"] = merged["salla_pharmacy_name"]
-    # إذا كان هناك abc_pharmacy_name، نستخدمه (وهذا يحافظ على تعدد الفروع)
-    abc_mask = merged["abc_pharmacy_name"] != ""
+    abc_mask = (merged["abc_pharmacy_name"] != "") & (merged["abc_pharmacy_name"] != "nan")
     merged.loc[abc_mask, "pharmacy_name"] = merged.loc[abc_mask, "abc_pharmacy_name"]
+    
     # إذا كان فارغاً، نستخدم salla_pharmacy_name
-    empty_mask = merged["pharmacy_name"] == ""
+    empty_mask = (merged["pharmacy_name"] == "") | (merged["pharmacy_name"] == "nan")
     merged.loc[empty_mask, "pharmacy_name"] = merged.loc[empty_mask, "salla_pharmacy_name"]
     
     # حساب الفرق
@@ -268,7 +260,7 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         axis=1
     )
     
-    # الأعمدة المطلوبة للنتيجة
+    # الأعمدة المطلوبة للنتيجة - فقط الأعمدة الموجودة في قاعدة البيانات
     ordered_columns = [
         "item_key", "order_number", "invoice_number", "sku", "product_name",
         "salla_product_name", "abc_product_name", "pharmacy_name",
@@ -282,11 +274,16 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         "coupon_discount", "offer_discount"
     ]
     
+    # إضافة الأعمدة المفقودة
     for col in ordered_columns:
         if col not in result.columns:
             result[col] = ""
     
+    # إزالة أي أعمدة إضافية غير موجودة في قاعدة البيانات
+    result = result[ordered_columns]
+    
     return result
+
 
 def process_excel(uploaded_file, uploaded_by: str):
     """معالجة ملف Excel وإدراج النتائج في قاعدة البيانات"""
@@ -308,7 +305,7 @@ def process_excel(uploaded_file, uploaded_by: str):
           int((results["case_type"] == "addition").sum()), int((results["case_type"] == "return").sum()),
           int((results["case_type"] == "orphan_salla").sum()), int((results["case_type"] == "orphan_abc").sum())))
     
-    # إدراج العناصر
+    # إعداد بيانات الإدراج - التأكد من وجود جميع الأعمدة المطلوبة
     insert_df = results.copy()
     insert_df['upload_batch_id'] = upload_batch_id
     insert_df['status'] = 'قيد المتابعة'
@@ -318,12 +315,45 @@ def process_excel(uploaded_file, uploaded_by: str):
     insert_df['active'] = 1
     insert_df['hidden_from_pharmacy'] = 0
     insert_df['is_item_locked'] = 0
+    insert_df['item_locked_by'] = ''
+    insert_df['item_locked_at'] = ''
     
-    # فتح موصل آمن وقصير جداً مع تفعيل خيارات المهلة الممتدة
+    # قائمة الأعمدة المطلوبة في قاعدة البيانات
+    required_columns = [
+        'item_key', 'upload_batch_id', 'order_number', 'invoice_number', 'sku',
+        'product_name', 'salla_product_name', 'abc_product_name', 'pharmacy_name',
+        'salla_pharmacy_name', 'abc_pharmacy_name', 'abc_pharmacist_name',
+        'salla_qty', 'abc_qty', 'difference', 'case_type', 'case_label',
+        'case_reason', 'status', 'performed_by', 'performed_at', 'customer_name',
+        'customer_phone', 'city', 'order_status', 'order_date', 'invoice_date',
+        'profile_type', 'receipt_classification', 'all_abc_pharmacies',
+        'other_branch_details', 'pharmacist_note', 'total_amount', 'first_seen_at',
+        'last_seen_at', 'active', 'hidden_from_pharmacy', 'payment_method',
+        'discount', 'shipping_cost', 'tax', 'coupon_discount', 'offer_discount',
+        'is_item_locked', 'item_locked_by', 'item_locked_at'
+    ]
+    
+    # إضافة الأعمدة المفقودة
+    for col in required_columns:
+        if col not in insert_df.columns:
+            if col in ['performed_by', 'performed_at', 'item_locked_by', 'item_locked_at']:
+                insert_df[col] = ''
+            elif col in ['is_item_locked']:
+                insert_df[col] = 0
+            else:
+                insert_df[col] = ''
+    
+    # التأكد من ترتيب الأعمدة
+    insert_df = insert_df[required_columns]
+    
+    # فتح موصل آمن
     db_conn = sqlite3.connect(DB_PATH, timeout=30.0)
     try:
-        # الكتابة في جدول reconciliation_items دفعة واحدة في جزء من الثانية
+        # الكتابة في جدول reconciliation_items
         insert_df.to_sql('reconciliation_items', db_conn, if_exists='append', index=False)
+    except Exception as e:
+        print(f"Error inserting data: {e}")
+        raise
     finally:
         db_conn.close()
     
