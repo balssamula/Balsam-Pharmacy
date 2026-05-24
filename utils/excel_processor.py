@@ -294,9 +294,8 @@ def process_excel(uploaded_file, uploaded_by: str):
     upload_batch_id = uuid.uuid4().hex
     timestamp = now_str()
     
-    # استخدام اتصال واحد فقط مع timeout أطول
     conn = sqlite3.connect(DB_PATH, timeout=60.0)
-    conn.execute("PRAGMA journal_mode=WAL")  # تحسين الأداء وتقليل القفل
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     cur = conn.cursor()
     
@@ -325,7 +324,7 @@ def process_excel(uploaded_file, uploaded_by: str):
         insert_df['performed_by'] = ''
         insert_df['performed_at'] = ''
         
-        # قائمة الأعمدة المطلوبة في قاعدة البيانات (مطابقة لـ init_database)
+        # قائمة الأعمدة المطلوبة في قاعدة البيانات (مع salla_branch_number)
         valid_columns = [
             'item_key', 'upload_batch_id', 'order_number', 'invoice_number', 'sku',
             'product_name', 'salla_product_name', 'abc_product_name', 'pharmacy_name',
@@ -358,7 +357,7 @@ def process_excel(uploaded_file, uploaded_by: str):
         # التأكد من ترتيب الأعمدة
         insert_df = insert_df[valid_columns]
         
-        # إدراج البيانات باستخدام to_sql مع الاتصال الحالي
+        # إدراج البيانات
         insert_df.to_sql('reconciliation_items', conn, if_exists='append', index=False, method='multi')
         
         # تعطيل العناصر القديمة وتفعيل الجلسة الحالية
