@@ -296,7 +296,7 @@ def process_excel(uploaded_file, uploaded_by: str):
     # إدراج العناصر
     insert_df = results.copy()
     insert_df['upload_batch_id'] = upload_batch_id
-    insert_df['status'] = 'قيد Mتابعة'
+    insert_df['status'] = 'قيد المتابعة'
     insert_df['pharmacist_note'] = ''
     insert_df['first_seen_at'] = timestamp
     insert_df['last_seen_at'] = timestamp
