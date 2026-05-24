@@ -10,33 +10,6 @@ DB_DIR = "data"
 DB_PATH = os.path.join(DB_DIR, "pharmacy_reconciliation.db")
 PHARMACY_COUNT = 17
 
-def upgrade_database():
-    """ترقية قاعدة البيانات لإضافة الأعمدة الجديدة"""
-    conn = sqlite3.connect(DB_PATH, timeout=60.0)
-    cur = conn.cursor()
-    
-    try:
-        # التحقق من وجود عمود salla_branch_number
-        cur.execute("PRAGMA table_info(reconciliation_items)")
-        columns = [row[1] for row in cur.fetchall()]
-        
-        if 'salla_branch_number' not in columns:
-            print("Adding column salla_branch_number to reconciliation_items")
-            cur.execute("ALTER TABLE reconciliation_items ADD COLUMN salla_branch_number TEXT DEFAULT ''")
-        
-        if 'branch_number' not in columns:
-            print("Adding column branch_number to reconciliation_items")
-            cur.execute("ALTER TABLE reconciliation_items ADD COLUMN branch_number TEXT DEFAULT ''")
-        
-        conn.commit()
-        print("Database upgrade completed successfully")
-        
-    except Exception as e:
-        print(f"Error upgrading database: {e}")
-        conn.rollback()
-    finally:
-        conn.close()
-        
 def get_client_ip():
     """الحصول على عنوان IP الخاص بالجهاز"""
     try:
@@ -65,12 +38,110 @@ def get_saudi_time():
 def pharmacy_names():
     return [f"Balsam Alula Pharmacy {i:02d}" for i in range(1, PHARMACY_COUNT + 1)]
 
+def upgrade_database():
+    """ترقية قاعدة البيانات لإضافة الأعمدة الجديدة - يتم استدعاؤها بعد إنشاء الجداول"""
+    conn = sqlite3.connect(DB_PATH, timeout=60.0)
+    cur = conn.cursor()
+    
+    try:
+        # الحصول على قائمة الأعمدة الحالية في جدول reconciliation_items
+        cur.execute("PRAGMA table_info(reconciliation_items)")
+        columns = [row[1] for row in cur.fetchall()]
+        
+        # قائمة الأعمدة التي يجب إضافتها إذا كانت مفقودة
+        columns_to_add = {
+            'salla_branch_number': "TEXT DEFAULT ''",
+            'branch_number': "TEXT DEFAULT ''",
+            'is_item_locked': "INTEGER DEFAULT 0",
+            'item_locked_by': "TEXT DEFAULT ''",
+            'item_locked_at': "TEXT DEFAULT ''",
+            'coupon_discount': "REAL DEFAULT 0",
+            'offer_discount': "REAL DEFAULT 0"
+        }
+        
+        for col_name, col_type in columns_to_add.items():
+            if col_name not in columns:
+                try:
+                    print(f"Adding column {col_name} to reconciliation_items")
+                    cur.execute(f"ALTER TABLE reconciliation_items ADD COLUMN {col_name} {col_type}")
+                except Exception as e:
+                    print(f"Error adding column {col_name}: {e}")
+        
+        conn.commit()
+        print("Database upgrade completed successfully")
+        
+    except Exception as e:
+        print(f"Error upgrading database: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+
 def init_database():
     os.makedirs(DB_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=60.0)
     cur = conn.cursor()
 
-    # جدول reconciliation_items مع إضافة salla_branch_number
+    # جدول المستخدمين
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL,
+            pharmacist_name TEXT DEFAULT '',
+            last_login TEXT DEFAULT '',
+            last_ip TEXT DEFAULT '',
+            can_view_dashboard INTEGER DEFAULT 0,
+            can_view_balances INTEGER DEFAULT 0,
+            can_view_monitoring INTEGER DEFAULT 0,
+            can_manage_users INTEGER DEFAULT 0,
+            can_view_pharmacy_actions INTEGER DEFAULT 0,
+            is_active INTEGER DEFAULT 1
+        )
+    """)
+
+    # جدول سجل الدخول
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS login_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT,
+            role TEXT,
+            ip_address TEXT,
+            login_time TEXT,
+            user_agent TEXT DEFAULT ''
+        )
+    """)
+
+    # جدول آخر وصول
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS last_access (
+            pharmacy_name TEXT PRIMARY KEY,
+            last_login TEXT DEFAULT '',
+            pharmacist_name TEXT DEFAULT ''
+        )
+    """)
+
+    # جدول المرفوعات والملفات
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS uploads (
+            upload_batch_id TEXT PRIMARY KEY,
+            session_name TEXT DEFAULT '',
+            file_name TEXT,
+            uploaded_by TEXT,
+            uploaded_at TEXT,
+            total_cases INTEGER DEFAULT 0,
+            total_additions INTEGER DEFAULT 0,
+            total_returns INTEGER DEFAULT 0,
+            total_orphan_salla INTEGER DEFAULT 0,
+            total_orphan_abc INTEGER DEFAULT 0,
+            total_post_cutoff INTEGER DEFAULT 0,
+            is_locked INTEGER DEFAULT 0,
+            locked_by TEXT DEFAULT '',
+            locked_at TEXT DEFAULT '',
+            is_active INTEGER DEFAULT 0
+        )
+    """)
+
+    # جدول الحالات والمطابقات الرئيسي - مع جميع الأعمدة المطلوبة
     cur.execute("""
         CREATE TABLE IF NOT EXISTS reconciliation_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,53 +195,6 @@ def init_database():
             item_locked_at TEXT DEFAULT ''
         )
     """)
-
-    cur.execute("PRAGMA table_info(users)")
-    existing_columns = [row[1] for row in cur.fetchall()]
-    if "last_ip" not in existing_columns:
-        cur.execute("ALTER TABLE users ADD COLUMN last_ip TEXT DEFAULT ''")
-
-    # جدول سجل الدخول
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS login_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT,
-            role TEXT,
-            ip_address TEXT,
-            login_time TEXT,
-            user_agent TEXT DEFAULT ''
-        )
-    """)
-
-    # جدول آخر وصول
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS last_access (
-            pharmacy_name TEXT PRIMARY KEY,
-            last_login TEXT DEFAULT '',
-            pharmacist_name TEXT DEFAULT ''
-        )
-    """)
-
-    # جدول المرفوعات والملفات
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS uploads (
-            upload_batch_id TEXT PRIMARY KEY,
-            session_name TEXT DEFAULT '',
-            file_name TEXT,
-            uploaded_by TEXT,
-            uploaded_at TEXT,
-            total_cases INTEGER DEFAULT 0,
-            total_additions INTEGER DEFAULT 0,
-            total_returns INTEGER DEFAULT 0,
-            total_orphan_salla INTEGER DEFAULT 0,
-            total_orphan_abc INTEGER DEFAULT 0,
-            total_post_cutoff INTEGER DEFAULT 0,
-            is_locked INTEGER DEFAULT 0,
-            locked_by TEXT DEFAULT '',
-            locked_at TEXT DEFAULT '',
-            is_active INTEGER DEFAULT 0
-        )
-    """)
  
     # إدراج المسؤول الرئيسي الافتراضي بأمان
     cur.execute("SELECT * FROM users WHERE username = 'admin'")
@@ -202,7 +226,8 @@ def init_database():
 
     conn.commit()
     conn.close()
-
+    
+    # تشغيل ترقية قاعدة البيانات لإضافة أي أعمدة مفقودة
     upgrade_database()
 
 def record_login_history(username: str, role: str, ip_address: str = None, user_agent: str = None):
