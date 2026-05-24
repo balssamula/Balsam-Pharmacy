@@ -297,8 +297,18 @@ def render_old_orders_pharmacy(old_orders_df, pharmacy_name, pharmacist_name):
             card_color = "#fff3cd"
             badge = "🟡 يحتاج مراجعة"
         
-        diff_value = numeric_value(row['difference'])
-        required_action = "إضافة" if diff_value > 0 else "إرجاع" if diff_value < 0 else "مطابق"
+        # 👇 الحل الجذري: تحويل الكميات إلى أرقام وحساب الفرق ديناميكياً بدقة
+        salla_numeric = int(row.get('salla_qty', 0)) if pd.notna(row.get('salla_qty', 0)) else 0
+        abc_numeric = int(row.get('abc_qty', 0)) if pd.notna(row.get('abc_qty', 0)) else 0
+        diff_value = salla_numeric - abc_numeric # حساب ناتج الطرح الفعلي الحالي
+        
+        # تحديد الإجراء المطلوب بناءً على الناتج الرقمي الجديد
+        if diff_value > 0:
+            required_action = "إضافة"
+        elif diff_value < 0:
+            required_action = "إرجاع"
+        else:
+            required_action = "مطابق"
         
         with st.container():
             st.markdown(f"""
