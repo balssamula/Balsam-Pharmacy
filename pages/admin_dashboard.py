@@ -594,15 +594,56 @@ def show():
     .stTabs [data-baseweb="tab-list"] button:hover { transform: translateY(-2px) !important; opacity: 1 !important; }
     </style>
     """, unsafe_allow_html=True)
-    
-    # ========== التبويبات المدمجة الجديدة ==========
+
+    # ========== حساب الإحصائيات الصحيحة للتبويبات ==========
+    # استبعاد الملغي والمسترجع من البيانات النشطة
+    active_mask_filtered = ~filtered_df["order_status"].apply(is_cancelled_or_returned_status)
+
+    # حساب أعداد التبويب المدمج الأول (إضافات + طلبات بدون فاتورة)
+    additions_merged_df = filtered_df[
+        filtered_df['case_type'].isin(['addition', 'orphan_salla']) & active_mask_filtered
+    ].copy()
+    additions_merged_df = exclude_old_items(additions_merged_df)
+    total_additions_merged = len(additions_merged_df)
+    completed_additions_merged = len(additions_merged_df[additions_merged_df["status"] == "تم"])
+
+    # حساب أعداد التبويب المدمج الثاني (إرجاعات + فواتير بدون طلب)
+    returns_merged_df = filtered_df[
+        filtered_df['case_type'].isin(['return', 'orphan_abc']) & active_mask_filtered
+    ].copy()
+    returns_merged_df = exclude_old_items(returns_merged_df)
+    total_returns_merged = len(returns_merged_df)
+    completed_returns_merged = len(returns_merged_df[returns_merged_df["status"] == "تم"])
+
+    # حساب أعداد التبويبات الأخرى مع استبعاد الملغي والمسترجع
+    post_cutoff_filtered = filtered_df[
+        (filtered_df["case_type"] == "post_cutoff_abc") & active_mask_filtered
+    ].copy()
+    post_cutoff_filtered = exclude_old_items(post_cutoff_filtered)
+    total_post_cutoff = len(post_cutoff_filtered)
+    completed_post_cutoff = len(post_cutoff_filtered[post_cutoff_filtered["status"] == "تم"])
+
+    payment_filtered = filtered_df[payment_mask & active_mask_filtered].copy()
+    payment_filtered = exclude_old_items(payment_filtered)
+    total_payment = len(payment_filtered)
+    completed_payment = len(payment_filtered[payment_filtered["status"] == "تم"])
+
+    cancelled_filtered = filtered_df[cancelled_mask].copy()
+    cancelled_filtered = exclude_old_items(cancelled_filtered)
+    total_cancelled = len(cancelled_filtered)
+
+    completed_filtered = completed_df.copy()
+    completed_filtered = exclude_old_items(completed_filtered)
+    total_completed = len(completed_filtered)
+
+    # ========== التبويبات المدمجة الجديدة مع الأعداد ==========
     tab_additions, tab_returns, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices, tab_old_stats = st.tabs([
-        f"📥 الإضافات والطلبات المفقودة",
-        f"📤 الإرجاعات والفواتير المعلقة",
-        f"⏰ فواتير بعد آخر طلب ({len(post_cutoff_df)})",
-        f"💰 بانتظار الدفع ({len(payment_df)})",
-        f"⚠️ ملغي/مسترجع ({len(cancelled_df)})",
-        f"✅ تم الانتهاء ({len(completed_df)})",
+        f"📥 الإضافات والطلبات المفقودة ({completed_additions_merged}/{total_additions_merged})" if total_additions_merged > 0 else "📥 الإضافات والطلبات المفقودة (0)",
+        f"📤 الإرجاعات والفواتير المعلقة ({completed_returns_merged}/{total_returns_merged})" if total_returns_merged > 0 else "📤 الإرجاعات والفواتير المعلقة (0)",
+        f"⏰ فواتير بعد آخر طلب ({completed_post_cutoff}/{total_post_cutoff})" if total_post_cutoff > 0 else f"⏰ فواتير بعد آخر طلب ({total_post_cutoff})",
+        f"💰 بانتظار الدفع ({completed_payment}/{total_payment})" if total_payment > 0 else f"💰 بانتظار الدفع ({total_payment})",
+        f"⚠️ ملغي/مسترجع ({total_cancelled})",
+        f"✅ تم الانتهاء ({total_completed})",
         "📅 طلبات قديمة",
         "🧾 فواتير قديمة",
         "📊 إحصائيات قديمة"
@@ -612,59 +653,60 @@ def show():
         st.markdown("""
         <div style="background: linear-gradient(135deg, #0f4c5c10, #1f7a8c10); padding: 0.75rem; border-radius: 12px; margin-bottom: 1rem;">
             <p style="margin: 0; font-weight: 500;">📥 <strong>الطلبات التي تحتاج إلى إضافة أو معالجة نقص الفواتير</strong><br>
-            <span style="font-size: 0.85rem;">🔵 الإضافات العادية: كمية الطلب أعلى من الفاتورة | 🟡 الطلبات بدون فاتورة: طلب موجود في سلة وغير موجود في ABC</span></p>
-        </div>
+            <span style="font-size: 0.85rem;">🔵 الإضافات العادية: كمية الطلب أعلى من الفاتورة | 🟡 الطلبات بدون فاتورة: طلب موجود في سلة وغير موجود في ABC</span>
+        </p></div>
         """, unsafe_allow_html=True)
         
-        additions_merged_df = filtered_df[filtered_df['case_type'].isin(['addition', 'orphan_salla'])].copy()
-        additions_merged_df = exclude_old_items(additions_merged_df)
-        
+        # استخدام DataFrame المعد مسبقاً مع استبعاد القديم والملغي
         if not additions_merged_df.empty:
             st.dataframe(styled_dataframe(additions_merged_df), use_container_width=True)
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             with col1:
                 normal_additions = len(additions_merged_df[additions_merged_df['case_type'] == 'addition'])
                 st.metric("➕ الإضافات العادية", normal_additions)
             with col2:
                 orphan_salla_count = len(additions_merged_df[additions_merged_df['case_type'] == 'orphan_salla'])
                 st.metric("🛒 الطلبات بدون فاتورة", orphan_salla_count)
+            with col3:
+                completed_in_tab = len(additions_merged_df[additions_merged_df["status"] == "تم"])
+                st.metric("✅ المنجز في هذا التبويب", f"{completed_in_tab}/{len(additions_merged_df)}")
         else:
             st.success("🎉 لا توجد طلبات إضافات أو طلبات بدون فاتورة حالياً.")
-    
+
     with tab_returns:
         st.markdown("""
         <div style="background: linear-gradient(135deg, #dc354510, #e74c3c10); padding: 0.75rem; border-radius: 12px; margin-bottom: 1rem;">
             <p style="margin: 0; font-weight: 500;">📤 <strong>الفواتير التي تحتاج إلى إرجاع أو معالجة نقص الطلبات</strong><br>
-            <span style="font-size: 0.85rem;">🔴 الإرجاعات العادية: كمية الفاتورة أعلى من الطلب | 🟡 الفواتير بدون طلب: فاتورة موجودة في ABC وغير موجودة في سلة</span></p>
-        </div>
+            <span style="font-size: 0.85rem;">🔴 الإرجاعات العادية: كمية الفاتورة أعلى من الطلب | 🟡 الفواتير بدون طلب: فاتورة موجودة في ABC وغير موجودة في سلة</span>
+        </p></div>
         """, unsafe_allow_html=True)
-        
-        returns_merged_df = filtered_df[filtered_df['case_type'].isin(['return', 'orphan_abc'])].copy()
-        returns_merged_df = exclude_old_items(returns_merged_df)
-        
+    
         if not returns_merged_df.empty:
             st.dataframe(styled_dataframe(returns_merged_df), use_container_width=True)
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             with col1:
                 normal_returns = len(returns_merged_df[returns_merged_df['case_type'] == 'return'])
                 st.metric("🔄 الإرجاعات العادية", normal_returns)
             with col2:
                 orphan_abc_count = len(returns_merged_df[returns_merged_df['case_type'] == 'orphan_abc'])
                 st.metric("📄 الفواتير بدون طلب", orphan_abc_count)
+            with col3:
+                completed_in_tab = len(returns_merged_df[returns_merged_df["status"] == "تم"])
+                st.metric("✅ المنجز في هذا التبويب", f"{completed_in_tab}/{len(returns_merged_df)}")
         else:
             st.success("🎉 لا توجد طلبات إرجاعات أو فواتير بدون طلب حالياً.")
-    
+
     with tab_post_cutoff:
-        render_table_with_click(post_cutoff_df, "post_cutoff")
-    
+        render_table_with_click(post_cutoff_filtered, "post_cutoff")
+
     with tab_payment:
-        render_table_with_click(payment_df, "payment")
-    
+        render_table_with_click(payment_filtered, "payment")
+
     with tab_cancelled:
-        render_table_with_click(cancelled_df, "cancelled")
-    
+        render_table_with_click(cancelled_filtered, "cancelled")
+
     with tab_completed:
-        render_table_with_click(completed_df, "completed")
+        render_table_with_click(completed_filtered, "completed")
     
     with tab_old_orders:
         st.markdown("""
