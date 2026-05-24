@@ -724,9 +724,9 @@ def get_old_orders(pharmacy_name: str = None, months: int = 6) -> pd.DataFrame:
     finally:
         conn.close()
 
-def get_old_orders_stats() -> dict:
+def get_old_orders_stats(pharmacy_name: str = None) -> dict:
     """إحصائيات الطلبات القديمة (مع استبعاد الملغي والمسترجع)"""
-    df = get_old_orders()
+    df = get_old_orders(pharmacy_name=pharmacy_name)
     if df.empty:
         return {"total": 0, "additions": 0, "returns": 0, "orphan_salla": 0, "orphan_abc": 0, "by_branch": {}}
     
@@ -738,8 +738,6 @@ def get_old_orders_stats() -> dict:
         "orphan_abc": len(df[df["case_type"] == "orphan_abc"]),
         "by_branch": df.groupby("pharmacy_name").size().to_dict()
     }
-    return stats
-
     return stats
 
 def get_old_invoices(pharmacy_name: str = None, months: int = 6) -> pd.DataFrame:
@@ -779,9 +777,9 @@ def get_old_invoices(pharmacy_name: str = None, months: int = 6) -> pd.DataFrame
     finally:
         conn.close()
 
-def get_old_invoices_stats() -> dict:
+def get_old_invoices_stats(pharmacy_name: str = None) -> dict:
     """إحصائيات الفواتير القديمة"""
-    df = get_old_invoices()
+    df = get_old_invoices(pharmacy_name=pharmacy_name)
     if df.empty:
         return {"total": 0, "additions": 0, "returns": 0, "orphan_salla": 0, "orphan_abc": 0, "by_branch": {}}
     
