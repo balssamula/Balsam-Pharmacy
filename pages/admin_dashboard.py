@@ -497,46 +497,61 @@ def show():
     cancelled_df = exclude_old_items(cancelled_df)
     completed_df = exclude_old_items(completed_df)
     
-    # تصدير Excel - يشمل جميع التبويبات بما فيها القديمة
-if st.session_state.get('show_export', False):
-    # جلب البيانات القديمة للتصدير
-    old_orders_export = get_old_orders(pharmacy_name=selected_branch_name, months=6)
-    old_invoices_export = get_old_invoices(pharmacy_name=selected_branch_name, months=6)
-    
-    export_data = {
-        "الإضافات": additions_df,
-        "الإرجاعات": returns_df,
-        "طلبات_بدون_فاتورة": orphan_salla_df,
-        "فواتير_بدون_طلب": orphan_abc_df,
-        "فواتير_بعد_آخر_طلب": post_cutoff_df,
-        "بانتظار_الدفع": payment_df,
-        "ملغي_ومسترجع": cancelled_df,
-        "تم_الانتهاء": completed_df,
-        "الطلبات_القديمة": old_orders_export,
-        "الفواتير_القديمة": old_invoices_export,
-        "إحصائيات_قديمة": pd.DataFrame({
-            "المقياس": ["إجمالي الطلبات القديمة", "إضافات قديمة", "إرجاعات قديمة", "طلبات بدون فاتورة",
-                        "إجمالي الفواتير القديمة", "إضافات فواتير", "إرجاعات فواتير", "فواتير بدون طلب"],
-            "القيمة": [
-                len(old_orders_export),
-                len(old_orders_export[old_orders_export["case_type"] == "addition"]) if not old_orders_export.empty else 0,
-                len(old_orders_export[old_orders_export["case_type"] == "return"]) if not old_orders_export.empty else 0,
-                len(old_orders_export[old_orders_export["case_type"] == "orphan_salla"]) if not old_orders_export.empty else 0,
-                len(old_invoices_export),
-                len(old_invoices_export[old_invoices_export["case_type"] == "addition"]) if not old_invoices_export.empty else 0,
-                len(old_invoices_export[old_invoices_export["case_type"] == "return"]) if not old_invoices_export.empty else 0,
-                len(old_invoices_export[old_invoices_export["case_type"] == "orphan_abc"]) if not old_invoices_export.empty else 0
-            ]
-        })
-    }
-    excel_data = export_to_excel(export_data)
-    st.download_button(
-        "📥 تحميل التقرير",
-        data=excel_data,
-        file_name=f"balsam_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-        use_container_width=True,
-    )
-    st.session_state.show_export = False
+    # ========== تصدير Excel ==========
+    if st.session_state.get('show_export', False):
+        # جلب البيانات القديمة للتصدير (مرة أخرى للتأكد من تحديثها)
+        old_orders_for_export = get_old_orders(pharmacy_name=selected_branch_name, months=6)
+        old_invoices_for_export = get_old_invoices(pharmacy_name=selected_branch_name, months=6)
+        
+        # تجهيز إحصائيات قديمة للتصدير
+        stats_data = []
+        if not old_orders_for_export.empty:
+            stats_data.append(["إجمالي الطلبات القديمة", len(old_orders_for_export)])
+            stats_data.append(["إضافات قديمة (طلبات)", len(old_orders_for_export[old_orders_for_export["case_type"] == "addition"])])
+            stats_data.append(["إرجاعات قديمة (طلبات)", len(old_orders_for_export[old_orders_for_export["case_type"] == "return"])])
+            stats_data.append(["طلبات بدون فاتورة قديمة", len(old_orders_for_export[old_orders_for_export["case_type"] == "orphan_salla"])])
+        else:
+            stats_data.append(["إجمالي الطلبات القديمة", 0])
+            stats_data.append(["إضافات قديمة (طلبات)", 0])
+            stats_data.append(["إرجاعات قديمة (طلبات)", 0])
+            stats_data.append(["طلبات بدون فاتورة قديمة", 0])
+        
+        if not old_invoices_for_export.empty:
+            stats_data.append(["إجمالي الفواتير القديمة", len(old_invoices_for_export)])
+            stats_data.append(["إضافات قديمة (فواتير)", len(old_invoices_for_export[old_invoices_for_export["case_type"] == "addition"])])
+            stats_data.append(["إرجاعات قديمة (فواتير)", len(old_invoices_for_export[old_invoices_for_export["case_type"] == "return"])])
+            stats_data.append(["فواتير بدون طلب قديمة", len(old_invoices_for_export[old_invoices_for_export["case_type"] == "orphan_abc"])])
+        else:
+            stats_data.append(["إجمالي الفواتير القديمة", 0])
+            stats_data.append(["إضافات قديمة (فواتير)", 0])
+            stats_data.append(["إرجاعات قديمة (فواتير)", 0])
+            stats_data.append(["فواتير بدون طلب قديمة", 0])
+        
+        stats_data.append(["إجمالي العناصر القديمة", len(old_orders_for_export) + len(old_invoices_for_export)])
+        
+        stats_df = pd.DataFrame(stats_data, columns=["المقياس", "القيمة"])
+        
+        export_data = {
+            "01_الإضافات": additions_df,
+            "02_الإرجاعات": returns_df,
+            "03_طلبات_بدون_فاتورة": orphan_salla_df,
+            "04_فواتير_بدون_طلب": orphan_abc_df,
+            "05_فواتير_بعد_آخر_طلب": post_cutoff_df,
+            "06_بانتظار_الدفع": payment_df,
+            "07_ملغي_ومسترجع": cancelled_df,
+            "08_تم_الانتهاء": completed_df,
+            "09_الطلبات_القديمة": old_orders_for_export,
+            "10_الفواتير_القديمة": old_invoices_for_export,
+            "11_إحصائيات_قديمة": stats_df
+        }
+        excel_data = export_to_excel(export_data)
+        st.download_button(
+            "📥 تحميل التقرير الشامل",
+            data=excel_data,
+            file_name=f"balsam_full_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            use_container_width=True,
+        )
+        st.session_state.show_export = False
     
     st.markdown("""
     <style>
