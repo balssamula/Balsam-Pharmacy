@@ -99,7 +99,7 @@ def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
         "product_name": "salla_product_name",
         "quantity": "salla_qty",
         "pharmacy_name": "salla_pharmacy_name",
-        "branch_number": "salla_branch_number",
+        "branch_number": "salla_branch_number",  # هذا العمود موجود الآن في قاعدة البيانات
     })
     
     return grouped
@@ -293,79 +293,90 @@ def process_excel(uploaded_file, uploaded_by: str):
     
     upload_batch_id = uuid.uuid4().hex
     timestamp = now_str()
-    conn = sqlite3.connect(DB_PATH)
+    
+    # استخدام اتصال واحد فقط مع timeout أطول
+    conn = sqlite3.connect(DB_PATH, timeout=60.0)
+    conn.execute("PRAGMA journal_mode=WAL")  # تحسين الأداء وتقليل القفل
+    conn.execute("PRAGMA synchronous=NORMAL")
     cur = conn.cursor()
     
-    # إدراج بيانات الرفع
-    cur.execute("""
-        INSERT INTO uploads (upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
-            total_additions, total_returns, total_orphan_salla, total_orphan_abc, is_active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-    """, (upload_batch_id, uploaded_file.name, uploaded_by, timestamp, len(results),
-          int((results["case_type"] == "addition").sum()), int((results["case_type"] == "return").sum()),
-          int((results["case_type"] == "orphan_salla").sum()), int((results["case_type"] == "orphan_abc").sum())))
-    
-    # إعداد بيانات الإدراج - التأكد من وجود جميع الأعمدة المطلوبة
-    insert_df = results.copy()
-    insert_df['upload_batch_id'] = upload_batch_id
-    insert_df['status'] = 'قيد المتابعة'
-    insert_df['pharmacist_note'] = ''
-    insert_df['first_seen_at'] = timestamp
-    insert_df['last_seen_at'] = timestamp
-    insert_df['active'] = 1
-    insert_df['hidden_from_pharmacy'] = 0
-    insert_df['is_item_locked'] = 0
-    insert_df['item_locked_by'] = ''
-    insert_df['item_locked_at'] = ''
-    
-    # قائمة الأعمدة المطلوبة في قاعدة البيانات
-    required_columns = [
-        'item_key', 'upload_batch_id', 'order_number', 'invoice_number', 'sku',
-        'product_name', 'salla_product_name', 'abc_product_name', 'pharmacy_name',
-        'salla_pharmacy_name', 'abc_pharmacy_name', 'abc_pharmacist_name',
-        'salla_qty', 'abc_qty', 'difference', 'case_type', 'case_label',
-        'case_reason', 'status', 'performed_by', 'performed_at', 'customer_name',
-        'customer_phone', 'city', 'order_status', 'order_date', 'invoice_date',
-        'profile_type', 'receipt_classification', 'all_abc_pharmacies',
-        'other_branch_details', 'pharmacist_note', 'total_amount', 'first_seen_at',
-        'last_seen_at', 'active', 'hidden_from_pharmacy', 'payment_method',
-        'discount', 'shipping_cost', 'tax', 'coupon_discount', 'offer_discount',
-        'is_item_locked', 'item_locked_by', 'item_locked_at'
-    ]
-    
-    # إضافة الأعمدة المفقودة
-    for col in required_columns:
-        if col not in insert_df.columns:
-            if col in ['performed_by', 'performed_at', 'item_locked_by', 'item_locked_at']:
-                insert_df[col] = ''
-            elif col in ['is_item_locked']:
-                insert_df[col] = 0
-            else:
-                insert_df[col] = ''
-    
-    # التأكد من ترتيب الأعمدة
-    insert_df = insert_df[required_columns]
-    
-    # فتح موصل آمن
-    db_conn = sqlite3.connect(DB_PATH, timeout=30.0)
     try:
-        # الكتابة في جدول reconciliation_items
-        insert_df.to_sql('reconciliation_items', db_conn, if_exists='append', index=False)
+        # إدراج بيانات الرفع
+        cur.execute("""
+            INSERT INTO uploads (upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
+                total_additions, total_returns, total_orphan_salla, total_orphan_abc, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        """, (upload_batch_id, uploaded_file.name, uploaded_by, timestamp, len(results),
+              int((results["case_type"] == "addition").sum()), int((results["case_type"] == "return").sum()),
+              int((results["case_type"] == "orphan_salla").sum()), int((results["case_type"] == "orphan_abc").sum())))
+        
+        # إعداد بيانات الإدراج
+        insert_df = results.copy()
+        insert_df['upload_batch_id'] = upload_batch_id
+        insert_df['status'] = 'قيد المتابعة'
+        insert_df['pharmacist_note'] = ''
+        insert_df['first_seen_at'] = timestamp
+        insert_df['last_seen_at'] = timestamp
+        insert_df['active'] = 1
+        insert_df['hidden_from_pharmacy'] = 0
+        insert_df['is_item_locked'] = 0
+        insert_df['item_locked_by'] = ''
+        insert_df['item_locked_at'] = ''
+        insert_df['performed_by'] = ''
+        insert_df['performed_at'] = ''
+        
+        # قائمة الأعمدة المطلوبة في قاعدة البيانات (مطابقة لـ init_database)
+        valid_columns = [
+            'item_key', 'upload_batch_id', 'order_number', 'invoice_number', 'sku',
+            'product_name', 'salla_product_name', 'abc_product_name', 'pharmacy_name',
+            'salla_pharmacy_name', 'abc_pharmacy_name', 'abc_pharmacist_name',
+            'branch_number', 'salla_branch_number', 'salla_qty', 'abc_qty', 'difference',
+            'case_type', 'case_label', 'case_reason', 'status', 'performed_by', 'performed_at',
+            'customer_name', 'customer_phone', 'city', 'order_status', 'order_date',
+            'invoice_date', 'profile_type', 'receipt_classification', 'all_abc_pharmacies',
+            'other_branch_details', 'pharmacist_note', 'total_amount', 'first_seen_at',
+            'last_seen_at', 'active', 'hidden_from_pharmacy', 'payment_method',
+            'discount', 'shipping_cost', 'tax', 'coupon_discount', 'offer_discount',
+            'is_item_locked', 'item_locked_by', 'item_locked_at'
+        ]
+        
+        # إزالة الأعمدة غير الموجودة في القائمة
+        cols_to_drop = [col for col in insert_df.columns if col not in valid_columns]
+        if cols_to_drop:
+            insert_df = insert_df.drop(columns=cols_to_drop)
+        
+        # إضافة الأعمدة المفقودة
+        for col in valid_columns:
+            if col not in insert_df.columns:
+                if col in ['performed_by', 'performed_at', 'item_locked_by', 'item_locked_at', 'branch_number', 'salla_branch_number']:
+                    insert_df[col] = ''
+                elif col in ['is_item_locked']:
+                    insert_df[col] = 0
+                else:
+                    insert_df[col] = ''
+        
+        # التأكد من ترتيب الأعمدة
+        insert_df = insert_df[valid_columns]
+        
+        # إدراج البيانات باستخدام to_sql مع الاتصال الحالي
+        insert_df.to_sql('reconciliation_items', conn, if_exists='append', index=False, method='multi')
+        
+        # تعطيل العناصر القديمة وتفعيل الجلسة الحالية
+        cur.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
+        cur.execute("UPDATE uploads SET is_active = 0")
+        cur.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
+        session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
+        cur.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
+        
+        conn.commit()
+        
     except Exception as e:
-        print(f"Error inserting data: {e}")
+        print(f"Error in process_excel: {e}")
+        conn.rollback()
         raise
     finally:
-        db_conn.close()
+        conn.close()
     
-    # تعطيل العناصر القديمة وتفعيل الجلسة الحالية
-    cur.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
-    cur.execute("UPDATE uploads SET is_active = 0")
-    cur.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
-    session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
-    cur.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
-    
-    conn.commit()
-    conn.close()
     return results, upload_batch_id
 
 def update_balances(abc_file, salla_file):
