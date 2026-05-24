@@ -351,10 +351,39 @@ def show():
         )
         st.session_state.show_export_pharmacy = False
     
+    # ========== حساب الإحصائيات الصحيحة مع استبعاد الملغي والمسترجع ==========
+    active_mask = ~df["order_status"].apply(is_cancelled_or_returned_status)
+
+    # حساب أعداد التبويب المدمج الأول (إضافات + طلبات بدون فاتورة)
+    branch_add_df = df[df['case_type'].isin(['addition', 'orphan_salla']) & active_mask].copy()
+    total_additions_merged = len(branch_add_df)
+    completed_additions_merged = len(branch_add_df[branch_add_df["status"] == "تم"])
+    pending_additions_merged = total_additions_merged - completed_additions_merged
+
+    # حساب أعداد التبويب المدمج الثاني (إرجاعات + فواتير بدون طلب)
+    branch_ret_df = df[df['case_type'].isin(['return', 'orphan_abc']) & active_mask].copy()
+    total_returns_merged = len(branch_ret_df)
+    completed_returns_merged = len(branch_ret_df[branch_ret_df["status"] == "تم"])
+    pending_returns_merged = total_returns_merged - completed_returns_merged
+
+    # حساب أعداد التبويبات الأخرى مع استبعاد الملغي والمسترجع
+    post_cutoff_df = df[(df["case_type"] == "post_cutoff_abc") & active_mask].copy()
+    total_post_cutoff = len(post_cutoff_df)
+    completed_post_cutoff = len(post_cutoff_df[post_cutoff_df["status"] == "تم"])
+
+    payment_df = df[df["order_status"].apply(is_pending_payment_status) & active_mask].copy()
+    total_payment = len(payment_df)
+
+    cancelled_df = df[df["order_status"].apply(is_cancelled_or_returned_status)].copy()
+    total_cancelled = len(cancelled_df)
+
+    completed_df = get_completed_items(pharmacy_name)
+    total_completed = len(completed_df)
+
     # إعداد أعداد التبويبات
-    tab_additions_count = len(df[df['case_type'].isin(['addition', 'orphan_salla']) & active_mask])
-    tab_returns_count = len(df[df['case_type'].isin(['return', 'orphan_abc']) & active_mask])
-    
+    tab_additions_count = f"{completed_additions_merged}/{total_additions_merged}" if total_additions_merged > 0 else "0"
+    tab_returns_count = f"{completed_returns_merged}/{total_returns_merged}" if total_returns_merged > 0 else "0"
+
     # تلوين التبويبات
     st.markdown("""
     <style>
@@ -370,57 +399,89 @@ def show():
     button[data-baseweb="tab"]:hover { transform: translateY(-2px) !important; opacity: 1 !important; }
     </style>
     """, unsafe_allow_html=True)
-    
-    # ========== التبويبات المدمجة الجديدة للصيدلي ==========
+
+    # ========== التبويبات المدمجة الجديدة للصيدلي مع الأعداد ==========
     tab_additions, tab_returns, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old = st.tabs([
         f"📥 الإضافات والطلبات المفقودة ({tab_additions_count})",
         f"📤 الإرجاعات والفواتير المعلقة ({tab_returns_count})",
-        f"⏰ فواتير بعد آخر طلب ({len(post_cutoff_df)})",
-        f"💰 بانتظار الدفع ({len(payment_df)})",
-        f"⚠️ ملغي/مسترجع ({len(cancelled_df)})",
-        f"✅ تم الانتهاء ({len(completed_df)})",
+        f"⏰ فواتير بعد آخر طلب ({completed_post_cutoff}/{total_post_cutoff})" if total_post_cutoff > 0 else f"⏰ فواتير بعد آخر طلب (0)",
+        f"💰 بانتظار الدفع ({total_payment})",
+        f"⚠️ ملغي/مسترجع ({total_cancelled})",
+        f"✅ تم الانتهاء ({total_completed})",
         "📅 الطلبات القديمة"
     ])
-    
+
     with tab_additions:
         st.markdown("""
         <div style="background: #dff1ff20; padding: 0.5rem 1rem; border-radius: 12px; margin-bottom: 0.75rem;">
             <span style="font-size: 0.9rem;">🔵 <strong>الإضافات العادية</strong>: كمية الطلب أعلى من الفاتورة | 🟡 <strong>طلبات بدون فاتورة</strong>: طلب موجود في سلة وغير موجود في ABC</span>
         </div>
         """, unsafe_allow_html=True)
-        
-        branch_add_df = df[df['case_type'].isin(['addition', 'orphan_salla']) & active_mask].copy()
-        render_case_cards_pharmacy(branch_add_df, allow_actions, pharmacist_name, pharmacy_name)
     
+        if not branch_add_df.empty:
+            # عرض إحصائيات سريعة في أعلى التبويب
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("📊 إجمالي الحالات", total_additions_merged)
+            with col2:
+                st.metric("✅ تم الإنجاز", completed_additions_merged)
+            with col3:
+                st.metric("⏳ قيد المتابعة", pending_additions_merged)
+            st.markdown("---")
+    
+        render_case_cards_pharmacy(branch_add_df, allow_actions, pharmacist_name, pharmacy_name)
+
     with tab_returns:
         st.markdown("""
         <div style="background: #ffe0df20; padding: 0.5rem 1rem; border-radius: 12px; margin-bottom: 0.75rem;">
             <span style="font-size: 0.9rem;">🔴 <strong>الإرجاعات العادية</strong>: كمية الفاتورة أعلى من الطلب | 🟡 <strong>فواتير بدون طلب</strong>: فاتورة موجودة في ABC وغير موجودة في سلة</span>
         </div>
         """, unsafe_allow_html=True)
-        
-        branch_ret_df = df[df['case_type'].isin(['return', 'orphan_abc']) & active_mask].copy()
+    
+        if not branch_ret_df.empty:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("📊 إجمالي الحالات", total_returns_merged)
+            with col2:
+                st.metric("✅ تم الإنجاز", completed_returns_merged)
+            with col3:
+                st.metric("⏳ قيد المتابعة", pending_returns_merged)
+            st.markdown("---")
+    
         render_case_cards_pharmacy(branch_ret_df, allow_actions, pharmacist_name, pharmacy_name)
-    
+
     with tab_post_cutoff:
+        if not post_cutoff_df.empty:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("📊 إجمالي الحالات", total_post_cutoff)
+            with col2:
+                st.metric("✅ تم الإنجاز", completed_post_cutoff)
+            st.markdown("---")
         render_case_cards_pharmacy(post_cutoff_df, False, pharmacist_name, pharmacy_name)
-    
+
     with tab_payment:
+        if not payment_df.empty:
+            st.info(f"💰 عدد الطلبات التي تنتظر الدفع: {total_payment}")
+            st.markdown("---")
         render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name)
-    
+
     with tab_cancelled:
+        if not cancelled_df.empty:
+            st.warning(f"⚠️ عدد الطلبات الملغية أو المسترجعة: {total_cancelled}")
+            st.markdown("---")
         render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name)
-    
+
     with tab_completed:
         render_completed_table(completed_df, is_admin=False)
-    
+
     with tab_old:
         st.markdown("### 📅 الطلبات القديمة (أكثر من 6 أشهر)")
-        
+    
         months = st.selectbox("عدد الأشهر للبحث", [3, 6, 9, 12, 18, 24], index=1, format_func=lambda x: f"{x} أشهر")
-        
+    
         old_orders_df = get_old_orders(pharmacy_name=pharmacy_name, months=months)
-        
+    
         if not old_orders_df.empty:
             st.warning(f"⚠️ يوجد {len(old_orders_df)} طلب قديم (أكثر من {months} أشهر) لم يتم إكمالها")
             render_old_orders_pharmacy(old_orders_df, pharmacy_name, pharmacist_name)
