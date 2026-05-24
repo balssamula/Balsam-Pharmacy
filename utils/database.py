@@ -835,7 +835,7 @@ def move_item_to_branch(item_key: str, target_branch: str, moved_by: str) -> boo
             WHERE item_key = ?
         """, (f"[تم النقل إلى فرع {target_branch} بواسطة {moved_by} في {current_time}]", item_key))
         
-        # إنشاء عنصر جديد في الفرع المستهدف مع الحفاظ على نفس upload_batch_id
+        # إنشاء عنصر جديد في الفرع المستهدف
         cur.execute("""
             INSERT INTO reconciliation_items (
                 item_key, upload_batch_id, order_number, invoice_number, sku, 
@@ -871,8 +871,26 @@ def move_item_to_branch(item_key: str, target_branch: str, moved_by: str) -> boo
 
 def get_available_branches(current_branch: str = None) -> list:
     """الحصول على قائمة الفروع المتاحة للنقل إليها"""
-    from utils.database import pharmacy_names
-    branches = pharmacy_names()
+    # قائمة الفروع الثابتة
+    branches = [
+        "Balsam Alula Pharmacy 01",
+        "Balsam Alula Pharmacy 02",
+        "Balsam Alula Pharmacy 03",
+        "Balsam Alula Pharmacy 04",
+        "Balsam Alula Pharmacy 05",
+        "Balsam Alula Pharmacy 06",
+        "Balsam Alula Pharmacy 07",
+        "Balsam Alula Pharmacy 08",
+        "Balsam Alula Pharmacy 09",
+        "Balsam Alula Pharmacy 10",
+        "Balsam Alula Pharmacy 11",
+        "Balsam Alula Pharmacy 12",
+        "Balsam Alula Pharmacy 13",
+        "Balsam Alula Pharmacy 14",
+        "Balsam Alula Pharmacy 15",
+        "Balsam Alula Pharmacy 16",
+        "Balsam Alula Pharmacy 17"
+    ]
     if current_branch:
         branches = [b for b in branches if b != current_branch]
     return branches
