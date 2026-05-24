@@ -327,29 +327,29 @@ def show():
         else:
             st.info("لا توجد جلسات سابقة")
 
-active_df = fetch_active_items() # جلب الحالات النشطة حالياً للجلسة
-if not active_df.empty:
-    st.markdown("### 📈 التحليل الإحصائي الفوري للجلسة النشطة")
-    chart_col1, chart_col2 = st.columns(2)
+    active_df = fetch_active_items() # جلب الحالات النشطة حالياً للجلسة
+    if not active_df.empty:
+        st.markdown("### 📈 التحليل الإحصائي الفوري للجلسة النشطة")
+        chart_col1, chart_col2 = st.columns(2)
     
-    with chart_col1:
-        # 1. مخطط دائري لتوزيع أنواع الحالات
-        case_counts = active_df['case_label'].value_counts().reset_index()
-        case_counts.columns = ['نوع الحالة', 'العدد']
-        fig_pie = px.pie(case_counts, values='العدد', names='نوع الحالة', 
-                         hole=0.4, color_discrete_sequence=['#4472C4', '#ED7D31', '#70AD47', '#FFC000'])
-        fig_pie.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=280, showlegend=True)
-        st.plotly_chart(fig_pie, use_container_width=True)
+        with chart_col1:
+            # 1. مخطط دائري لتوزيع أنواع الحالات
+            case_counts = active_df['case_label'].value_counts().reset_index()
+            case_counts.columns = ['نوع الحالة', 'العدد']
+            fig_pie = px.pie(case_counts, values='العدد', names='نوع الحالة', 
+                             hole=0.4, color_discrete_sequence=['#4472C4', '#ED7D31', '#70AD47', '#FFC000'])
+            fig_pie.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=280, showlegend=True)
+            st.plotly_chart(fig_pie, use_container_width=True)
         
-    with chart_col2:
-        # 2. مخطط شريطي أفقي يوضح أكثر الفروع التي بها فروقات ومشاكل
-        branch_counts = active_df['pharmacy_name'].value_counts().reset_index()
-        branch_counts.columns = ['الفرع', 'عدد الحالات']
-        # عرض أعلى 7 فروع تحتاج تركيز ومتابعة
-        fig_bar = px.bar(branch_counts.head(7), x='عدد الحالات', y='الفرع', orientation='h',
-                         color='عدد الحالات', color_continuous_scale='Viridis')
-        fig_bar.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=280, coloraxis_showscale=False)
-        st.plotly_chart(fig_bar, use_container_width=True)
+        with chart_col2:
+            # 2. مخطط شريطي أفقي يوضح أكثر الفروع التي بها فروقات ومشاكل
+            branch_counts = active_df['pharmacy_name'].value_counts().reset_index()
+            branch_counts.columns = ['الفرع', 'عدد الحالات']
+            # عرض أعلى 7 فروع تحتاج تركيز ومتابعة
+            fig_bar = px.bar(branch_counts.head(7), x='عدد الحالات', y='الفرع', orientation='h',
+                             color='عدد الحالات', color_continuous_scale='Viridis')
+            fig_bar.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=280, coloraxis_showscale=False)
+            st.plotly_chart(fig_bar, use_container_width=True)
         
     with st.expander("🔄 مقارنة الجلسات", expanded=False):
         sessions_list = get_all_sessions()
