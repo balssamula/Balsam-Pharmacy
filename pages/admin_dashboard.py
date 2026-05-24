@@ -118,17 +118,19 @@ def styled_dataframe(input_df):
     return display_df.style.apply(highlight_rows, axis=1)
 
 def render_old_items_table(df, title, is_orders=True):
-    """عرض جدول للعناصر القديمة (طلبات أو فواتير) مع تلوين أسود"""
+    """عرض جدول للعناصر القديمة (طلبات أو فواتير) مع الحفاظ على ألوان الملغي والمسترجع"""
     if df.empty:
         st.success(f"🎉 لا توجد {title} قديمة (أكثر من 6 أشهر)")
         return
     
     def highlight_old_rows(row):
-        # الطلبات القديمة: خلفية سوداء ونص أبيض
+        # الطلبات الملغية والمسترجعة تبقى بلونها الأحمر الفاتح
+        if is_cancelled_or_returned_status(row.get('order_status', '')):
+            return ['background-color: #ffe5e5; color: #333'] * len(row)
+        
+        # الطلبات القديمة العادية: خلفية سوداء ونص أبيض
         order_date = row.get('order_date', '')
         invoice_date = row.get('invoice_date', '')
-        
-        # تحديد التاريخ المناسب (تاريخ الطلب أو تاريخ الفاتورة)
         check_date = invoice_date if not is_orders else order_date
         
         if check_date and check_date != '':
@@ -141,9 +143,9 @@ def render_old_items_table(df, title, is_orders=True):
             except:
                 pass
         
-        # الطلبات الملغية والمسترجعة
-        if is_cancelled_or_returned_status(row.get('order_status', '')):
-            return ['background-color: #ffe5e5; color: #333'] * len(row)
+        # بانتظار الدفع
+        if is_pending_payment_status(row.get('order_status', '')):
+            return ['background-color: #fff4d6; color: #333'] * len(row)
         
         return [''] * len(row)
     
@@ -452,16 +454,38 @@ def show():
     cancelled_df = filtered_df[cancelled_mask]
     
     completed_df = get_completed_items()
+
     selected_branch_name = None if selected_branch == "الكل" else selected_branch
 
-    # إحصائيات الطلبات والفواتير القديمة حسب الفرع المختار
-    old_orders_stats = get_old_orders_stats(selected_branch_name)
-    old_invoices_stats = get_old_invoices_stats(selected_branch_name)
+    # الحصول على بيانات الطلبات والفواتير القديمة بناءً على الفلتر
+    old_orders_df_all = get_old_orders(pharmacy_name=selected_branch_name, months=6)
+    old_invoices_df_all = get_old_invoices(pharmacy_name=selected_branch_name, months=6)
 
-    # جلب البيانات القديمة حسب الفرع
-    old_orders_df = get_old_orders(pharmacy_name=selected_branch_name, months=6)
-    old_invoices_df = get_old_invoices(pharmacy_name=selected_branch_name, months=6)
-    
+    # تخزين أرقام الطلبات والفواتير القديمة لاستبعادها من التبويبات الأخرى
+    old_order_numbers = set(old_orders_df_all['order_number'].astype(str).tolist()) if not old_orders_df_all.empty else set()
+    old_invoice_numbers = set(old_invoices_df_all['invoice_number'].astype(str).tolist()) if not old_invoices_df_all.empty else set()
+
+    # دالة لاستبعاد العناصر القديمة من DataFrame
+    def exclude_old_items(df, exclude_orders=True, exclude_invoices=True):
+        if df.empty:
+            return df
+        result_df = df.copy()
+        if exclude_orders and 'order_number' in result_df.columns:
+            result_df = result_df[~result_df['order_number'].astype(str).isin(old_order_numbers)]
+        if exclude_invoices and 'invoice_number' in result_df.columns:
+            result_df = result_df[~result_df['invoice_number'].astype(str).isin(old_invoice_numbers)]
+        return result_df
+
+    # تطبيق الاستبعاد على التبويبات الأخرى
+    additions_df = exclude_old_items(additions_df, exclude_orders=True, exclude_invoices=True)
+    returns_df = exclude_old_items(returns_df, exclude_orders=True, exclude_invoices=True)
+    orphan_salla_df = exclude_old_items(orphan_salla_df, exclude_orders=True, exclude_invoices=True)
+    orphan_abc_df = exclude_old_items(orphan_abc_df, exclude_orders=True, exclude_invoices=True)
+    post_cutoff_df = exclude_old_items(post_cutoff_df, exclude_orders=True, exclude_invoices=True)
+    payment_df = exclude_old_items(payment_df, exclude_orders=True, exclude_invoices=True)
+    cancelled_df = exclude_old_items(cancelled_df, exclude_orders=True, exclude_invoices=True)
+    completed_df = exclude_old_items(completed_df, exclude_orders=True, exclude_invoices=True)
+
     # تصدير Excel
     if st.session_state.get('show_export', False):
         export_data = {
@@ -542,34 +566,45 @@ def show():
     st.markdown("""
     <div style="background: linear-gradient(135deg, #1a1a1a, #333); padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">
         <h3 style="color: white; margin: 0;">📅 الطلبات القديمة (أكثر من 6 أشهر)</h3>
-        <p style="color: #ccc; margin: 0.5rem 0 0 0;">⚠️ الطلبات التي مر عليها أكثر من 6 أشهر تظهر بخلفية سوداء ونص أبيض</p>
+        <p style="color: #ccc; margin: 0.5rem 0 0 0;">⚠️ الطلبات التي مر عليها أكثر من 6 أشهر (الملغية والمسترجعة غير مستبعدة)</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # عرض الفلتر الحالي
     if selected_branch != "الكل":
         st.info(f"🏥 عرض الطلبات القديمة للفرع: {selected_branch}")
     
-    # الحصول على الطلبات القديمة حسب الفرع المختار وعدد الأشهر
-    old_orders_stats_filtered = get_old_orders_stats(selected_branch_name)
+    # اختيار عدد الأشهر
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        months_orders = st.slider("عدد الأشهر للبحث (طلبات)", min_value=3, max_value=24, value=6, step=3, key="old_orders_months")
+    with col2:
+        if st.button("🔄 تحديث الطلبات", use_container_width=True, key="refresh_orders"):
+            st.rerun()
     
-    if old_orders_stats_filtered["total"] > 0:
+    # جلب الطلبات القديمة حسب الفلتر وعدد الأشهر
+    old_orders_filtered = get_old_orders(pharmacy_name=selected_branch_name, months=months_orders)
+    
+    if not old_orders_filtered.empty:
+        # إحصائيات
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("📊 إجمالي الطلبات القديمة", old_orders_stats_filtered["total"])
+            st.metric("📊 إجمالي الطلبات القديمة", len(old_orders_filtered))
         with col2:
-            st.metric("➕ إضافات قديمة", old_orders_stats_filtered["additions"])
+            additions_count = len(old_orders_filtered[old_orders_filtered["case_type"] == "addition"])
+            st.metric("➕ إضافات قديمة", additions_count)
         with col3:
-            st.metric("➖ إرجاعات قديمة", old_orders_stats_filtered["returns"])
+            returns_count = len(old_orders_filtered[old_orders_filtered["case_type"] == "return"])
+            st.metric("➖ إرجاعات قديمة", returns_count)
         with col4:
-            st.metric("📦 طلبات بدون فاتورة", old_orders_stats_filtered.get("orphan_salla", 0))
+            orphan_count = len(old_orders_filtered[old_orders_filtered["case_type"] == "orphan_salla"])
+            st.metric("📦 طلبات بدون فاتورة", orphan_count)
         
-        months = st.slider("عدد الأشهر للبحث (طلبات)", min_value=3, max_value=24, value=6, step=3, key="old_orders_months")
-        old_orders_filtered_df = get_old_orders(pharmacy_name=selected_branch_name, months=months)
-        render_old_items_table(old_orders_filtered_df, "الطلبات", is_orders=True)
+        # عرض الجدول
+        render_old_items_table(old_orders_filtered, "الطلبات", is_orders=True)
         
-        if st.button("📥 تصدير الطلبات القديمة إلى Excel", use_container_width=True):
-            excel_data = export_to_excel({"الطلبات_القديمة": old_orders_filtered_df})
+        # زر تصدير
+        if st.button("📥 تصدير الطلبات القديمة إلى Excel", use_container_width=True, key="export_old_orders"):
+            excel_data = export_to_excel({"الطلبات_القديمة": old_orders_filtered})
             st.download_button(
                 "📥 تحميل التقرير",
                 data=excel_data,
@@ -578,40 +613,53 @@ def show():
             )
     else:
         if selected_branch != "الكل":
-            st.success(f"🎉 لا توجد طلبات قديمة (أكثر من 6 أشهر) للفرع {selected_branch}")
+            st.success(f"🎉 لا توجد طلبات قديمة (أكثر من {months_orders} أشهر) للفرع {selected_branch}")
         else:
-            st.success("🎉 لا توجد طلبات قديمة (أكثر من 6 أشهر)")
+            st.success(f"🎉 لا توجد طلبات قديمة (أكثر من {months_orders} أشهر)")
 
     with tab10:
     st.markdown("""
     <div style="background: linear-gradient(135deg, #1a1a1a, #333); padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">
         <h3 style="color: white; margin: 0;">🧾 الفواتير القديمة (أكثر من 6 أشهر)</h3>
-        <p style="color: #ccc; margin: 0.5rem 0 0 0;">⚠️ الفواتير التي مر عليها أكثر من 6 أشهر ولم تكتمل</p>
+        <p style="color: #ccc; margin: 0.5rem 0 0 0;">⚠️ الفواتير التي مر عليها أكثر من 6 أشهر (الملغية والمسترجعة غير مستبعدة)</p>
     </div>
     """, unsafe_allow_html=True)
     
     if selected_branch != "الكل":
         st.info(f"🏥 عرض الفواتير القديمة للفرع: {selected_branch}")
     
-    old_invoices_stats_filtered = get_old_invoices_stats(selected_branch_name)
+    # اختيار عدد الأشهر
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        months_invoices = st.slider("عدد الأشهر للبحث (فواتير)", min_value=3, max_value=24, value=6, step=3, key="old_invoices_months")
+    with col2:
+        if st.button("🔄 تحديث الفواتير", use_container_width=True, key="refresh_invoices"):
+            st.rerun()
     
-    if old_invoices_stats_filtered["total"] > 0:
+    # جلب الفواتير القديمة حسب الفلتر وعدد الأشهر
+    old_invoices_filtered = get_old_invoices(pharmacy_name=selected_branch_name, months=months_invoices)
+    
+    if not old_invoices_filtered.empty:
+        # إحصائيات
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("📊 إجمالي الفواتير القديمة", old_invoices_stats_filtered["total"])
+            st.metric("📊 إجمالي الفواتير القديمة", len(old_invoices_filtered))
         with col2:
-            st.metric("➕ إضافات", old_invoices_stats_filtered["additions"])
+            additions_count = len(old_invoices_filtered[old_invoices_filtered["case_type"] == "addition"])
+            st.metric("➕ إضافات", additions_count)
         with col3:
-            st.metric("➖ إرجاعات", old_invoices_stats_filtered["returns"])
+            returns_count = len(old_invoices_filtered[old_invoices_filtered["case_type"] == "return"])
+            st.metric("➖ إرجاعات", returns_count)
         with col4:
-            st.metric("🧾 فواتير بدون طلب", old_invoices_stats_filtered.get("orphan_abc", 0))
+            orphan_count = len(old_invoices_filtered[old_invoices_filtered["case_type"] == "orphan_abc"])
+            st.metric("🧾 فواتير بدون طلب", orphan_count)
         
-        months_inv = st.slider("عدد الأشهر للبحث (فواتير)", min_value=3, max_value=24, value=6, step=3, key="old_invoices_months")
-        old_invoices_filtered_df = get_old_invoices(pharmacy_name=selected_branch_name, months=months_inv)
-        render_old_items_table(old_invoices_filtered_df, "الفواتير", is_orders=False)
+        # عرض الجدول
+        render_old_items_table(old_invoices_filtered, "الفواتير", is_orders=False)
         
-        if st.button("📥 تصدير الفواتير القديمة إلى Excel", use_container_width=True):
-            excel_data = export_to_excel({"الفواتير_القديمة": old_invoices_filtered_df})
+        # زر تصدير
+        if st.button("📥 تصدير الفواتير القديمة إلى Excel", use_container_width=True, key="export_old_invoices"):
+            excel_data = export_to_excel({"الفواتير_القديمة": old_invoices_filtered})
             st.download_button(
                 "📥 تحميل التقرير",
                 data=excel_data,
@@ -620,54 +668,57 @@ def show():
             )
     else:
         if selected_branch != "الكل":
-            st.success(f"🎉 لا توجد فواتير قديمة (أكثر من 6 أشهر) للفرع {selected_branch}")
+            st.success(f"🎉 لا توجد فواتير قديمة (أكثر من {months_invoices} أشهر) للفرع {selected_branch}")
         else:
-            st.success("🎉 لا توجد فواتير قديمة (أكثر من 6 أشهر)")
+            st.success(f"🎉 لا توجد فواتير قديمة (أكثر من {months_invoices} أشهر)")
 
     with tab11:
     st.markdown("### 📊 إحصائيات العناصر القديمة")
     st.markdown("---")
     
-    # عرض الفلتر الحالي
     if selected_branch != "الكل":
         st.info(f"🏥 عرض الإحصائيات للفرع: {selected_branch}")
     
-    old_orders_stats_filtered = get_old_orders_stats(selected_branch_name)
-    old_invoices_stats_filtered = get_old_invoices_stats(selected_branch_name)
+    # جلب الإحصائيات بناءً على الفلتر
+    old_orders_for_stats = get_old_orders(pharmacy_name=selected_branch_name, months=6)
+    old_invoices_for_stats = get_old_invoices(pharmacy_name=selected_branch_name, months=6)
     
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("#### 📅 الطلبات القديمة")
         st.markdown(f"""
-        - **إجمالي الطلبات القديمة:** {old_orders_stats_filtered['total']}
-        - **إضافات قديمة:** {old_orders_stats_filtered['additions']}
-        - **إرجاعات قديمة:** {old_orders_stats_filtered['returns']}
-        - **طلبات بدون فاتورة:** {old_orders_stats_filtered.get('orphan_salla', 0)}
+        - **إجمالي الطلبات القديمة:** {len(old_orders_for_stats)}
+        - **إضافات قديمة:** {len(old_orders_for_stats[old_orders_for_stats["case_type"] == "addition"])}
+        - **إرجاعات قديمة:** {len(old_orders_for_stats[old_orders_for_stats["case_type"] == "return"])}
+        - **طلبات بدون فاتورة:** {len(old_orders_for_stats[old_orders_for_stats["case_type"] == "orphan_salla"])}
         """)
         
-        if old_orders_stats_filtered['by_branch'] and selected_branch == "الكل":
+        if selected_branch == "الكل" and not old_orders_for_stats.empty:
             st.markdown("#### 🏥 التوزيع حسب الفرع")
-            for branch, count in old_orders_stats_filtered['by_branch'].items():
+            branch_dist = old_orders_for_stats.groupby("pharmacy_name").size()
+            for branch, count in branch_dist.items():
                 st.markdown(f"- {branch[-10:]}: {count} طلب")
     
     with col2:
         st.markdown("#### 🧾 الفواتير القديمة")
         st.markdown(f"""
-        - **إجمالي الفواتير القديمة:** {old_invoices_stats_filtered['total']}
-        - **إضافات:** {old_invoices_stats_filtered['additions']}
-        - **إرجاعات:** {old_invoices_stats_filtered['returns']}
-        - **فواتير بدون طلب:** {old_invoices_stats_filtered.get('orphan_abc', 0)}
+        - **إجمالي الفواتير القديمة:** {len(old_invoices_for_stats)}
+        - **إضافات:** {len(old_invoices_for_stats[old_invoices_for_stats["case_type"] == "addition"])}
+        - **إرجاعات:** {len(old_invoices_for_stats[old_invoices_for_stats["case_type"] == "return"])}
+        - **فواتير بدون طلب:** {len(old_invoices_for_stats[old_invoices_for_stats["case_type"] == "orphan_abc"])}
         """)
         
-        if old_invoices_stats_filtered['by_branch'] and selected_branch == "الكل":
+        if selected_branch == "الكل" and not old_invoices_for_stats.empty:
             st.markdown("#### 🏥 التوزيع حسب الفرع")
-            for branch, count in old_invoices_stats_filtered['by_branch'].items():
+            branch_dist = old_invoices_for_stats.groupby("pharmacy_name").size()
+            for branch, count in branch_dist.items():
                 st.markdown(f"- {branch[-10:]}: {count} فاتورة")
     
     st.markdown("---")
-    total_old = old_orders_stats_filtered['total'] + old_invoices_stats_filtered['total']
+    total_old = len(old_orders_for_stats) + len(old_invoices_for_stats)
     if total_old > 0:
         st.warning(f"⚠️ إجمالي العناصر القديمة (طلبات + فواتير): {total_old}")
+        st.info("💡 هذه العناصر تم استبعادها تلقائياً من التبويبات الأخرى (الإضافات، الإرجاعات، إلخ)")
     else:
         st.success("🎉 لا توجد عناصر قديمة (طلبات أو فواتير)")
     
