@@ -16,7 +16,8 @@ from utils.database import (
     get_manager_last_login, get_login_history,
     get_old_orders, get_old_orders_stats,
     get_old_invoices, get_old_invoices_stats,
-    move_item_to_branch, get_available_branches
+    move_item_to_branch, get_available_branches,
+    check_duplicate_across_branches
 )
 from utils.helpers import (
     is_cancelled_or_returned_status, is_pending_payment_status,
