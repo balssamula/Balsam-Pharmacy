@@ -790,3 +790,89 @@ def get_old_invoices_stats(pharmacy_name: str = None) -> dict:
         "by_branch": df.groupby("pharmacy_name").size().to_dict()
     }
     return stats
+
+# ========== دوال نقل العناصر بين الفروع ==========
+
+def move_item_to_branch(item_key: str, target_branch: str, moved_by: str) -> bool:
+    """نقل عنصر من فرع إلى فرع آخر"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    try:
+        # الحصول على بيانات العنصر الحالي
+        cur.execute("""
+            SELECT order_number, sku, case_type, pharmacy_name, salla_qty, abc_qty, 
+                   product_name, invoice_number, order_status, order_date, invoice_date,
+                   customer_name, customer_phone, city, total_amount, payment_method,
+                   discount, shipping_cost, tax, upload_batch_id
+            FROM reconciliation_items WHERE item_key = ? AND active = 1
+        """, (item_key,))
+        item = cur.fetchone()
+        
+        if not item:
+            return False
+        
+        (order_number, sku, case_type, old_pharmacy, salla_qty, abc_qty,
+         product_name, invoice_number, order_status, order_date, invoice_date,
+         customer_name, customer_phone, city, total_amount, payment_method,
+         discount, shipping_cost, tax, upload_batch_id) = item
+        
+        # إنشاء item_key جديد للفرع المستهدف
+        new_item_key = f"{target_branch}||{order_number}||{sku}||{case_type}"
+        
+        # التحقق من عدم وجود العنصر بالفعل في الفرع المستهدف
+        cur.execute("SELECT 1 FROM reconciliation_items WHERE item_key = ? AND active = 1", (new_item_key,))
+        if cur.fetchone():
+            conn.close()
+            return False
+        
+        # تعطيل العنصر القديم
+        current_time = now_str()
+        cur.execute("""
+            UPDATE reconciliation_items 
+            SET active = 0, hidden_from_pharmacy = 1, 
+                pharmacist_note = COALESCE(pharmacist_note || '\n', '') || ?
+            WHERE item_key = ?
+        """, (f"[تم النقل إلى فرع {target_branch} بواسطة {moved_by} في {current_time}]", item_key))
+        
+        # إنشاء عنصر جديد في الفرع المستهدف مع الحفاظ على نفس upload_batch_id
+        cur.execute("""
+            INSERT INTO reconciliation_items (
+                item_key, upload_batch_id, order_number, invoice_number, sku, 
+                product_name, pharmacy_name, salla_qty, abc_qty, difference,
+                case_type, case_label, case_reason, status, order_status,
+                order_date, invoice_date, customer_name, customer_phone, city,
+                total_amount, payment_method, discount, shipping_cost, tax,
+                first_seen_at, last_seen_at, active, hidden_from_pharmacy,
+                profile_type, receipt_classification, all_abc_pharmacies,
+                pharmacist_note
+            )
+            SELECT 
+                ?, upload_batch_id, order_number, invoice_number, sku,
+                product_name, ?, salla_qty, abc_qty, difference,
+                case_type, case_label, case_reason, status, order_status,
+                order_date, invoice_date, customer_name, customer_phone, city,
+                total_amount, payment_method, discount, shipping_cost, tax,
+                ?, ?, 1, 0,
+                profile_type, receipt_classification, all_abc_pharmacies,
+                ?
+            FROM reconciliation_items WHERE item_key = ?
+        """, (new_item_key, target_branch, current_time, current_time, 
+              f"[تم النقل من فرع {old_pharmacy} بواسطة {moved_by}]", item_key))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error moving item: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_available_branches(current_branch: str = None) -> list:
+    """الحصول على قائمة الفروع المتاحة للنقل إليها"""
+    from utils.database import pharmacy_names
+    branches = pharmacy_names()
+    if current_branch:
+        branches = [b for b in branches if b != current_branch]
+    return branches
