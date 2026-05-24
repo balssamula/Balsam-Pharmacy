@@ -43,21 +43,58 @@ def init_database():
     conn = sqlite3.connect(DB_PATH, timeout=60.0)
     cur = conn.cursor()
 
-    # جدول المستخدمين
+    # جدول reconciliation_items مع إضافة salla_branch_number
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
-            password TEXT NOT NULL,
-            role TEXT NOT NULL,
-            pharmacist_name TEXT DEFAULT '',
-            last_login TEXT DEFAULT '',
-            last_ip TEXT DEFAULT '',
-            can_view_dashboard INTEGER DEFAULT 0,
-            can_view_balances INTEGER DEFAULT 0,
-            can_view_monitoring INTEGER DEFAULT 0,
-            can_manage_users INTEGER DEFAULT 0,
-            can_view_pharmacy_actions INTEGER DEFAULT 0,
-            is_active INTEGER DEFAULT 1
+        CREATE TABLE IF NOT EXISTS reconciliation_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_key TEXT UNIQUE,
+            upload_batch_id TEXT,
+            order_number TEXT,
+            invoice_number TEXT,
+            sku TEXT,
+            product_name TEXT,
+            salla_product_name TEXT,
+            abc_product_name TEXT,
+            pharmacy_name TEXT,
+            salla_pharmacy_name TEXT,
+            abc_pharmacy_name TEXT,
+            abc_pharmacist_name TEXT,
+            branch_number TEXT,
+            salla_branch_number TEXT,
+            salla_qty REAL DEFAULT 0,
+            abc_qty REAL DEFAULT 0,
+            difference REAL DEFAULT 0,
+            case_type TEXT,
+            case_label TEXT,
+            case_reason TEXT,
+            status TEXT DEFAULT 'قيد المتابعة',
+            performed_by TEXT DEFAULT '',
+            performed_at TEXT DEFAULT '',
+            customer_name TEXT DEFAULT '',
+            customer_phone TEXT DEFAULT '',
+            city TEXT DEFAULT '',
+            order_status TEXT DEFAULT '',
+            order_date TEXT DEFAULT '',
+            invoice_date TEXT DEFAULT '',
+            profile_type TEXT DEFAULT '',
+            receipt_classification TEXT DEFAULT '',
+            all_abc_pharmacies TEXT DEFAULT '',
+            other_branch_details TEXT DEFAULT '',
+            pharmacist_note TEXT DEFAULT '',
+            total_amount REAL DEFAULT 0,
+            first_seen_at TEXT,
+            last_seen_at TEXT,
+            active INTEGER DEFAULT 1,
+            hidden_from_pharmacy INTEGER DEFAULT 0,
+            payment_method TEXT DEFAULT '',
+            discount REAL DEFAULT 0,
+            shipping_cost REAL DEFAULT 0,
+            tax REAL DEFAULT 0,
+            coupon_discount REAL DEFAULT 0,
+            offer_discount REAL DEFAULT 0,
+            is_item_locked INTEGER DEFAULT 0,
+            item_locked_by TEXT DEFAULT '',
+            item_locked_at TEXT DEFAULT ''
         )
     """)
 
@@ -105,60 +142,6 @@ def init_database():
             locked_by TEXT DEFAULT '',
             locked_at TEXT DEFAULT '',
             is_active INTEGER DEFAULT 0
-        )
-    """)
-
-    # جدول الحالات والمطابقات الرئيسي
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS reconciliation_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            item_key TEXT UNIQUE,
-            upload_batch_id TEXT,
-            order_number TEXT,
-            invoice_number TEXT,
-            sku TEXT,
-            product_name TEXT,
-            salla_product_name TEXT,
-            abc_product_name TEXT,
-            pharmacy_name TEXT,
-            salla_pharmacy_name TEXT,
-            abc_pharmacy_name TEXT,
-            abc_pharmacist_name TEXT,
-            branch_number TEXT,
-            salla_qty REAL DEFAULT 0,
-            abc_qty REAL DEFAULT 0,
-            difference REAL DEFAULT 0,
-            case_type TEXT,
-            case_label TEXT,
-            case_reason TEXT,
-            status TEXT DEFAULT 'قيد المتابعة',
-            performed_by TEXT DEFAULT '',
-            performed_at TEXT DEFAULT '',
-            customer_name TEXT DEFAULT '',
-            customer_phone TEXT DEFAULT '',
-            city TEXT DEFAULT '',
-            order_status TEXT DEFAULT '',
-            order_date TEXT DEFAULT '',
-            invoice_date TEXT DEFAULT '',
-            profile_type TEXT DEFAULT '',
-            receipt_classification TEXT DEFAULT '',
-            all_abc_pharmacies TEXT DEFAULT '',
-            other_branch_details TEXT DEFAULT '',
-            pharmacist_note TEXT DEFAULT '',
-            total_amount REAL DEFAULT 0,
-            first_seen_at TEXT,
-            last_seen_at TEXT,
-            active INTEGER DEFAULT 1,
-            hidden_from_pharmacy INTEGER DEFAULT 0,
-            payment_method TEXT DEFAULT '',
-            discount REAL DEFAULT 0,
-            shipping_cost REAL DEFAULT 0,
-            tax REAL DEFAULT 0,
-            coupon_discount REAL DEFAULT 0,
-            offer_discount REAL DEFAULT 0,
-            is_item_locked INTEGER DEFAULT 0,
-            item_locked_by TEXT DEFAULT '',
-            item_locked_at TEXT DEFAULT ''
         )
     """)
  
