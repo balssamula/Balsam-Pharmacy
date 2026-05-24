@@ -3,33 +3,62 @@ import pandas as pd
 from utils.helpers import status_pill, case_pill, status_alert_pill, payment_alert_pill, numeric_value
 
 def render_metrics(df: pd.DataFrame):
-    cols = st.columns(6)
     total = len(df)
     additions = int((df["case_type"] == "addition").sum())
     returns = int((df["case_type"] == "return").sum())
     orphan_salla = int((df["case_type"] == "orphan_salla").sum())
     orphan_abc = int((df["case_type"] == "orphan_abc").sum())
-    completed = int((df["status"] == "تم").sum())
+    completed = int((df["status"] == "تم").sum()) # تعديل اللبس النصي القديم
     
-    metrics = [
-        ("إجمالي الحالات", total),
-        ("إضافات", additions),
-        ("إرجاعات", returns),
-        ("طلبات بدون فاتورة", orphan_salla),
-        ("فواتير بدون طلب", orphan_abc),
-        ("تم إنجازها", completed),
-    ]
-    for col, (label, value) in zip(cols, metrics):
-        with col:
-            st.markdown(
-                f"""
-                <div class="metric-box">
-                    <div style="font-size:0.88rem;color:#5a7380;">{label}</div>
-                    <div style="font-size:2rem;font-weight:800;color:#16425b;">{value}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    st.markdown(f"""
+    <style>
+    .dashboard-container {{
+        display: flex; flex-wrap: wrap; gap: 15px; justify-content: space-between; margin-bottom: 25px;
+    }}
+    .creative-card {{
+        flex: 1; min-width: 160px; background: rgba(255, 255, 255, 0.9);
+        border-radius: 20px; padding: 20px; text-align: center;
+        box-shadow: 0 10px 20px rgba(31, 122, 140, 0.05);
+        border: 1px solid rgba(31, 122, 140, 0.1); transition: all 0.3s ease;
+        border-bottom: 4px solid #6c757d;
+    }}
+    .creative-card:hover {{
+        transform: translateY(-5px); box-shadow: 0 15px 30px rgba(31, 122, 140, 0.15);
+    }}
+    .card-additions {{ border-bottom-color: #4472C4; }}
+    .card-returns {{ border-bottom-color: #ED7D31; }}
+    .card-salla {{ border-bottom-color: #70AD47; }}
+    .card-abc {{ border-bottom-color: #FFC000; }}
+    .card-done {{ border-bottom-color: #28a745; }}
+    </style>
+    
+    <div class="dashboard-container">
+        <div class="creative-card">
+            <div style="font-size: 0.9rem; color: #64748b; font-weight: 500;">📊 إجمالي الحالات</div>
+            <div style="font-size: 2.2rem; font-weight: 800; color: #1e293b; margin-top: 5px;">{total}</div>
+        </div>
+        <div class="creative-card card-additions">
+            <div style="font-size: 0.9rem; color: #4472C4; font-weight: bold;">➕ الإضافات</div>
+            <div style="font-size: 2.2rem; font-weight: 800; color: #4472C4; margin-top: 5px;">{additions}</div>
+        </div>
+        <div class="creative-card card-returns">
+            <div style="font-size: 0.9rem; color: #ED7D31; font-weight: bold;">🔄 الإرجاعات</div>
+            <div style="font-size: 2.2rem; font-weight: 800; color: #ED7D31; margin-top: 5px;">{returns}</div>
+        </div>
+        <div class="creative-card card-salla">
+            <div style="font-size: 0.9rem; color: #70AD47; font-weight: bold;">🛒 بدون فاتورة</div>
+            <div style="font-size: 2.2rem; font-weight: 800; color: #70AD47; margin-top: 5px;">{orphan_salla}</div>
+        </div>
+        <div class="creative-card card-abc">
+            <div style="font-size: 0.9rem; color: #FFC000; font-weight: bold;">📄 بدون طلب</div>
+            <div style="font-size: 2.2rem; font-weight: 800; color: #FFC000; margin-top: 5px;">{orphan_abc}</div>
+        </div>
+        <div class="creative-card card-done">
+            <div style="font-size: 0.9rem; color: #28a745; font-weight: bold;">✅ المكتملة</div>
+            <div style="font-size: 2.2rem; font-weight: 800; color: #28a745; margin-top: 5px;">{completed}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 def render_case_cards(df: pd.DataFrame, allow_actions: bool, pharmacist_name: str, 
                       pharmacy_name: str, is_admin: bool = False):
