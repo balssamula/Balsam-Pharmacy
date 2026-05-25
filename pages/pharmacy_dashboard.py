@@ -193,7 +193,14 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             st.caption("💡 يرجى مراجعة هذه الفروع لتجنب ازدواجية المعالجة")
         
         st.markdown("</div>", unsafe_allow_html=True)
-        
+        if row.get('is_duplicate_warning') == 1 or "تنبيه للمراجعة والتدقيق" in str(row.get('case_reason', '')):
+            st.markdown(f"""
+            <div style="background-color: #fff5f5; border: 1px solid #fc8181; padding: 0.75rem; border-radius: 10px; margin-top: 0.5rem; margin-bottom: 0.5rem;">
+                <p style="color: #c53030; margin: 0; font-size: 0.85rem; font-weight: bold; line-height: 1.4;">
+                    {row['case_reason']}
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
         # حقل الملاحظات
         note_key = f"note_{idx}_{row.get('order_number', '')}_{row.get('sku', '')}"
         note_value = st.text_area("📝 ملحوظة الصيدلي", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
