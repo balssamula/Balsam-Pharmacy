@@ -8,7 +8,8 @@ from openpyxl.utils import get_column_letter
 from utils.database import (
     fetch_active_items, get_completed_items, get_tab_completed_counts, 
     get_old_orders, get_old_invoices, get_old_invoices_stats,
-    check_duplicate_across_branches, get_all_duplicate_items
+    check_duplicate_across_branches, get_all_duplicate_items,
+    save_case_note, mark_case_done
 )
 from utils.helpers import (
     is_cancelled_or_returned_status, is_pending_payment_status, 
@@ -81,33 +82,39 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
     output.seek(0)
     return output.getvalue()
 
-@st.fragment
+
 def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_name):
-    """عرض بطاقة حالة واحدة مع تفاصيلها وأزرار الإجراءات"""
+    """عرض بطاقة حالة واحدة - نسخة مبسطة باستخدام st.container و st.columns"""
     
-    # تعيين لون ومسمى شارة التمييز (Badge) بناءً على نوع الحالة الفعلي
+    # تعيين النص واللون حسب نوع الحالة
     case_type = row.get('case_type', '')
     
     if case_type == 'addition':
         badge_text = "➕ إضافة مخزنية عادية"
-        badge_style = "background:#dff1ff; color:#084298;"
+        badge_color = "#dff1ff"
+        badge_text_color = "#084298"
     elif case_type == 'orphan_salla':
         badge_text = "🛒 طلب مبيعات مفقود الفاتورة"
-        badge_style = "background:#fff3cd; color:#856404; font-weight:bold;"
+        badge_color = "#fff3cd"
+        badge_text_color = "#856404"
     elif case_type == 'return':
         badge_text = "🔄 إرجاع مخزني عادي"
-        badge_style = "background:#ffe0df; color:#491217;"
+        badge_color = "#ffe0df"
+        badge_text_color = "#491217"
     elif case_type == 'orphan_abc':
         badge_text = "📄 فاتورة توريد مفقودة الطلب"
-        badge_style = "background:#f8d7da; color:#721c24; font-weight:bold;"
+        badge_color = "#f8d7da"
+        badge_text_color = "#721c24"
     elif case_type == 'post_cutoff_abc':
         badge_text = "⏰ فاتورة بعد آخر طلب"
-        badge_style = "background:#e2e8f0; color:#475569;"
+        badge_color = "#e2e8f0"
+        badge_text_color = "#475569"
     else:
         badge_text = row.get('case_label', 'حالة عامة')
-        badge_style = "background:#e2e8f0; color:#475569;"
+        badge_color = "#e2e8f0"
+        badge_text_color = "#475569"
 
-    # حساب الفروقات ديناميكياً
+    # حساب الفروقات
     salla_numeric = int(row.get('salla_qty', 0)) if pd.notna(row.get('salla_qty', 0)) else 0
     abc_numeric = int(row.get('abc_qty', 0)) if pd.notna(row.get('abc_qty', 0)) else 0
     diff_value = salla_numeric - abc_numeric
@@ -115,102 +122,101 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
     order_status = row.get('order_status', 'غير متوفرة')
     invoice_date = row.get('invoice_date', '')
     order_date = row.get('order_date', '')
-    unique_key = f"{case_type}_{row.get('order_number', '')}_{row.get('sku', '')}_{idx}"
     
     # التحقق من وجود مكررات
     order_number = str(row.get('order_number', ''))
     sku = str(row.get('sku', ''))
     
-    duplicate_warning = ""
+    duplicates = []
     try:
-        from utils.database import check_duplicate_across_branches
         duplicates = check_duplicate_across_branches(order_number, sku, pharmacy_name)
-        
-        if duplicates:
-            warning_html = f"""
-            <div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px;">
-                <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
-                    <span style="font-size:1.2rem;">⚠️</span>
-                    <span style="color:#856404; font-weight:bold;">تنبيه: يوجد نفس المنتج (SKU: {sku}) في فروع أخرى</span>
+    except Exception as e:
+        pass
+    
+    with st.container():
+        # البطاقة الرئيسية
+        st.markdown(f"""
+        <div style="background:#f8f9fa; border-radius:16px; padding:1rem; margin-bottom:1rem; border-right:5px solid #1f7a8c; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; flex-wrap:wrap;">
+                <span style="background:{badge_color}; color:{badge_text_color}; padding:0.25rem 0.75rem; border-radius:20px; font-size:0.8rem; font-weight:bold;">{badge_text}</span>
+                <div>
+                    <span style="color:#6c757d; font-size:0.75rem;">📅 الطلب: {order_date[:16] if order_date else 'غير محدد'}</span>
+                    <span style="color:#6c757d; font-size:0.75rem; margin-right:0.5rem;">📅 الفاتورة: {invoice_date[:16] if invoice_date else 'غير محدد'}</span>
                 </div>
-                <div style="margin-right:1.5rem;">
-            """
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # تفاصيل البطاقة - 3 أعمدة
+        col1, col2, col3 = st.columns([2, 1, 1.5])
+        
+        with col1:
+            st.markdown(f"""
+            - **📋 رقم الطلب:** {row.get('order_number', 'N/A')}
+            - **🏷️ SKU:** {row.get('sku', 'N/A')}
+            - **📦 المنتج:** {str(row.get('product_name', 'N/A'))[:60]}
+            """)
+        
+        with col2:
+            # تحديد لون الفرق
+            if diff_value > 0:
+                diff_color = "🟢"
+                diff_class = "positive"
+            elif diff_value < 0:
+                diff_color = "🔴"
+                diff_class = "negative"
+            else:
+                diff_color = "⚪"
+                diff_class = "zero"
+            
+            st.markdown(f"""
+            - **🛒 كمية سلة:** {salla_numeric}
+            - **📄 كمية ABC:** {abc_numeric}
+            - **📊 الفرق:** {diff_color} {diff_value}
+            """)
+        
+        with col3:
+            st.markdown(f"""
+            - **🧾 رقم الفاتورة:** {row.get('invoice_number', 'N/A')}
+            - **👤 الصيدلي:** {row.get('abc_pharmacist_name', 'غير معروف')}
+            - **📌 حالة الطلب:** {order_status}
+            """)
+        
+        # تنبيه المكررات
+        if duplicates:
+            st.warning(f"⚠️ **تنبيه:** يوجد نفس المنتج (SKU: {sku}) في الفروع التالية:")
             for dup in duplicates:
                 dup_pharmacy = dup.get('pharmacy', 'غير معروف')
                 dup_status = dup.get('status', 'غير معروف')
                 dup_case = dup.get('case_type', 'غير معروف')
                 dup_invoice = dup.get('invoice_date', '')
-                
-                warning_html += f"""
-                <div style="font-size:0.85rem; margin-bottom:0.4rem; padding:0.3rem 0; border-bottom:1px dashed #ffe0a3;">
-                    🏥 <strong>{dup_pharmacy}</strong> | الحالة: {dup_status} | النوع: {dup_case}
-                    {f' | تاريخ الفاتورة: {dup_invoice[:16]}' if dup_invoice else ''}
-                </div>
-                """
-            warning_html += """
-                </div>
-                <div style="margin-top:0.5rem; font-size:0.8rem; color:#856404;">
-                    💡 يرجى مراجعة هذه الفروع لتجنب ازدواجية المعالجة
-                </div>
-            </div>
-            """
-            duplicate_warning = warning_html
-    except Exception as e:
-        print(f"Error checking duplicates: {e}")
-
-    # عرض البطاقة مع التنبيه
-    st.markdown(f"""
-    <div style="background:#f8f9fa; border-radius:16px; padding:1.2rem; margin-bottom:0.8rem; border-right:5px solid #1f7a8c; box-shadow:0 4px 12px rgba(0,0,0,0.03);">
-        <div style="display:flex; justify-content:space-between; margin-bottom:0.8rem; align-items:center;">
-            <span style="{badge_style} padding:0.3rem 1rem; border-radius:20px; font-size:0.85rem;">{badge_text}</span>
-            <div style="text-align:left;">
-                <span style="color:#6c757d; font-size:0.8rem; margin-left:1rem;">📅 تاريخ الطلب: {order_date[:16] if order_date else 'غير محدد'}</span>
-                <span style="color:#6c757d; font-size:0.8rem;">📅 تاريخ الفاتورة: {invoice_date[:16] if invoice_date else 'غير محدد'}</span>
-            </div>
-        </div>
-        <div style="display:flex; flex-wrap:wrap; gap:1rem;">
-            <div style="flex:2; min-width:200px;">
-                <strong>📋 رقم الطلب / الفاتورة:</strong> {row.get('order_number', '') if pd.notna(row.get('order_number')) else row.get('invoice_number', '')}<br>
-                <strong>🏷️ SKU:</strong> {row.get('sku', '')}<br>
-                <strong>📦 المنتج:</strong> {row.get('product_name', '')[:60]}
-            </div>
-            <div style="flex:1; min-width:120px;">
-                <strong>📊 الكميات المكتشفة:</strong><br>
-                🛒 سلة: {salla_numeric}<br>
-                📄 ABC: {abc_numeric}<br>
-                <strong>📊 الفرق الفعلي:</strong> <span style="color:{'#28a745' if diff_value > 0 else '#dc3545' if diff_value < 0 else '#6c757d'}; font-weight:bold;">{'+' if diff_value > 0 else ''}{diff_value}</span>
-            </div>
-            <div style="flex:1.5; min-width:160px;">
-                <strong>🧾 الفاتورة/الصيدلي:</strong><br>
-                {row.get('invoice_number', '')}/{row.get('abc_pharmacist_name', 'غير معروف')}<br>
-                <strong>📌 حالة الطلب:</strong> <span style="color:#d9534f;">{order_status}</span><br>
-                <strong>🎯 الإجراء المطلوب:</strong> <span style="color:{'#28a745' if diff_value > 0 else '#dc3545' if diff_value < 0 else '#6c757d'}; font-weight:bold;">{'إضافة' if diff_value > 0 else 'إرجاع' if diff_value < 0 else 'مطابق'}</span>
-            </div>
-        </div>
-        {duplicate_warning}
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # حقل الملاحظات والأزرار
-    note_key = f"note_{unique_key}"
-    note_value = st.text_area("📝 ملحوظة الصيدلي", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
-    
-    btn_col1, btn_col2 = st.columns([1, 4])
-    with btn_col1:
-        if st.button("💾 حفظ", key=f"save_{unique_key}", use_container_width=True):
-            from utils.database import save_case_note
-            save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value)
-            st.toast("📋 تم حفظ الملاحظة بنجاح!", icon="💾")
-
-    if allow_actions and row.get("status") != "تم" and diff_value != 0 and case_type in {"addition", "return", "orphan_salla", "orphan_abc"}:
-        button_label = "✅ تأكيد الإضافة" if diff_value > 0 else "🔄 تأكيد الإرجاع"
-        with btn_col2:
-            if st.button(button_label, key=f"done_{unique_key}", use_container_width=True):
-                from utils.database import save_case_note, mark_case_done
+                st.markdown(f"- 🏥 **{dup_pharmacy}** | الحالة: {dup_status} | النوع: {dup_case} {f'| تاريخ الفاتورة: {dup_invoice[:16]}' if dup_invoice else ''}")
+            st.caption("💡 يرجى مراجعة هذه الفروع لتجنب ازدواجية المعالجة")
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+        # حقل الملاحظات
+        note_key = f"note_{idx}_{row.get('order_number', '')}_{row.get('sku', '')}"
+        note_value = st.text_area("📝 ملحوظة الصيدلي", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
+        
+        # الأزرار
+        btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 3])
+        
+        with btn_col1:
+            if st.button("💾 حفظ", key=f"save_{idx}_{note_key}", use_container_width=True):
                 save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value)
-                mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
-                st.toast("✅ تم تأكيد الحالة وإغلاقها!", icon="🚀")
-                st.rerun()
+                st.toast("📋 تم حفظ الملاحظة!", icon="💾")
+        
+        if allow_actions and row.get("status") != "تم" and diff_value != 0 and case_type in {"addition", "return", "orphan_salla", "orphan_abc"}:
+            button_label = "✅ تأكيد الإضافة" if diff_value > 0 else "🔄 تأكيد الإرجاع"
+            with btn_col2:
+                if st.button(button_label, key=f"done_{idx}_{note_key}", use_container_width=True):
+                    save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value)
+                    mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
+                    st.toast("✅ تم تأكيد الحالة!", icon="🚀")
+                    st.rerun()
+        
+        st.markdown("---")
+
 
 def render_case_cards_pharmacy(df: pd.DataFrame, allow_actions: bool, pharmacist_name: str, pharmacy_name: str):
     """عرض بطاقات الحالات للصيدلي"""
@@ -220,89 +226,7 @@ def render_case_cards_pharmacy(df: pd.DataFrame, allow_actions: bool, pharmacist
 
     for idx, row in df.iterrows():
         render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_name)
-        st.markdown("---")
 
-def render_old_invoices_pharmacy(old_invoices_df, pharmacy_name, pharmacist_name):
-    """عرض الفواتير القديمة للصيدلي"""
-    if old_invoices_df.empty:
-        return
-    
-    st.warning(f"⚠️ توجد {len(old_invoices_df)} فاتورة قديمة (أكثر من 6 أشهر) لم يتم إكمالها")
-    
-    for idx, row in old_invoices_df.iterrows():
-        days_old = int(row['days_old'])
-        if days_old > 365:
-            card_color = "#ffcccc"
-            badge = "🔴 قديم جداً"
-        elif days_old > 180:
-            card_color = "#ffe0cc"
-            badge = "🟠 قديم"
-        else:
-            card_color = "#fff3cd"
-            badge = "🟡 يحتاج مراجعة"
-        
-        # 👇 الحل الجذري: تحويل الكميات إلى أرقام وحساب الفرق ديناميكياً بدقة
-        salla_numeric = int(row.get('salla_qty', 0)) if pd.notna(row.get('salla_qty', 0)) else 0
-        abc_numeric = int(row.get('abc_qty', 0)) if pd.notna(row.get('abc_qty', 0)) else 0
-        diff_value = salla_numeric - abc_numeric # حساب ناتج الطرح الفعلي الحالي
-        
-        # تحديد الإجراء المطلوب بناءً على الناتج الرقمي الجديد
-        if diff_value > 0:
-            required_action = "إضافة"
-        elif diff_value < 0:
-            required_action = "إرجاع"
-        else:
-            required_action = "مطابق"
-        invoice_date = row.get('invoice_date', '')
-        
-        with st.container():
-            st.markdown(f"""
-            <div style="background:{card_color};border-radius:16px;padding:1rem;margin-bottom:1rem;border-right:4px solid #dc3545;">
-                <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;">
-                    <span style="background:#dc3545;color:white;padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;">{badge}</span>
-                    <span style="color:#6c757d;">📅 تاريخ الفاتورة: {invoice_date[:16] if invoice_date else ''} | ⏰ {days_old} يوم</span>
-                </div>
-                <div style="display:flex;flex-wrap:wrap;gap:1rem;">
-                    <div style="flex:2;">
-                        <strong>📋 رقم الفاتورة:</strong> {row['invoice_number']}<br>
-                        <strong>🏷️ SKU:</strong> {row['sku']}<br>
-                        <strong>📦 المنتج:</strong> {row['product_name'][:60]}
-                    </div>
-                    <div style="flex:1;">
-                        <strong>📊 الكميات:</strong><br>
-                        🛒 سلة: {int(row['salla_qty'])}<br>
-                        📄 ABC: {int(row['abc_qty'])}<br>
-                        <strong>📊 الفرق:</strong> {diff_value}
-                    </div>
-                    <div style="flex:1.5;">
-                        <strong>🧾 رقم الطلب/الصيدلي:</strong><br>
-                        {row['order_number']}/{row['abc_pharmacist_name'] or 'غير معروف'}<br>
-                        <strong>📌 حالة الطلب:</strong> {row['order_status']}<br>
-                        <strong>🎯 المطلوب:</strong> {required_action}
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            note_key = f"old_invoice_note_{idx}"
-            note_value = st.text_area("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=note_key, height=60)
-            
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                if st.button("💾 حفظ", key=f"save_old_invoice_{idx}"):
-                    from utils.database import save_case_note
-                    save_case_note(row['order_number'], row['sku'], pharmacy_name, row['case_type'], note_value)
-                    st.success("✅ تم حفظ الملحوظة")
-                    st.rerun()
-            
-            if row['status'] != "تم":
-                with col2:
-                    if st.button("✅ تأكيد الإكمال", key=f"complete_old_invoice_{idx}"):
-                        from utils.database import mark_case_done
-                        mark_case_done(row['order_number'], row['sku'], pharmacy_name, row['case_type'], pharmacist_name)
-                        st.success("✅ تم تأكيد إكمال الفاتورة")
-                        st.rerun()
-            st.markdown("---")
 
 def render_old_orders_pharmacy(old_orders_df, pharmacy_name, pharmacist_name):
     """عرض الطلبات القديمة للصيدلي"""
@@ -312,76 +236,126 @@ def render_old_orders_pharmacy(old_orders_df, pharmacy_name, pharmacist_name):
     for idx, row in old_orders_df.iterrows():
         days_old = int(row['days_old'])
         if days_old > 365:
-            card_color = "#ffcccc"
             badge = "🔴 قديم جداً"
         elif days_old > 180:
-            card_color = "#ffe0cc"
             badge = "🟠 قديم"
         else:
-            card_color = "#fff3cd"
             badge = "🟡 يحتاج مراجعة"
         
-        # 👇 الحل الجذري: تحويل الكميات إلى أرقام وحساب الفرق ديناميكياً بدقة
-        salla_numeric = int(row.get('salla_qty', 0)) if pd.notna(row.get('salla_qty', 0)) else 0
-        abc_numeric = int(row.get('abc_qty', 0)) if pd.notna(row.get('abc_qty', 0)) else 0
-        diff_value = salla_numeric - abc_numeric # حساب ناتج الطرح الفعلي الحالي
-        
-        # تحديد الإجراء المطلوب بناءً على الناتج الرقمي الجديد
-        if diff_value > 0:
-            required_action = "إضافة"
-        elif diff_value < 0:
-            required_action = "إرجاع"
-        else:
-            required_action = "مطابق"
+        diff_value = numeric_value(row['difference'])
+        required_action = "إضافة" if diff_value > 0 else "إرجاع" if diff_value < 0 else "مطابق"
         
         with st.container():
             st.markdown(f"""
-            <div style="background:{card_color};border-radius:16px;padding:1rem;margin-bottom:1rem;border-right:4px solid #dc3545;">
-                <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;">
-                    <span style="background:#dc3545;color:white;padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;">{badge}</span>
+            <div style="background:#fff3cd; border-radius:16px; padding:1rem; margin-bottom:1rem; border-right:4px solid #dc3545;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                    <span style="background:#dc3545; color:white; padding:0.2rem 0.8rem; border-radius:20px; font-size:0.8rem;">{badge}</span>
                     <span style="color:#6c757d;">📅 {row['order_date'][:16] if row['order_date'] else ''} | ⏰ {days_old} يوم</span>
-                </div>
-                <div style="display:flex;flex-wrap:wrap;gap:1rem;">
-                    <div style="flex:2;">
-                        <strong>📋 رقم الطلب:</strong> {row['order_number']}<br>
-                        <strong>🏷️ SKU:</strong> {row['sku']}<br>
-                        <strong>📦 المنتج:</strong> {row['product_name'][:60]}
-                    </div>
-                    <div style="flex:1;">
-                        <strong>📊 الكميات:</strong><br>
-                        🛒 سلة: {int(row['salla_qty'])}<br>
-                        📄 ABC: {int(row['abc_qty'])}<br>
-                        <strong>📊 الفرق:</strong> {diff_value}
-                    </div>
-                    <div style="flex:1.5;">
-                        <strong>🧾 الفاتورة/الصيدلي:</strong><br>
-                        {row['invoice_number']}/{row['abc_pharmacist_name'] or 'غير معروف'}<br>
-                        <strong>📌 حالة الطلب:</strong> {row['order_status']}<br>
-                        <strong>🎯 المطلوب:</strong> {required_action}
-                    </div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
             
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(f"""
+                - **📋 رقم الطلب:** {row['order_number']}
+                - **🏷️ SKU:** {row['sku']}
+                - **📦 المنتج:** {row['product_name'][:60]}
+                - **🛒 كمية سلة:** {int(row['salla_qty'])}
+                - **📄 كمية ABC:** {int(row['abc_qty'])}
+                """)
+            with col2:
+                st.markdown(f"""
+                - **🧾 الفاتورة:** {row['invoice_number']}
+                - **👤 الصيدلي:** {row['abc_pharmacist_name'] or 'غير معروف'}
+                - **📌 حالة الطلب:** {row['order_status']}
+                - **📊 الفرق:** {diff_value}
+                - **🎯 المطلوب:** {required_action}
+                """)
+            
             note_key = f"old_note_{idx}"
             note_value = st.text_area("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=note_key, height=60)
             
-            col1, col2 = st.columns([1, 4])
-            with col1:
+            col_btn1, col_btn2 = st.columns([1, 4])
+            with col_btn1:
                 if st.button("💾 حفظ", key=f"save_old_{idx}"):
-                    from utils.database import save_case_note
                     save_case_note(row['order_number'], row['sku'], pharmacy_name, row['case_type'], note_value)
                     st.success("✅ تم حفظ الملحوظة")
                     st.rerun()
             
             if row['status'] != "تم":
-                with col2:
+                with col_btn2:
                     if st.button("✅ تأكيد الإكمال", key=f"complete_old_{idx}"):
-                        from utils.database import mark_case_done
                         mark_case_done(row['order_number'], row['sku'], pharmacy_name, row['case_type'], pharmacist_name)
                         st.success("✅ تم تأكيد إكمال الطلب")
                         st.rerun()
             st.markdown("---")
+
+
+def render_old_invoices_pharmacy(old_invoices_df, pharmacy_name, pharmacist_name):
+    """عرض الفواتير القديمة للصيدلي"""
+    if old_invoices_df.empty:
+        return
+    
+    for idx, row in old_invoices_df.iterrows():
+        days_old = int(row['days_old'])
+        if days_old > 365:
+            badge = "🔴 قديم جداً"
+        elif days_old > 180:
+            badge = "🟠 قديم"
+        else:
+            badge = "🟡 يحتاج مراجعة"
+        
+        diff_value = numeric_value(row['difference'])
+        required_action = "إضافة" if diff_value > 0 else "إرجاع" if diff_value < 0 else "مطابق"
+        invoice_date = row.get('invoice_date', '')
+        
+        with st.container():
+            st.markdown(f"""
+            <div style="background:#fff3cd; border-radius:16px; padding:1rem; margin-bottom:1rem; border-right:4px solid #dc3545;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                    <span style="background:#dc3545; color:white; padding:0.2rem 0.8rem; border-radius:20px; font-size:0.8rem;">{badge}</span>
+                    <span style="color:#6c757d;">📅 تاريخ الفاتورة: {invoice_date[:16] if invoice_date else ''} | ⏰ {days_old} يوم</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(f"""
+                - **📋 رقم الفاتورة:** {row['invoice_number']}
+                - **🏷️ SKU:** {row['sku']}
+                - **📦 المنتج:** {row['product_name'][:60]}
+                - **🛒 كمية سلة:** {int(row['salla_qty'])}
+                - **📄 كمية ABC:** {int(row['abc_qty'])}
+                """)
+            with col2:
+                st.markdown(f"""
+                - **📋 رقم الطلب:** {row['order_number']}
+                - **👤 الصيدلي:** {row['abc_pharmacist_name'] or 'غير معروف'}
+                - **📌 حالة الطلب:** {row['order_status']}
+                - **📊 الفرق:** {diff_value}
+                - **🎯 المطلوب:** {required_action}
+                """)
+            
+            note_key = f"old_invoice_note_{idx}"
+            note_value = st.text_area("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=note_key, height=60)
+            
+            col_btn1, col_btn2 = st.columns([1, 4])
+            with col_btn1:
+                if st.button("💾 حفظ", key=f"save_old_invoice_{idx}"):
+                    save_case_note(row['order_number'], row['sku'], pharmacy_name, row['case_type'], note_value)
+                    st.success("✅ تم حفظ الملحوظة")
+                    st.rerun()
+            
+            if row['status'] != "تم":
+                with col_btn2:
+                    if st.button("✅ تأكيد الإكمال", key=f"complete_old_invoice_{idx}"):
+                        mark_case_done(row['order_number'], row['sku'], pharmacy_name, row['case_type'], pharmacist_name)
+                        st.success("✅ تم تأكيد إكمال الفاتورة")
+                        st.rerun()
+            st.markdown("---")
+
 
 def show():
     pharmacy_name = st.session_state.username
@@ -405,7 +379,7 @@ def show():
         if st.button("📥 تصدير إلى Excel", use_container_width=True):
             st.session_state.show_export_pharmacy = True
 
-    # التحقق من وجود مكررات
+    # التحقق من وجود مكررات عامة
     duplicate_items = get_all_duplicate_items(pharmacy_name)
     if not duplicate_items.empty:
         with st.expander("⚠️ تنبيه: منتجات مكررة عبر الفروع", expanded=True):
@@ -415,34 +389,11 @@ def show():
                 use_container_width=True
             )
 
-    # ========== جلب الفواتير القديمة أولاً لاستخدامها في الاستبعاد ==========
-    old_invoices_df_all = get_old_invoices(pharmacy_name=pharmacy_name, months=6)
-    old_orders_df_all = get_old_orders(pharmacy_name=pharmacy_name, months=6)
-    
-    # إنشاء قائمة بأرقام الفواتير والطلبات القديمة لاستبعادها
-    old_invoice_numbers = set(old_invoices_df_all['invoice_number'].astype(str).tolist()) if not old_invoices_df_all.empty else set()
-    old_order_numbers = set(old_orders_df_all['order_number'].astype(str).tolist()) if not old_orders_df_all.empty else set()
-    
-    def exclude_old_invoices(df_temp):
-        """استبعاد الفواتير القديمة من DataFrame"""
-        if df_temp.empty:
-            return df_temp
-        result_temp = df_temp.copy()
-        # استبعاد الفواتير القديمة (حسب رقم الفاتورة)
-        if 'invoice_number' in result_temp.columns:
-            result_temp = result_temp[~result_temp['invoice_number'].astype(str).isin(old_invoice_numbers)]
-        # استبعاد الطلبات القديمة (حسب رقم الطلب)
-        if 'order_number' in result_temp.columns:
-            result_temp = result_temp[~result_temp['order_number'].astype(str).isin(old_order_numbers)]
-        return result_temp
-
     df = fetch_active_items(pharmacy_name, include_hidden=False)
     
     if df.empty:
         st.info("📭 لا توجد حالات نشطة لهذا الفرع حاليًا.")
         completed_df = get_completed_items(pharmacy_name)
-        completed_df = exclude_old_invoices(completed_df)
-        
         if not completed_df.empty:
             st.markdown("---")
             st.markdown('<div class="section-title">✅ الطلبات المكتملة</div>', unsafe_allow_html=True)
@@ -476,11 +427,8 @@ def show():
         is_locked = df['is_locked'].iloc[0] == 1
     allow_actions = not is_locked
 
-    # ========== استبعاد الفواتير والطلبات القديمة من البيانات النشطة ==========
-    df_filtered = exclude_old_invoices(df)
-    
-    active_mask = ~df_filtered["order_status"].apply(is_cancelled_or_returned_status)
-    active_df = df_filtered[active_mask]
+    active_mask = ~df["order_status"].apply(is_cancelled_or_returned_status)
+    active_df = df[active_mask]
     
     total = len(active_df)
     additions = len(active_df[active_df["case_type"] == "addition"])
@@ -488,7 +436,7 @@ def show():
     orphan_salla = len(active_df[active_df["case_type"] == "orphan_salla"])
     orphan_abc = len(active_df[active_df["case_type"] == "orphan_abc"])
     post_cutoff = len(active_df[active_df["case_type"] == "post_cutoff_abc"])
-    completed = len(df_filtered[df_filtered["status"] == "تم"])
+    completed = len(df[df["status"] == "تم"])
     
     col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
     with col1:
@@ -506,32 +454,31 @@ def show():
     with col7:
         st.metric("✅ تم إنجازها", completed)
 
-    # ========== تجهيز البيانات للتبويبات مع استبعاد القديم ==========
-    branch_add_df = df_filtered[df_filtered['case_type'].isin(['addition', 'orphan_salla']) & active_mask].copy()
+    # تجهيز البيانات للتبويبات
+    branch_add_df = df[df['case_type'].isin(['addition', 'orphan_salla']) & active_mask].copy()
     total_additions_merged = len(branch_add_df)
     completed_additions_merged = len(branch_add_df[branch_add_df["status"] == "تم"])
     pending_additions_merged = total_additions_merged - completed_additions_merged
     
-    branch_ret_df = df_filtered[df_filtered['case_type'].isin(['return', 'orphan_abc']) & active_mask].copy()
+    branch_ret_df = df[df['case_type'].isin(['return', 'orphan_abc']) & active_mask].copy()
     total_returns_merged = len(branch_ret_df)
     completed_returns_merged = len(branch_ret_df[branch_ret_df["status"] == "تم"])
     pending_returns_merged = total_returns_merged - completed_returns_merged
     
-    post_cutoff_df = df_filtered[(df_filtered["case_type"] == "post_cutoff_abc") & active_mask].copy()
+    post_cutoff_df = df[(df["case_type"] == "post_cutoff_abc") & active_mask].copy()
     total_post_cutoff = len(post_cutoff_df)
     completed_post_cutoff = len(post_cutoff_df[post_cutoff_df["status"] == "تم"])
     
-    payment_df = df_filtered[df_filtered["order_status"].apply(is_pending_payment_status) & active_mask].copy()
+    payment_df = df[df["order_status"].apply(is_pending_payment_status) & active_mask].copy()
     total_payment = len(payment_df)
     
-    cancelled_df = df_filtered[df_filtered["order_status"].apply(is_cancelled_or_returned_status)].copy()
+    cancelled_df = df[df["order_status"].apply(is_cancelled_or_returned_status)].copy()
     total_cancelled = len(cancelled_df)
     
     completed_df = get_completed_items(pharmacy_name)
-    completed_df = exclude_old_invoices(completed_df)
     total_completed = len(completed_df)
     
-    # جلب الفواتير القديمة للتبويب المنفصل (بدون استبعاد)
+    # جلب الفواتير القديمة
     old_invoices_df = get_old_invoices(pharmacy_name=pharmacy_name, months=6)
     old_orders_df = get_old_orders(pharmacy_name=pharmacy_name, months=6)
     
@@ -541,37 +488,25 @@ def show():
     
     # تصدير Excel
     if st.session_state.get('show_export_pharmacy', False):
-        # استخدام df_filtered بدلاً من df الأصلي
-        additions_merged = df_filtered[df_filtered['case_type'].isin(['addition', 'orphan_salla']) & active_mask].copy()
-        returns_merged = df_filtered[df_filtered['case_type'].isin(['return', 'orphan_abc']) & active_mask].copy()
+        additions_merged = df[df['case_type'].isin(['addition', 'orphan_salla'])].copy()
+        returns_merged = df[df['case_type'].isin(['return', 'orphan_abc'])].copy()
         
-        # إضافة عمود توضيحي
         additions_merged['نوع التفصيلي'] = additions_merged['case_type'].map({
-            'addition': 'إضافة عادية', 
-            'orphan_salla': 'طلب بدون فاتورة'
+            'addition': 'إضافة عادية', 'orphan_salla': 'طلب بدون فاتورة'
         })
         returns_merged['نوع التفصيلي'] = returns_merged['case_type'].map({
-            'return': 'إرجاع عادي', 
-            'orphan_abc': 'فاتورة بدون طلب'
+            'return': 'إرجاع عادي', 'orphan_abc': 'فاتورة بدون طلب'
         })
         
-        # استبعاد الملغي والمسترجع من بيانات التصدير
-        additions_merged = additions_merged[~additions_merged["order_status"].apply(is_cancelled_or_returned_status)]
-        returns_merged = returns_merged[~returns_merged["order_status"].apply(is_cancelled_or_returned_status)]
-        
-        # استبعاد القديم أيضاً
-        additions_merged = exclude_old_invoices(additions_merged)
-        returns_merged = exclude_old_invoices(returns_merged)
-        
         export_data = {
-            "01_الإضافات_والطلبات_بدون_فاتورة": additions_merged,
-            "02_الإرجاعات_والفواتير_بدون_طلب": returns_merged,
-            "03_فواتير_بعد_آخر_طلب": post_cutoff_df,
-            "04_بانتظار_الدفع": payment_df,
-            "05_ملغي_ومسترجع": cancelled_df,
-            "06_تم_الانتهاء": completed_df,
-            "07_الطلبات_القديمة": old_orders_df,
-            "08_الفواتير_القديمة": old_invoices_df
+            "الإضافات_والطلبات_بدون_فاتورة": additions_merged,
+            "الإرجاعات_والفواتير_بدون_طلب": returns_merged,
+            "فواتير_بعد_آخر_طلب": post_cutoff_df,
+            "بانتظار_الدفع": payment_df,
+            "ملغي_ومسترجع": cancelled_df,
+            "تم_الانتهاء": completed_df,
+            "الطلبات_القديمة": old_orders_df,
+            "الفواتير_القديمة": old_invoices_df
         }
         excel_data = export_to_excel(export_data, pharmacy_name)
         st.download_button(
@@ -600,7 +535,7 @@ def show():
     </style>
     """, unsafe_allow_html=True)
     
-    # ========== التبويبات مع إضافة تبويب الفواتير القديمة ==========
+    # التبويبات
     tab_additions, tab_returns, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices = st.tabs([
         f"📥 الإضافات والطلبات المفقودة ({tab_additions_count})",
         f"📤 الإرجاعات والفواتير المعلقة ({tab_returns_count})",
