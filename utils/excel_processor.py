@@ -1,9 +1,10 @@
+import os
 import pandas as pd
 import numpy as np
 import sqlite3
 import uuid
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from utils.helpers import (
     normalize_order_number, normalize_sku, normalize_text,
     determine_branch, get_branch_number, is_gift_or_promotion, now_str
@@ -428,49 +429,26 @@ def process_excel(uploaded_file, uploaded_by: str):
             import sqlite3
     
             db_conn = sqlite3.connect(DB_PATH, timeout=60.0)
+            db_conn = sqlite3.connect(DB_PATH, timeout=60.0)
             try:
-                # تحويل خيار الإدراج في SQLite ليتعامل مع التصادم بمرونة (بدون انهيار السيرفر)
-                # خيار 'INSERT OR REPLACE' يقوم بتحديث البيانات إذا تكرر المفتاح، و 'INSERT OR IGNORE' يتخطاه بأمان
                 sqlite3.register_adapter(int, lambda x: int(x))
                 sqlite3.register_adapter(float, lambda x: float(x))
         
-                # تنفيذ الإدراج الآمن عبر الحزم
                 from pandas.io import sql
                 pandas_sql = sql.SQLiteDatabase(db_conn)
         
-                # حقن آلية الاستبدال الذكي عند تصادم المفاتيح الفريدة
                 with db_conn:
-                    # نقوم بإنشاء جدول مؤقت أو إدراج مباشر مع تغيير جملة الإدخال الافتراضية للـ SQLite
                     cursor = db_conn.cursor()
-            
-                    # استخراج أسماء الأعمدة وقيمها كقائمة لتجهيز الاستعلام الجمعي الآمن
                     columns = list(insert_df.columns)
                     placeholders = ", ".join(["?"] * len(columns))
                     sql_query = f"INSERT OR REPLACE INTO reconciliation_items ({', '.join(columns)}) VALUES ({placeholders})"
             
-                    # تنفيذ الإدخال الجمعي فائق السرعة والأمان
                     cursor.executemany(sql_query, insert_df.values.tolist())
             
             finally:
                 db_conn.close()
         
-        # تعطيل العناصر القديمة وتفعيل الجلسة الحالية
-        cur.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
-        cur.execute("UPDATE uploads SET is_active = 0")
-        cur.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
-        session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
-        cur.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
-        
-        conn.commit()
-        
-    except Exception as e:
-        print(f"Error in process_excel: {e}")
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-    
-    return results, upload_batch_id
+            return results, upload_batch_id #
 
 
 def update_balances(abc_file, salla_file):
