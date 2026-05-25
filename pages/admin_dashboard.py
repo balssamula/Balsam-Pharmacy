@@ -99,34 +99,15 @@ def compare_sessions(session1_id: str, session2_id: str) -> pd.DataFrame:
     })
 
 def styled_dataframe(input_df):
-    """تنسيق DataFrame مع تمييز الألوان حسب نوع الحالة"""
+    """تنسيق DataFrame مع تمييز الألوان حسب نوع الحالة - نسخة مبسطة"""
     if input_df.empty:
-        return None
-        
-    def highlight_rows(row):
-        # تحويل القيم إلى سلاسل نصية للتعامل الآمن
-        case_type = str(row.get('case_type', '')).strip() if 'case_type' in row else ''
-        status = str(row.get('status', '')).strip() if 'status' in row else ''
-        
-        # 1. الحالات المكتملة (أخضر فاتح)
-        if status == "تم":
-            return ['background-color: #d4edda; color: #155724;'] * len(row)
-            
-        # 2. تمييز الحالات داخل التبويبات المدمجة
-        if case_type in ['orphan_salla', 'orphan_abc']:
-            return ['background-color: #fff3cd; color: #856404;'] * len(row)
-        elif case_type == 'return':
-            return ['background-color: #ffe0df; color: #491217;'] * len(row)
-        elif case_type == 'addition':
-            return ['background-color: #dff1ff; color: #084298;'] * len(row)
-            
-        return [''] * len(row)
+        return input_df
     
     display_df = input_df.copy()
     
     # إضافة عمود type_label لتوضيح نوع الحالة
     if 'case_type' in display_df.columns:
-        display_df['type_label'] = display_df['case_type'].map({
+        display_df['نوع الحالة'] = display_df['case_type'].map({
             'addition': '➕ إضافة عادية',
             'return': '🔄 إرجاع عادي',
             'orphan_salla': '🛒 طلب بدون فاتورة (سلة)',
@@ -134,7 +115,8 @@ def styled_dataframe(input_df):
             'post_cutoff_abc': '⏰ فاتورة بعد آخر طلب'
         }).fillna(display_df['case_type'])
     
-    display_df = display_df.rename(columns={
+    # إعادة تسمية الأعمدة
+    rename_map = {
         "order_number": "رقم الطلب",
         "invoice_number": "رقم الفاتورة",
         "sku": "SKU",
@@ -144,144 +126,141 @@ def styled_dataframe(input_df):
         "abc_qty": "كمية ABC",
         "difference": "الفرق",
         "order_status": "حالة الطلب",
-        "type_label": "نوع الحالة",
         "status": "الحالة"
-    })
-    return display_df.style.apply(highlight_rows, axis=1)
+    }
+    
+    for old_col, new_col in rename_map.items():
+        if old_col in display_df.columns:
+            display_df[new_col] = display_df[old_col]
+            if old_col != new_col:
+                display_df = display_df.drop(columns=[old_col])
+    
+    # إضافة عمود الفرق الملون (كنص)
+    if 'difference' in input_df.columns:
+        display_df['الفرق'] = display_df['difference'].apply(
+            lambda x: f"🟢 +{x}" if x > 0 else (f"🔴 {x}" if x < 0 else "⚪ 0")
+        )
+    
+    # تحديد الأعمدة النهائية للعرض
+    final_columns = ["رقم الطلب", "رقم الفاتورة", "SKU", "المنتج", "الفرع", 
+                     "كمية سلة", "كمية ABC", "الفرق", "نوع الحالة", "حالة الطلب", "الحالة"]
+    
+    available_columns = [col for col in final_columns if col in display_df.columns]
+    display_df = display_df[available_columns]
+    
+    return display_df
 
 def render_table_with_click(df, tab_name, allow_move: bool = True):
-    """عرض جدول مع إمكانية تحديد الصف وإظهار إجراءات منبثقة"""
+    """عرض جدول مع إمكانية تحديد الصف وإظهار إجراءات منبثقة - نسخة محسنة"""
     if df.empty:
         st.success("لا توجد بيانات في هذا القسم.")
         return
     
-    styled_df = styled_dataframe(df)
-    if styled_df is not None:
-        event = st.dataframe(
-            styled_df,
-            use_container_width=True,
-            height=400,
-            selection_mode="single-row",
-            on_select="rerun"
-        )
+    # استخدام DataFrame المنسق بدون styling معقد
+    display_df = styled_dataframe(df)
+    
+    if display_df is not None and not display_df.empty:
+        # عرض الجدول بدون تحديد صف (لتجنب الأخطاء مع البيانات الكبيرة)
+        # أو استخدام selectbox للاختيار بدلاً من تحديد الصف المباشر
         
-        if event.selection.rows:
-            selected_idx = event.selection.rows[0]
-            if 0 <= selected_idx < len(df):
+        # طريقة 1: عرض الجدول العادي
+        st.dataframe(display_df, use_container_width=True, height=400)
+        
+        # طريقة 2: إضافة قائمة منسدلة لاختيار الصف
+        if len(df) > 0:
+            st.markdown("---")
+            st.markdown("### 🛠️ إجراءات الصف")
+            
+            # إنشاء قائمة خيارات للصفوف
+            row_options = []
+            for idx, row in df.iterrows():
+                order_num = row.get('order_number', 'N/A')
+                sku = row.get('sku', 'N/A')
+                product = str(row.get('product_name', 'N/A'))[:30]
+                row_options.append(f"{idx}: طلب {order_num} - SKU: {sku} - {product}")
+            
+            selected_row_str = st.selectbox("اختر الصف للإجراءات", row_options, key=f"select_{tab_name}")
+            selected_idx = int(selected_row_str.split(':')[0]) if selected_row_str else None
+            
+            if selected_idx is not None and 0 <= selected_idx < len(df):
                 row = df.iloc[selected_idx]
                 item_key = row.get('item_key', '')
                 
-                # ========== التحقق من وجود مكررات ==========
-                order_number = str(row.get('order_number', ''))
-                sku = str(row.get('sku', ''))
-                current_pharmacy = row.get('pharmacy_name', '')
-                
-                duplicate_warning = ""
-                try:
-                    from utils.database import check_duplicate_across_branches
-                    duplicates = check_duplicate_across_branches(order_number, sku, current_pharmacy)
-                    
-                    if duplicates:
-                        duplicate_warning = f"""
-                        <div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem;">
-                            <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
-                                <span style="font-size:1.2rem;">⚠️</span>
-                                <span style="color:#856404; font-weight:bold;">تنبيه: يوجد نفس المنتج (SKU: {sku}) في فروع أخرى</span>
-                            </div>
-                            <div style="margin-right:1.5rem;">
-                        """
-                        for dup in duplicates:
-                            dup_pharmacy = dup.get('pharmacy', 'غير معروف')
-                            dup_status = dup.get('status', 'غير معروف')
-                            dup_case = dup.get('case_type', 'غير معروف')
-                            dup_invoice = dup.get('invoice_date', '')
-                            
-                            duplicate_warning += f"""
-                            <div style="font-size:0.85rem; margin-bottom:0.4rem; padding:0.3rem 0; border-bottom:1px dashed #ffe0a3;">
-                                🏥 <strong>{dup_pharmacy}</strong> | الحالة: {dup_status} | النوع: {dup_case}
-                                {f' | تاريخ الفاتورة: {dup_invoice[:16]}' if dup_invoice else ''}
-                            </div>
-                            """
-                        duplicate_warning += """
-                            </div>
-                        </div>
-                        """
-                except Exception as e:
-                    pass
-                
                 st.markdown(f"""
-                <div style="background:#f0f2f6;border-radius:10px;padding:1rem;margin-top:1rem;border-right:4px solid #1f7a8c;">
-                    <h4 style="margin:0 0 0.5rem 0;">🛠️ إجراءات الصف المحدد</h4>
-                    <p><strong>📋 رقم الطلب:</strong> {row['order_number']} | 
-                    <strong>🏷️ SKU:</strong> {row['sku']} | 
-                    <strong>📦 المنتج:</strong> {row['product_name'][:50]}</p>
+                <div style="background:#f0f2f6;border-radius:10px;padding:1rem;margin-top:0.5rem;border-right:4px solid #1f7a8c;">
+                    <p><strong>📋 رقم الطلب:</strong> {row.get('order_number', 'N/A')} | 
+                    <strong>🏷️ SKU:</strong> {row.get('sku', 'N/A')} | 
+                    <strong>📦 المنتج:</strong> {str(row.get('product_name', 'N/A'))[:50]}</p>
                     <p><strong>🏥 الفرع الحالي:</strong> {row.get('pharmacy_name', 'غير محدد')}</p>
-                    {duplicate_warning}
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # الصف الأول من الأزرار
-                col1, col2, col3, col4 = st.columns(4)
+                # أزرار الإجراءات في أعمدة
+                cols = st.columns(5 if allow_move else 4)
+                col_idx = 0
                 
                 # زر الإخفاء/الإظهار
                 is_hidden = row.get('hidden_from_pharmacy', 0) == 1
-                if col1.button("🙈 إخفاء" if not is_hidden else "👁️ إظهار", key=f"hide_{tab_name}_{selected_idx}", use_container_width=True):
+                if cols[col_idx].button("🙈 إخفاء" if not is_hidden else "👁️ إظهار", key=f"hide_{tab_name}_{selected_idx}", use_container_width=True):
                     if is_hidden:
                         unhide_item_from_pharmacy(item_key)
                     else:
                         hide_item_from_pharmacy(item_key, st.session_state.username)
                     st.rerun()
+                col_idx += 1
                 
                 # زر القفل/الفتح
                 is_locked = row.get('is_item_locked', 0) == 1
-                if col2.button("🔒 قفل" if not is_locked else "🔓 فتح", key=f"lock_{tab_name}_{selected_idx}", use_container_width=True):
+                if cols[col_idx].button("🔒 قفل" if not is_locked else "🔓 فتح", key=f"lock_{tab_name}_{selected_idx}", use_container_width=True):
                     if is_locked:
                         unlock_item(item_key)
                     else:
                         lock_item(item_key, st.session_state.username)
                     st.rerun()
+                col_idx += 1
                 
-                # زر إعادة الفتح (للحالات المكتملة فقط)
-                if row['status'] == "تم":
-                    if col3.button("🔄 إعادة فتح", key=f"reopen_{tab_name}_{selected_idx}", use_container_width=True):
+                # زر إعادة الفتح
+                if row.get('status') == "تم":
+                    if cols[col_idx].button("🔄 إعادة فتح", key=f"reopen_{tab_name}_{selected_idx}", use_container_width=True):
                         reopen_case_by_item_key(item_key)
                         st.rerun()
+                col_idx += 1
                 
-                # الصف الثاني من الأزرار (النقل والملحوظة)
-                if allow_move and row['status'] != "تم":
-                    st.markdown("---")
-                    col_a, col_b, col_c, col_d = st.columns([2, 1, 2, 1])
-                    
+                # نقل إلى فرع آخر
+                if allow_move and row.get('status') != "تم":
                     current_branch = row.get('pharmacy_name', '')
                     branches = get_available_branches(current_branch)
                     
                     if branches:
-                        selected_branch = col_a.selectbox(
-                            "🏥 نقل إلى فرع",
+                        selected_branch = cols[col_idx].selectbox(
+                            "🏥",
                             branches,
-                            key=f"move_branch_{tab_name}_{selected_idx}"
+                            key=f"move_branch_{tab_name}_{selected_idx}",
+                            label_visibility="collapsed"
                         )
+                        col_idx += 1
                         
-                        if col_b.button("🚚 نقل", key=f"move_{tab_name}_{selected_idx}", use_container_width=True):
+                        if cols[col_idx].button("🚚 نقل", key=f"move_{tab_name}_{selected_idx}", use_container_width=True):
                             if move_item_to_branch(item_key, selected_branch, st.session_state.username):
                                 st.success(f"✅ تم نقل العنصر إلى {selected_branch}")
                                 st.rerun()
                             else:
                                 st.error("❌ فشل نقل العنصر")
-                    
-                    note = col_c.text_input("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=f"note_{tab_name}_{selected_idx}")
-                    
-                    if col_d.button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
-                        save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note)
-                        st.rerun()
+                        col_idx += 1
+                    else:
+                        cols[col_idx].write("⚠️ لا فروع")
+                        col_idx += 2
                 else:
-                    # إذا كان النقل غير مسموح، نعرض فقط الملحوظة
-                    st.markdown("---")
-                    col_a, col_b = st.columns([3, 1])
-                    note = col_a.text_input("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=f"note_{tab_name}_{selected_idx}")
-                    if col_b.button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
-                        save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note)
-                        st.rerun()
+                    if allow_move:
+                        col_idx += 2
+                
+                # ملحوظة وحفظ
+                note = cols[col_idx].text_input("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=f"note_{tab_name}_{selected_idx}")
+                col_idx += 1
+                
+                if cols[col_idx].button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
+                    save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note)
+                    st.rerun()
 
 def render_old_items_table(df, title, is_orders=True):
     if df.empty:
