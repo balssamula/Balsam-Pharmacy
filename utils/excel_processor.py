@@ -105,7 +105,7 @@ def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
     return grouped
     
 def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
-    """معالجة شيت ABC - مع الحفاظ على تعدد الفروع"""
+    """معالجة شيت ABC - إنشاء سطر منفصل لكل فرع للحفاظ على تعدد الفروع"""
     df = df_abc.copy()
     
     # إزالة صفوف الإجمالي (subtotal)
@@ -170,7 +170,12 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
     
-    # تجميع البيانات مع الحفاظ على تعدد الفروع (تجميع حسب order_number, sku, والفرع)
+    # ========== التعديل الأساسي: نضيف عمود للتمييز ==========
+    # إضافة عمود للتمييز بين الفروع المختلفة
+    df["branch_key"] = df["order_number"] + "||" + df["sku"] + "||" + df["abc_pharmacy_name"]
+    
+    # تجميع البيانات مع الحفاظ على تعدد الفروع
+    # نستخدم groupby على order_number, sku, والفرع معاً
     grouped = df.groupby(["order_number", "sku", "abc_pharmacy_name"], as_index=False).agg({
         "abc_qty": "sum",
         "invoice_number": "first",
@@ -181,6 +186,9 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
         "receipt_classification": lambda x: " | ".join(sorted({normalize_text(v) for v in x if normalize_text(v)})),
         "all_abc_pharmacies": lambda x: " | ".join(sorted({normalize_text(v) for v in x if normalize_text(v)}))
     })
+    
+    # إضافة معلومات الفروع المتعددة كحقل منفصل
+    grouped["other_branch_details"] = ""
     
     return grouped
 
@@ -193,7 +201,9 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     if salla_grouped.empty and abc_grouped.empty:
         return pd.DataFrame()
     
-    # دمج مع الحفاظ على تعدد الفروع
+    # ========== دمج البيانات مع الحفاظ على تعدد الفروع ==========
+    # ندمج على order_number و sku فقط (بدون الفرع)
+    # ثم سنكرر الصفوف من سلة لكل فرع في ABC
     merged = pd.merge(salla_grouped, abc_grouped, on=["order_number", "sku"], how="outer", indicator=True)
     
     # تعبئة القيم المفقودة
@@ -219,9 +229,11 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     merged["product_name"] = merged["salla_product_name"]
     merged.loc[merged["product_name"].eq(""), "product_name"] = merged.loc[merged["product_name"].eq(""), "abc_product_name"]
     
-    # تعبئة اسم الصيدلية - الحفاظ على اسم الفرع
+    # ========== تعبئة اسم الصيدلية - الأهم: الحفاظ على تعدد الفروع ==========
     # نعطي الأولوية لاسم الفرع من ABC إذا كان موجوداً
     merged["pharmacy_name"] = merged["salla_pharmacy_name"]
+    
+    # إذا كان هناك abc_pharmacy_name، نستخدمه (وهذا يحافظ على تعدد الفروع)
     abc_mask = (merged["abc_pharmacy_name"] != "") & (merged["abc_pharmacy_name"] != "nan")
     merged.loc[abc_mask, "pharmacy_name"] = merged.loc[abc_mask, "abc_pharmacy_name"]
     
@@ -254,13 +266,13 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     result = merged[merged["case_type"] != ""].copy()
     result["case_label"] = result["case_type"]
     
-    # إنشاء item_key فريد (بما في ذلك اسم الفرع لضمان عدم الدمج)
+    # ========== إنشاء item_key فريد (بما في ذلك اسم الفرع لضمان عدم الدمج) ==========
     result["item_key"] = result.apply(
         lambda r: f"{r['pharmacy_name']}||{r['order_number']}||{r['sku']}||{r['case_type']}", 
         axis=1
     )
     
-    # الأعمدة المطلوبة للنتيجة - فقط الأعمدة الموجودة في قاعدة البيانات
+    # الأعمدة المطلوبة للنتيجة
     ordered_columns = [
         "item_key", "order_number", "invoice_number", "sku", "product_name",
         "salla_product_name", "abc_product_name", "pharmacy_name",
@@ -279,7 +291,7 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         if col not in result.columns:
             result[col] = ""
     
-    # إزالة أي أعمدة إضافية غير موجودة في قاعدة البيانات
+    # إزالة أي أعمدة إضافية
     result = result[ordered_columns]
     
     return result
