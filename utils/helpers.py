@@ -39,13 +39,35 @@ def is_pending_payment_status(status_text: str) -> bool:
     # دعم كتابات مختلفة لكلمة "بانتظار"
     return any([
         "بانتظار الدفع" in status,
-        "بانتظار الدفع" in status,  # بنفس الشكل
+        "بإنتظار الدفع" in status,  # بنفس الشكل
         "بانتظار الدفع" in status,  # بشكل مختلف
         "انتظار الدفع" in status,
         "Pending Payment" in status,
         "pending payment" in status.lower()
     ])
 
+def normalize_order_status(status_text: str) -> str:
+    """توحيد كتابة حالات الطلب"""
+    status = normalize_text(status_text)
+    
+    # توحيد "بانتظار الدفع"
+    if "بإنتظار الدفع" in status or "انتظار الدفع" in status:
+        return "بانتظار الدفع"
+    
+    # توحيد "ملغي"
+    if "ملغي" in status or "الغي" in status:
+        return "ملغي"
+    
+    # توحيد "مسترجع"
+    if "مسترجع" in status:
+        return "مسترجع"
+    
+    # توحيد "تم التوصيل"
+    if "تم التوصيل" in status or "توصيل" in status:
+        return "تم التوصيل"
+    
+    return status
+    
 def is_gift_or_promotion(customer_name: str) -> bool:
     name = normalize_text(customer_name)
     gift_keywords = ["هدية", "دعاية", "gift", "promotion", "free", "sample", "اختبار", "test"]
