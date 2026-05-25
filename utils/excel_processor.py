@@ -295,13 +295,13 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         # السيناريو 5: سلة=10، فرع1=5 (تظهر كإضافة عادية)
         if not matched and salla_q > abc_q and abc_q > 0:
             merged.at[idx, "case_type"] = "addition"
-            merged.at[idx, "case_reason"] = f"كمية طلب سلة ({int(salla_q)}) أكبر من كمية الفاتورة في هذا الفرع ({int(abc_q)})."
+            merged.at[idx, "case_reason"] = f"كمية طلب سلة ({int(salla_q)}) أكبر من كمية الفاتورة في هذا الفرع ({int(abc_q)}). العجز يتطلب إضافة مخزنية."
             continue
 
         # السيناريو 7: سلة=10، فرع1=11 (الكمية في ABC أكبر - إرجاع مخزني عادي)
         if abc_q > salla_q:
             merged.at[idx, "case_type"] = "return"
-            merged.at[idx, "case_reason"] = f"كمية الفاتورة الموردة بالفرع ({int(abc_q)}) أكبر من كمية طلب سلة المدفوعة ({int(salla_q)})."
+            merged.at[idx, "case_reason"] = f"كمية الفاتورة الموردة بالفرع ({int(abc_q)}) أكبر من كمية طلب سلة المدفوعة ({int(salla_q)}). الزيادة تتطلب إرجاع مخزني."
             continue
 
         # الحالات المعزولة المستندية (طلبات مفقودة الفاتورة أو فواتير زائدة بدون مبيعات)
