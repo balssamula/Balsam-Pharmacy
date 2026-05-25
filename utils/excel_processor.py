@@ -331,17 +331,16 @@ def process_excel(uploaded_file, username):
         sqlite3.register_adapter(int, lambda x: int(x))
         sqlite3.register_adapter(float, lambda x: float(x))
         
-        # تفادي خطأ التصادم UNIQUE Constraint عبر استخدام آلية الاستبدال والتحديث الذكي
         with db_conn:
             cursor = db_conn.cursor()
             columns = list(insert_df.columns)
             placeholders = ", ".join(["?"] * len(columns))
             sql_query = f"INSERT OR REPLACE INTO reconciliation_items ({', '.join(columns)}) VALUES ({placeholders})"
             
-            # تنفيذ الإدراج الجمعي الآمن المقسم لحزم لمنع الـ SQL Variables Limit
+            # تنفيذ الإدراج الجمعي الآمن
             cursor.executemany(sql_query, insert_df.values.tolist())
             
-            # 📊 حقن وتدشين الكود الخاص بك لتنشيط وأرشفة الجلسات الحالية بأمان وثبات محاذي
+            # تحديث وتنشيط الجلسة الحالية وأرشفة القديمة
             cursor.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
             cursor.execute("UPDATE uploads SET is_active = 0")
             cursor.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
@@ -356,7 +355,7 @@ def process_excel(uploaded_file, username):
         raise e
         
     finally:
-        # إغلاق موصل قاعدة البيانات دائماً وأبداً لمنع تجمد السيرفر السحابي
+        # إغلاق الاتصال لمنع تعليق أو قفل قاعدة البيانات السحابية
         db_conn.close()
         
     return results, upload_batch_id
