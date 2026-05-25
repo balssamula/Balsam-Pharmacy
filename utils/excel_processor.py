@@ -429,7 +429,6 @@ def process_excel(uploaded_file, uploaded_by: str):
             import sqlite3
     
             db_conn = sqlite3.connect(DB_PATH, timeout=60.0)
-            db_conn = sqlite3.connect(DB_PATH, timeout=60.0)
             try:
                 sqlite3.register_adapter(int, lambda x: int(x))
                 sqlite3.register_adapter(float, lambda x: float(x))
