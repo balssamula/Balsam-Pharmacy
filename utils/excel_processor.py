@@ -331,21 +331,24 @@ def process_excel(uploaded_file, username):
         sqlite3.register_adapter(int, lambda x: int(x))
         sqlite3.register_adapter(float, lambda x: float(x))
         
+        # 🧠 توليد وتثبيت رقم الجلسة المفقود برمجياً في هذه اللحظة ليكون متاحاً لكافة الأسطر
+        import uuid
+        upload_batch_id = f"batch_{uuid.uuid4().hex[:8]}_{datetime.now().strftime('%m%d%H%M')}"
+        
         with db_conn:
-            # توحيد المؤشر البرمجي ليكون 'cursor' في كامل البلوك منعا لأخطاء التسمية
             cursor = db_conn.cursor()
             
-            # تجهيز الحقول الإضافية المطلوبة لقاعدة البيانات مباشرة داخل فريم النتائج المستقر
+            # حقن وتجهيز الحقول الإضافية المطلوبة لقاعدة البيانات مباشرة داخل فريم النتائج الجاهز
             results['upload_batch_id'] = upload_batch_id
             results['status'] = 'قيد المتابعة'
             results['pharmacist_note'] = ''
-            results['first_seen_at'] = now_str()
-            results['last_seen_at'] = now_str()
+            results['first_seen_at'] = now_str() if 'now_str' in globals() else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            results['last_seen_at'] = now_str() if 'now_str' in globals() else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             results['active'] = 1
             results['hidden_from_pharmacy'] = 0
             results['is_item_locked'] = 0
             
-            # استخراج قائمة أسماء الأعمدة المتواجدة في فريم النتائج الفعلي لضمان مطابقة الـ SQL
+            # استخراج قائمة أسماء الأعمدة الفعلية لضمان مطابقة الـ SQL
             columns = list(results.columns)
             placeholders = ", ".join(["?"] * len(columns))
             sql_query = f"INSERT OR REPLACE INTO reconciliation_items ({', '.join(columns)}) VALUES ({placeholders})"
@@ -353,13 +356,13 @@ def process_excel(uploaded_file, username):
             # تنفيذ الإدراج الجمعي السريع والآمن فورا للسيناريوهات السبعة
             cursor.executemany(sql_query, results.values.tolist())
                   
-            # تعطيل العناصر القديمة وتفعيل الجلسة الحالية وإغلاق القديمة عبر نفس الـ cursor الموحد
+            # تعطيل العناصر القديمة وتفعيل الجلسة الحالية وإغلاق القديمة عبر الـ cursor الموحد
             cursor.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
             cursor.execute("UPDATE uploads SET is_active = 0")
             cursor.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
             
-            # حساب وقت الجلسة بتوقيت السعودية المستقر وتحديث الحقل
-            session_name = (datetime.utcnow() + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M")
+            # حساب وتحديث اسم الجلسة الإحصائية الحالية بالتوقيت المستقر
+            session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
             cursor.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
             
             db_conn.commit()
@@ -369,10 +372,10 @@ def process_excel(uploaded_file, username):
         db_conn.rollback()
         raise e
     finally:
-        # إغلاق قاعدة البيانات لمنع تجمد السيرفر السحابي أو حدوث Locked
+        # إغلاق قاعدة البيانات دائماً وأبداً لمنع تجمد السيرفر السحابي أو حدوث Locked
         db_conn.close()
     
-    # سطر الإرجاع النهائي والنظيف للدالة لإرسال النتائج للداشبورد
+    # سطر الإرجاع النهائي والنظيف للدالة لإرسال النتائج للداشبورد بنجاح
     return results, upload_batch_id
 
 def update_balances(abc_file, salla_file):
