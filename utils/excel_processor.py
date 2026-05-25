@@ -192,34 +192,42 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
 
 def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame:
     """
-    تجميع كامل لحالات الإضافات والنواقص والسيناريوهات السبعة لفرز الفروع
+    تجميع كامل ودقيق لجميع أصناف الإضافات والنواقص مع استبعاد كامل للطلبات الملغية والمسترجعة
     """
+    # 1. تطهير وفلترة شيت سلة قبل البدء (استبعاد الحالات الملغية والمسترجعة تماماً)
+    if "order_status" in df_salla.columns:
+        df_salla['order_status_clean'] = df_salla['order_status'].astype(str).str.strip()
+        # استبعاد الكلمات المفتاحية للملغي والمسترجع
+        invalid_status_mask = df_salla['order_status_clean'].str.contains("ملغي|مسترجع|cancelled|returned|refunded", na=False, case=False)
+        df_salla = df_salla[~invalid_status_mask].copy()
+
+    # 2. تجهيز وتجميع البيانات للفروع
     salla_grouped = prepare_salla_frame(df_salla)
     abc_grouped = prepare_abc_frame(df_abc)
     
     if salla_grouped.empty and abc_grouped.empty:
         return pd.DataFrame()
         
-    # حساب المجموع الكلي للكميات في ABC لكل رقم طلب وصنف
+    # حساب المجموع الكلي لكميات ABC لكل رقم طلب وصنف
     abc_total_qty = abc_grouped.groupby(["order_number", "sku"])["abc_qty"].sum().reset_index()
     abc_total_qty.rename(columns={"abc_qty": "abc_total_qty"}, inplace=True)
     
-    # دمج شيت سلة مع مجموع ABC الكلي لمعرفة مطابقة الكمية الإجمالية
+    # دمج بيانات سلة النشطة مع المجموع الإجمالي لـ ABC
     salla_with_total = pd.merge(salla_grouped, abc_total_qty, on=["order_number", "sku"], how="left")
     salla_with_total["abc_total_qty"] = salla_with_total["abc_total_qty"].fillna(0)
     salla_with_total["total_matched"] = salla_with_total["salla_qty"] == salla_with_total["abc_total_qty"]
     
-    # الدمج الخارجي الكامل مع فروع ABC بالتفصيل للفرز السطري
+    # الدمج الخارجي الشامل مع تفاصيل الفروع
     merged = pd.merge(salla_with_total, abc_grouped, on=["order_number", "sku"], how="outer", indicator=True)
     
-    # تصحيح وتطهير القيم الرقمية لمنع أخطاء المعالجة الحسابية
+    # تنظيف وتطهير الأعمدة الرقمية
     for col in ["salla_qty", "abc_qty", "total_amount", "abc_total_qty"]:
         if col in merged.columns:
             merged[col] = pd.to_numeric(merged[col], errors="coerce").fillna(0)
             
     merged["total_matched"] = merged["total_matched"].fillna(False)
     
-    # تعبئة الأعمدة النصية لضمان سلامة الهيكل البرمجي لقاعدة البيانات
+    # تجهيز وتعبئة الأعمدة النصية لمنع الـ NaN في قاعدة البيانات
     text_cols = [
         "salla_product_name", "abc_product_name", "customer_name", "customer_phone", "city",
         "order_status", "order_date", "invoice_number", "invoice_date", "salla_pharmacy_name",
@@ -229,10 +237,10 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         if col not in merged.columns: merged[col] = ""
         merged[col] = merged[col].fillna("").astype(str)
         
-    # دمج مسميات المنتجات والفروع بطريقة Pandas الآمنة وتفادي الاختفاء
+    # دمج مسميات المنتجات والفروع بطريقة آمنة
     merged["product_name"] = merged["salla_product_name"].where(merged["salla_product_name"].str.strip() != "", merged["abc_product_name"])
     
-    # 🧠 التوجيه الحاسم: إذا كان فرع ABC فارغاً (حالة طلب بدون فاتورة) يتم إسناد فرع سلة فوراً لمنع سقوط السجل
+    # التوجيه الذكي: إذا كانت الفاتورة مفقودة من فرع ABC، نسند فرع سلة فوراً لمنع سقوط الصنف
     merged["pharmacy_name"] = merged["abc_pharmacy_name"].where(
         merged["abc_pharmacy_name"].str.strip() != "", 
         merged["salla_pharmacy_name"]
@@ -244,7 +252,7 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     merged["is_duplicate_warning"] = 0
     
     # -------------------------------------------------------------------------
-    # 🛡️ خوارزمية الفرز الشاملة والمطورة لتجميع الإضافات والإرجاعات
+    # 🧠 تطبيق منطق الفرز الصارم وجلب كافة أصناف الإضافات والنواقص
     # -------------------------------------------------------------------------
     for idx, row in merged.iterrows():
         salla_q = row['salla_qty']
@@ -266,41 +274,40 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
             ]
             if not other_branches_df.empty:
                 if abc_q == 0: continue 
-                
                 other_branch_names = ", ".join(other_branches_df['abc_pharmacy_name'].unique())
                 merged.at[idx, "case_type"] = "addition" if diff_calc > 0 else "return" if diff_calc < 0 else "addition"
                 merged.at[idx, "is_duplicate_warning"] = 1
                 merged.at[idx, "case_reason"] = f"⚠️ تنبيه للمراجعة والتدقيق: الصنف متداخل مع فروع أخرى وهي ({other_branch_names}). يرجى التحقق من القيد الفعلي للفرع الصحيح."
                 continue
 
-        # ب. السيناريو 2 و 4: تجاهل الفروع الصفرية المتطابقة إجمالياً
+        # ب. السيناريو 2 و 4: استبعاد وحجب الفروع الصفرية المتطابقة إجمالياً
         if matched and abc_q == 0:
             continue
         if matched and salla_q == abc_q:
             continue
 
-        # ج. تجميع كافة الإضافات (الكمية في سلة أعلى من ABC لنفس الصنف ورقم الطلب)
+        # ج. الشرط الأول للإضافات: كمية الصنف في سلة أعلى من كمية نفس الصنف ونفس الطلب على ABC
         if diff_calc > 0 and salla_q > 0 and abc_q > 0:
             merged.at[idx, "case_type"] = "addition"
             merged.at[idx, "case_reason"] = f"كمية طلب سلة المدفوعة ({int(salla_q)}) أعلى من كمية الفاتورة بالفرع ({int(abc_q)}). العجز يتطلب إضافة مخزنية حقيقية."
             continue
 
-        # د. حالات الإرجاع الصافية (ABC أكبر من سلة)
+        # د. الشرط الثاني للإضافات الحتمية: الصنف موجود في سلة [الكمية > 0] وليس له فاتورة أو صنف مطابق نهائياً على ABC
+        if (row['_merge'] == "left_only" or abc_total == 0) and salla_q > 0:
+            merged.at[idx, "case_type"] = "orphan_salla"
+            merged.at[idx, "case_reason"] = f"🛒 نقص مستندي كامل: صنف الطلب موجود ومؤكد في سلة بكمية {int(salla_q)} ولكن مستند الفاتورة مفقود بالكامل من نظام ABC لنفس الصنف ورقم الطلب."
+            continue
+
+        # هـ. حالات الإرجاع الصافية المستقرة (ABC أكبر من سلة للطلب القائم)
         if diff_calc < 0 and abc_q > 0:
             merged.at[idx, "case_type"] = "return"
             merged.at[idx, "case_reason"] = f"كمية الفاتورة الموردة بالفرع ({int(abc_q)}) أكبر من كمية طلب سلة ({int(salla_q)}). الزيادة تتطلب إرجاع مخزني."
             continue
 
-        # هـ. طلب في سلة وليس له فاتورة نهائياً بنفس رقم الصنف ورقم الفاتورة على ABC
-        if (row['_merge'] == "left_only" or abc_q == 0) and salla_q > 0:
-            merged.at[idx, "case_type"] = "orphan_salla"
-            merged.at[idx, "case_reason"] = f"🛒 طلب مبيعات موجود في سلة بكمية {int(salla_q)} ومستند فاتورته مفقود بالكامل من نظام ABC لنفس الصنف."
-            continue
-
-        # و. فاتورة بدون طلب
+        # و. فواتير مجهولة بدون مبيعات (فاتورة بدون طلب)
         if row['_merge'] == "right_only" and abc_q > 0:
             merged.at[idx, "case_type"] = "orphan_abc"
-            merged.at[idx, "case_reason"] = f"📄 فاتورة توريد متواجدة في ABC بكمية {int(abc_q)} لا يقابلها أي طلب مبيعات في سلة."
+            merged.at[idx, "case_reason"] = f"📄 فاتورة توريد متواجدة في ABC بكمية {int(abc_q)} لا يقابلها أي طلب مبيعات قائم في سلة."
             continue
 
     result = merged[merged["case_type"] != ""].copy()
@@ -311,7 +318,6 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     result["duplicate_warning"] = result["is_duplicate_warning"].apply(lambda x: "⚠️ منتج متداخل بين الفروع" if x == 1 else "")
     result["item_key"] = result.apply(lambda r: f"{r['pharmacy_name']}||{r['order_number']}||{r['sku']}||{r['case_type']}||{uuid.uuid4().hex[:4]}", axis=1)
     
-    # تفريغ وترتيب مصفوفة الأعمدة النهائية القياسية
     ordered_columns = [
         "item_key", "upload_batch_id", "order_number", "invoice_number", "sku",
         "product_name", "salla_product_name", "abc_product_name", "pharmacy_name",
