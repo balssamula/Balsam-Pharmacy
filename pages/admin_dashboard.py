@@ -590,6 +590,13 @@ def show():
         return result_temp
     
     # ========== حساب الإحصائيات الصحيحة للتبويبات ==========
+    # 👇 التصحيح الفاصل: إزالة المسافات وتطهير النصوص لإظهار الطلبات بانتظار المراجعة والتحليل
+    filtered_df['status_clean'] = filtered_df['status'].astype(str).str.strip()
+
+    # قناع تصفية الحالات النشطة (بانتظار المراجعة أو المتابعة)
+    active_mask_filtered = filtered_df['status_clean'].isin(['قيد المتابعة', 'بانتظار المراجعة', 'معلق', ''])
+
+    # تجميع التبويبات المدمجة بناءً على الأقنعة المطهرة الجديدة
     additions_merged_df = filtered_df[filtered_df['case_type'].isin(['addition', 'orphan_salla']) & active_mask_filtered].copy()
     additions_merged_df = exclude_old_items(additions_merged_df)
     total_additions_merged = len(additions_merged_df)
