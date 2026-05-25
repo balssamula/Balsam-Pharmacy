@@ -236,7 +236,7 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         "salla_product_name", "abc_product_name", "customer_name", "customer_phone", "city",
         "order_status", "order_date", "invoice_number", "invoice_date", "salla_pharmacy_name",
         "abc_pharmacy_name", "abc_pharmacist_name", "profile_type", "receipt_classification",
-        "all_abc_pharmacies", "other_branch_details", "payment_method", "salla_pharmacy_name"
+        "all_abc_pharmacies", "other_branch_details", "payment_method"
     ]
     for col in text_cols:
         if col not in merged.columns:
@@ -394,6 +394,7 @@ def process_excel(uploaded_file, uploaded_by: str):
               int((results["case_type"] == "orphan_abc").sum()) if not results.empty else 0))
         
         if not results.empty:
+            # إعداد بيانات الإدراج
             insert_df = results.copy()
             insert_df['upload_batch_id'] = upload_batch_id
             insert_df['status'] = 'قيد المتابعة'
@@ -408,6 +409,7 @@ def process_excel(uploaded_file, uploaded_by: str):
             insert_df['performed_by'] = ''
             insert_df['performed_at'] = ''
             
+            # قائمة الأعمدة الموجودة في قاعدة البيانات (بدون duplicate_warning)
             valid_columns = [
                 'item_key', 'upload_batch_id', 'order_number', 'invoice_number', 'sku',
                 'product_name', 'salla_product_name', 'abc_product_name', 'pharmacy_name',
@@ -419,25 +421,32 @@ def process_excel(uploaded_file, uploaded_by: str):
                 'other_branch_details', 'pharmacist_note', 'total_amount', 'first_seen_at',
                 'last_seen_at', 'active', 'hidden_from_pharmacy', 'payment_method',
                 'discount', 'shipping_cost', 'tax', 'coupon_discount', 'offer_discount',
-                'is_item_locked', 'item_locked_by', 'item_locked_at', 'duplicate_warning'
+                'is_item_locked', 'item_locked_by', 'item_locked_at'
             ]
             
+            # إزالة الأعمدة غير الموجودة في القائمة (مثل duplicate_warning)
             cols_to_drop = [col for col in insert_df.columns if col not in valid_columns]
             if cols_to_drop:
+                print(f"Dropping columns: {cols_to_drop}")
                 insert_df = insert_df.drop(columns=cols_to_drop)
             
+            # إضافة الأعمدة المفقودة
             for col in valid_columns:
                 if col not in insert_df.columns:
-                    if col in ['performed_by', 'performed_at', 'item_locked_by', 'item_locked_at', 'branch_number', 'salla_branch_number', 'duplicate_warning']:
+                    if col in ['performed_by', 'performed_at', 'item_locked_by', 'item_locked_at', 'branch_number', 'salla_branch_number']:
                         insert_df[col] = ''
                     elif col in ['is_item_locked']:
                         insert_df[col] = 0
                     else:
                         insert_df[col] = ''
             
+            # التأكد من ترتيب الأعمدة
             insert_df = insert_df[valid_columns]
+            
+            # إدراج البيانات
             insert_df.to_sql('reconciliation_items', conn, if_exists='append', index=False, method='multi')
         
+        # تعطيل العناصر القديمة وتفعيل الجلسة الحالية
         cur.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
         cur.execute("UPDATE uploads SET is_active = 0")
         cur.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
