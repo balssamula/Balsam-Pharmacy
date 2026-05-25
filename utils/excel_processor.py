@@ -432,15 +432,20 @@ def process_excel(uploaded_file, uploaded_by: str):
             # ترتيب الأعمدة
             insert_df = insert_df[valid_columns]
             
-            # ========== الإدراج على دفعات (batches) لتجنب "too many SQL variables" ==========
-            batch_size = 500  # عدد الصفوف في كل دفعة
-            total_rows = len(insert_df)
+            # ========== الإدراج باستخدام executemany (أكثر كفاءة) ==========
+            # تحويل DataFrame إلى قائمة من الصفوف
+            rows = insert_df.values.tolist()
             
-            for start in range(0, total_rows, batch_size):
-                end = min(start + batch_size, total_rows)
-                batch_df = insert_df.iloc[start:end]
-                batch_df.to_sql('reconciliation_items', conn, if_exists='append', index=False, method='multi')
-                print(f"Inserted rows {start} to {end} of {total_rows}")
+            # إنشاء استعلام INSERT
+            placeholders = ', '.join(['?' for _ in range(len(valid_columns))])
+            insert_query = f"INSERT INTO reconciliation_items ({', '.join(valid_columns)}) VALUES ({placeholders})"
+            
+            # الإدراج على دفعات
+            batch_size = 500
+            for i in range(0, len(rows), batch_size):
+                batch = rows[i:i+batch_size]
+                cur.executemany(insert_query, batch)
+                print(f"Inserted rows {i} to {i+len(batch)} of {len(rows)}")
         
         # تعطيل العناصر القديمة وتفعيل الجلسة الحالية
         cur.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
