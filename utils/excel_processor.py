@@ -330,8 +330,22 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     # توليد مفتاح سري فريد ديناميكي لربط العمليات الحسابية
     result["item_key"] = result.apply(lambda r: f"{r['pharmacy_name']}||{r['order_number']}||{r['sku']}||{r['case_type']}||{uuid.uuid4().hex[:4]}", axis=1)
     
-    return result[ordered_columns] # إعادة الفريم المنظم والمفلتر بالكامل
-
+    # 👇 الحل الجذري: تعريف الأعمدة المطلوبة بشكل صريح ومتوافق مع قاعدة البيانات
+    ordered_columns = [
+        "item_key", "upload_batch_id", "order_number", "invoice_number", "sku",
+        "product_name", "salla_product_name", "abc_product_name", "pharmacy_name",
+        "salla_pharmacy_name", "abc_pharmacy_name", "abc_pharmacist_name", "branch_number",
+        "salla_qty", "abc_qty", "difference", "case_type", "case_label", "case_reason",
+        "status", "customer_name", "customer_phone", "city", "order_status",
+        "order_date", "invoice_date", "profile_type", "receipt_classification",
+        "all_abc_pharmacies", "other_branch_details", "pharmacist_note", "total_amount",
+        "first_seen_at", "last_seen_at", "active", "hidden_from_pharmacy", "is_item_locked"
+    ]
+    
+    # فلترة الأعمدة المتاحة فقط في الجدول لتفادي أي أخطاء جانبية
+    available_cols = [c for c in ordered_columns if c in result.columns]
+    
+    return result[available_cols] # إعادة الفريم المنظم والآمن تماماً
 
 def process_excel(uploaded_file, uploaded_by: str):
     """معالجة ملف Excel وإدراج النتائج في قاعدة البيانات"""
