@@ -189,16 +189,20 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
 
 
 def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame:
-    """تصنيف الحالات - فقط إظهار الحالات التي يوجد فيها اختلاف في الكميات"""
+    """تصنيف الحالات - مقارنة لكل فرع على حدة بدون تجميع"""
     salla_grouped = prepare_salla_frame(df_salla)
     abc_grouped = prepare_abc_frame(df_abc)
     
     if salla_grouped.empty and abc_grouped.empty:
         return pd.DataFrame()
     
-    # دمج البيانات مع الاحتفاظ بكل فرع على حدة
-    # نستخدم left join بحيث نحتفظ بصفوف سلة وصفوف ABC معاً
-    merged = pd.merge(salla_grouped, abc_grouped, on=["order_number", "sku"], how="outer", indicator=True)
+    # ========== إنشاء قائمة بجميع الفروع من ABC ==========
+    # نأخذ كل فرع كسطر منفصل
+    abc_by_branch = abc_grouped.copy()
+    
+    # ========== دمج سلة مع ABC لكل فرع على حدة ==========
+    # نستخدم merge بحيث كل فرع في ABC له سطر منفصل
+    merged = pd.merge(salla_grouped, abc_by_branch, on=["order_number", "sku"], how="outer", indicator=True)
     
     # تعبئة القيم المفقودة
     for col in ["salla_qty", "abc_qty", "total_amount"]:
@@ -223,7 +227,7 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     merged["product_name"] = merged["salla_product_name"]
     merged.loc[merged["product_name"].eq(""), "product_name"] = merged.loc[merged["product_name"].eq(""), "abc_product_name"]
     
-    # تعبئة اسم الصيدلية - نعطي الأولوية لاسم الفرع من ABC
+    # تعبئة اسم الصيدلية - نستخدم اسم الفرع من ABC إذا موجود
     merged["pharmacy_name"] = merged["salla_pharmacy_name"]
     abc_mask = (merged["abc_pharmacy_name"] != "") & (merged["abc_pharmacy_name"] != "nan")
     merged.loc[abc_mask, "pharmacy_name"] = merged.loc[abc_mask, "abc_pharmacy_name"]
@@ -231,40 +235,45 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     empty_mask = (merged["pharmacy_name"] == "") | (merged["pharmacy_name"] == "nan")
     merged.loc[empty_mask, "pharmacy_name"] = merged.loc[empty_mask, "salla_pharmacy_name"]
     
-    # حساب الفرق
+    # حساب الفرق (لكل فرع على حدة)
     merged["difference"] = merged["salla_qty"] - merged["abc_qty"]
     
-    # ========== المنطق الجديد: فقط نأخذ الحالات التي الفرق فيها != 0 ==========
-    # أي أن الكميات مختلفة بين سلة و ABC
-    # أو الحالات التي الطلب موجود فقط في سلة أو فقط في ABC
-    
+    # ========== المنطق الجديد: مقارنة لكل فرع على حدة ==========
     merged["case_type"] = ""
     merged["case_reason"] = ""
     
-    # حالة إضافة (الطلب في سلة أكبر من ABC)
-    addition_mask = (merged["_merge"] == "both") & (merged["salla_qty"] != merged["abc_qty"]) & (merged["salla_qty"] > merged["abc_qty"])
-    merged.loc[addition_mask, "case_type"] = "addition"
-    merged.loc[addition_mask, "case_reason"] = f"كمية الطلب في سلة ({merged.loc[addition_mask, 'salla_qty']}) أكبر من كمية الفاتورة في ABC ({merged.loc[addition_mask, 'abc_qty']})."
-    
-    # حالة إرجاع (الطلب في ABC أكبر من سلة)
-    return_mask = (merged["_merge"] == "both") & (merged["salla_qty"] != merged["abc_qty"]) & (merged["abc_qty"] > merged["salla_qty"])
-    merged.loc[return_mask, "case_type"] = "return"
-    merged.loc[return_mask, "case_reason"] = f"كمية الفاتورة في ABC ({merged.loc[return_mask, 'abc_qty']}) أكبر من كمية الطلب في سلة ({merged.loc[return_mask, 'salla_qty']})."
-    
-    # طلب بدون فاتورة (موجود فقط في سلة)
+    # حالة: العنصر موجود في سلة فقط (لا يوجد في أي فرع من ABC)
     orphan_salla_mask = (merged["_merge"] == "left_only") & (merged["salla_qty"] > 0)
     merged.loc[orphan_salla_mask, "case_type"] = "orphan_salla"
-    merged.loc[orphan_salla_mask, "case_reason"] = "سطر طلب موجود في سلة ولم يُعثر على سطر مطابق له في ABC."
+    merged.loc[orphan_salla_mask, "case_reason"] = f"طلب موجود في سلة بكمية {merged.loc[orphan_salla_mask, 'salla_qty']} ولم يُعثر عليه في ABC."
     
-    # فاتورة بدون طلب (موجودة فقط في ABC)
+    # حالة: العنصر موجود في ABC فقط (لا يوجد في سلة)
     orphan_abc_mask = (merged["_merge"] == "right_only") & (merged["abc_qty"] != 0)
     merged.loc[orphan_abc_mask, "case_type"] = "orphan_abc"
-    merged.loc[orphan_abc_mask, "case_reason"] = "سطر فاتورة موجود في ABC ولم يُعثر على سطر مطابق له في سلة."
+    merged.loc[orphan_abc_mask, "case_reason"] = f"فاتورة موجودة في ABC بكمية {merged.loc[orphan_abc_mask, 'abc_qty']} ولم يُعثر عليها في سلة."
     
-    # تصفية النتيجة: فقط الحالات التي case_type ليس فارغاً (أي هناك اختلاف)
+    # حالة: العنصر موجود في كليهما مع اختلاف في الكمية
+    both_mask = (merged["_merge"] == "both") & (merged["salla_qty"] != merged["abc_qty"])
+    
+    # إضافة (كمية سلة أكبر من كمية ABC)
+    addition_mask = both_mask & (merged["salla_qty"] > merged["abc_qty"])
+    merged.loc[addition_mask, "case_type"] = "addition"
+    merged.loc[addition_mask, "case_reason"] = (
+        f"كمية الطلب في سلة ({merged.loc[addition_mask, 'salla_qty']}) "
+        f"أكبر من كمية الفاتورة في هذا الفرع ({merged.loc[addition_mask, 'abc_qty']})."
+    )
+    
+    # إرجاع (كمية ABC أكبر من كمية سلة)
+    return_mask = both_mask & (merged["abc_qty"] > merged["salla_qty"])
+    merged.loc[return_mask, "case_type"] = "return"
+    merged.loc[return_mask, "case_reason"] = (
+        f"كمية الفاتورة في هذا الفرع ({merged.loc[return_mask, 'abc_qty']}) "
+        f"أكبر من كمية الطلب في سلة ({merged.loc[return_mask, 'salla_qty']})."
+    )
+    
+    # تصفية النتيجة: فقط الحالات التي case_type ليس فارغاً
     result = merged[merged["case_type"] != ""].copy()
     
-    # إذا كانت النتيجة فارغة، نرجع DataFrame فارغ (يعني كل شيء مطابق)
     if result.empty:
         return pd.DataFrame()
     
@@ -290,16 +299,13 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         "coupon_discount", "offer_discount"
     ]
     
-    # إضافة الأعمدة المفقودة
     for col in ordered_columns:
         if col not in result.columns:
             result[col] = ""
     
-    # ترتيب الأعمدة
     result = result[ordered_columns]
     
     return result
-
 
 def process_excel(uploaded_file, uploaded_by: str):
     """معالجة ملف Excel وإدراج النتائج في قاعدة البيانات"""
