@@ -107,7 +107,7 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
         badge_text = row.get('case_label', 'حالة عامة')
         badge_style = "background:#e2e8f0; color:#475569;"
 
-    # حساب الفروقات ديناميكياً لضمان دقة الأرقام
+    # حساب الفروقات ديناميكياً
     salla_numeric = int(row.get('salla_qty', 0)) if pd.notna(row.get('salla_qty', 0)) else 0
     abc_numeric = int(row.get('abc_qty', 0)) if pd.notna(row.get('abc_qty', 0)) else 0
     diff_value = salla_numeric - abc_numeric
@@ -117,16 +117,17 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
     order_date = row.get('order_date', '')
     unique_key = f"{case_type}_{row.get('order_number', '')}_{row.get('sku', '')}_{idx}"
     
-    # ========== التحقق من وجود مكررات في فروع أخرى ==========
+    # التحقق من وجود مكررات
     order_number = str(row.get('order_number', ''))
     sku = str(row.get('sku', ''))
     
     duplicate_warning = ""
     try:
+        from utils.database import check_duplicate_across_branches
         duplicates = check_duplicate_across_branches(order_number, sku, pharmacy_name)
         
         if duplicates:
-            duplicate_warning = f"""
+            warning_html = f"""
             <div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px;">
                 <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
                     <span style="font-size:1.2rem;">⚠️</span>
@@ -140,24 +141,24 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
                 dup_case = dup.get('case_type', 'غير معروف')
                 dup_invoice = dup.get('invoice_date', '')
                 
-                duplicate_warning += f"""
+                warning_html += f"""
                 <div style="font-size:0.85rem; margin-bottom:0.4rem; padding:0.3rem 0; border-bottom:1px dashed #ffe0a3;">
                     🏥 <strong>{dup_pharmacy}</strong> | الحالة: {dup_status} | النوع: {dup_case}
                     {f' | تاريخ الفاتورة: {dup_invoice[:16]}' if dup_invoice else ''}
                 </div>
                 """
-            duplicate_warning += """
+            warning_html += """
                 </div>
                 <div style="margin-top:0.5rem; font-size:0.8rem; color:#856404;">
                     💡 يرجى مراجعة هذه الفروع لتجنب ازدواجية المعالجة
                 </div>
             </div>
             """
+            duplicate_warning = warning_html
     except Exception as e:
-        # في حالة الخطأ، لا نعرض التنبيه
-        pass
+        print(f"Error checking duplicates: {e}")
 
-    # عرض تصميم البطاقة مع التنبيه
+    # عرض البطاقة مع التنبيه
     st.markdown(f"""
     <div style="background:#f8f9fa; border-radius:16px; padding:1.2rem; margin-bottom:0.8rem; border-right:5px solid #1f7a8c; box-shadow:0 4px 12px rgba(0,0,0,0.03);">
         <div style="display:flex; justify-content:space-between; margin-bottom:0.8rem; align-items:center;">
@@ -190,7 +191,7 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
     </div>
     """, unsafe_allow_html=True)
     
-    # حقل الملاحظات والأزرار التفاعلية
+    # حقل الملاحظات والأزرار
     note_key = f"note_{unique_key}"
     note_value = st.text_area("📝 ملحوظة الصيدلي", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
     
