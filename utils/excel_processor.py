@@ -332,9 +332,10 @@ def process_excel(uploaded_file, username):
         sqlite3.register_adapter(float, lambda x: float(x))
         
         with db_conn:
+            # توحيد المؤشر البرمجي ليكون 'cursor' في كامل البلوك منعا لأخطاء التسمية
             cursor = db_conn.cursor()
             
-            # إعداد الحقول الإضافية المطلوبة لقاعدة البيانات مباشرة داخل فريم النتائج
+            # تجهيز الحقول الإضافية المطلوبة لقاعدة البيانات مباشرة داخل فريم النتائج المستقر
             results['upload_batch_id'] = upload_batch_id
             results['status'] = 'قيد المتابعة'
             results['pharmacist_note'] = ''
@@ -344,30 +345,34 @@ def process_excel(uploaded_file, username):
             results['hidden_from_pharmacy'] = 0
             results['is_item_locked'] = 0
             
-            # استخراج أسماء الأعمدة المتواجدة في فريم النتائج الفعلي لضمان مطابقة الـ SQL
+            # استخراج قائمة أسماء الأعمدة المتواجدة في فريم النتائج الفعلي لضمان مطابقة الـ SQL
             columns = list(results.columns)
             placeholders = ", ".join(["?"] * len(columns))
             sql_query = f"INSERT OR REPLACE INTO reconciliation_items ({', '.join(columns)}) VALUES ({placeholders})"
             
-            # تنفيذ الإدراج الجمعي السريع والآمن فورا
+            # تنفيذ الإدراج الجمعي السريع والآمن فورا للسيناريوهات السبعة
             cursor.executemany(sql_query, results.values.tolist())
                   
-        # تعطيل العناصر القديمة وتفعيل الجلسة الحالية
-        cur.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
-        cur.execute("UPDATE uploads SET is_active = 0")
-        cur.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
-        session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
-        cur.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
-        
-        db_conn.commit()
+            # تعطيل العناصر القديمة وتفعيل الجلسة الحالية وإغلاق القديمة عبر نفس الـ cursor الموحد
+            cursor.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
+            cursor.execute("UPDATE uploads SET is_active = 0")
+            cursor.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
+            
+            # حساب وقت الجلسة بتوقيت السعودية المستقر وتحديث الحقل
+            session_name = (datetime.utcnow() + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M")
+            cursor.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
+            
+            db_conn.commit()
         
     except Exception as e:
-        print(f"Error in process_excel: {e}")
+        print(f"Error in process_excel database chunk processing: {e}")
         db_conn.rollback()
-        raise
+        raise e
     finally:
+        # إغلاق قاعدة البيانات لمنع تجمد السيرفر السحابي أو حدوث Locked
         db_conn.close()
     
+    # سطر الإرجاع النهائي والنظيف للدالة لإرسال النتائج للداشبورد
     return results, upload_batch_id
 
 def update_balances(abc_file, salla_file):
