@@ -444,6 +444,15 @@ def process_excel(uploaded_file, uploaded_by: str):
             
                     cursor.executemany(sql_query, insert_df.values.tolist())
 
+                    # تعطيل العناصر القديمة وتفعيل الجلسة الحالية
+                    cur.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
+                    cur.execute("UPDATE uploads SET is_active = 0")
+                    cur.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
+                    session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    cur.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
+        
+                    db_conn.commit()
+
             except Exception as e:
                 # حماية إضافية طباعة الخطأ في السيرفر إذا حدث أي تصادم أثناء الإدخال
                 print(f"Error during to_sql execution: {e}")
