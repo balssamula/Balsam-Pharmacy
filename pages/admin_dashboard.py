@@ -170,7 +170,11 @@ def render_table_with_click(df, tab_name, allow_move: bool = True):
             if 0 <= selected_idx < len(df):
                 row = df.iloc[selected_idx]
                 item_key = row.get('item_key', '')
-                
+                # 👇 حل مشكلة التبويبات القديمة: البحث عن المعرف الرقمي id كبديل أمان في حال غياب الـ item_key
+                item_key = row.get('item_key', row.get('id', ''))
+                if pd.isna(item_key) or item_key == '':
+                    item_key = f"old_row_{selected_idx}" # مفتاح أمان افتراضي لمنع انهيار الرسم
+                    
                 # ========== التحقق من وجود مكررات ==========
                 order_number = str(row.get('order_number', ''))
                 sku = str(row.get('sku', ''))
@@ -211,12 +215,10 @@ def render_table_with_click(df, tab_name, allow_move: bool = True):
                 
                 st.markdown(f"""
                 <div style="background:#f0f2f6;border-radius:10px;padding:1rem;margin-top:1rem;border-right:4px solid #1f7a8c;">
-                    <h4 style="margin:0 0 0.5rem 0;">🛠️ إجراءات الصف المحدد</h4>
-                    <p><strong>📋 رقم الطلب:</strong> {row['order_number']} | 
-                    <strong>🏷️ SKU:</strong> {row['sku']} | 
-                    <strong>📦 المنتج:</strong> {row['product_name'][:50]}</p>
-                    <p><strong>🏥 الفرع الحالي:</strong> {row.get('pharmacy_name', 'غير محدد')}</p>
-                    {duplicate_warning}
+                    <h4 style="margin:0 0 0.5rem 0;">🛠️ إجراءات الصف المحدد (الأرشيف التاريخي)</h4>
+                    <p><strong>📋 مستند الحالة:</strong> {row.get('order_number', row.get('invoice_number', 'N/A'))} | 
+                    <strong>🏷️ SKU:</strong> {row.get('sku', 'N/A')} | 
+                    <strong>📦 المنتج:</strong> {str(row.get('product_name', 'N/A'))[:60]}</p>
                 </div>
                 """, unsafe_allow_html=True)
                 
