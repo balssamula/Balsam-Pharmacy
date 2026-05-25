@@ -333,14 +333,26 @@ def process_excel(uploaded_file, username):
         
         with db_conn:
             cursor = db_conn.cursor()
-            columns = list(insert_df.columns)
+            
+            # إعداد الحقول الإضافية المطلوبة لقاعدة البيانات مباشرة داخل فريم النتائج
+            results['upload_batch_id'] = upload_batch_id
+            results['status'] = 'قيد المتابعة'
+            results['pharmacist_note'] = ''
+            results['first_seen_at'] = now_str()
+            results['last_seen_at'] = now_str()
+            results['active'] = 1
+            results['hidden_from_pharmacy'] = 0
+            results['is_item_locked'] = 0
+            
+            # استخراج أسماء الأعمدة المتواجدة في فريم النتائج الفعلي لضمان مطابقة الـ SQL
+            columns = list(results.columns)
             placeholders = ", ".join(["?"] * len(columns))
             sql_query = f"INSERT OR REPLACE INTO reconciliation_items ({', '.join(columns)}) VALUES ({placeholders})"
             
-            # تنفيذ الإدراج الجمعي الآمن
-            cursor.executemany(sql_query, insert_df.values.tolist())
+            # تنفيذ الإدراج الجمعي السريع والآمن فورا
+            cursor.executemany(sql_query, results.values.tolist())
             
-            # تحديث وتنشيط الجلسة الحالية وأرشفة القديمة
+            # 📊 أسطر تفعيل الجلسة الحالية وأرشفة الملفات القديمة
             cursor.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
             cursor.execute("UPDATE uploads SET is_active = 0")
             cursor.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
@@ -351,11 +363,11 @@ def process_excel(uploaded_file, username):
             db_conn.commit()
             
     except Exception as e:
-        print(f"Error during to_sql database bulk processing: {e}")
+        print(f"Error during database bulk insertion: {e}")
         raise e
         
     finally:
-        # إغلاق الاتصال لمنع تعليق أو قفل قاعدة البيانات السحابية
+        # إغلاق موصل قاعدة البيانات دائماً وأبداً لمنع تجمد السيرفر السحابي
         db_conn.close()
         
     return results, upload_batch_id
