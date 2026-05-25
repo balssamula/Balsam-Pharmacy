@@ -323,12 +323,12 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
 # =========================================================================
 
 def process_excel(uploaded_file, username):
-    """معالجة ملف Excel وإدراج النتائج في قاعدة البيانات"""
+    """معالجة وإدراج ملف النتائج في قاعدة البيانات ككتلة واحدة آمنة"""
     df_salla = pd.read_excel(uploaded_file, sheet_name="سلة")
     df_abc = pd.read_excel(uploaded_file, sheet_name="abc")
     results = classify_cases(df_salla, df_abc)
     
-    upload_batch_id = uuid.uuid4().hex
+    upload_batch_id = f"batch_{uuid.uuid4().hex[:8]}_{datetime.now().strftime('%m%d%H%M')}"
     timestamp = now_str()
     
     conn = sqlite3.connect(DB_PATH, timeout=60.0)
@@ -337,19 +337,19 @@ def process_excel(uploaded_file, username):
     cur = conn.cursor()
     
     try:
-        # إدراج بيانات الرفع
+        # 1. إدراج بيانات الرفع الإحصائية في جدول المرفوعات
         cur.execute("""
             INSERT INTO uploads (upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
-                total_additions, total_returns, total_orphan_salla, total_orphan_abc, is_active)
+                                 total_additions, total_returns, total_orphan_salla, total_orphan_abc, is_active)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-        """, (upload_batch_id, uploaded_file.name, uploaded_by, timestamp, len(results),
+        """, (upload_batch_id, uploaded_file.name, username, timestamp, len(results),
               int((results["case_type"] == "addition").sum()) if not results.empty else 0,
               int((results["case_type"] == "return").sum()) if not results.empty else 0,
               int((results["case_type"] == "orphan_salla").sum()) if not results.empty else 0,
               int((results["case_type"] == "orphan_abc").sum()) if not results.empty else 0))
         
+        # 2. إذا كانت هناك حالات مستخرجة، يتم تجهيزها وحقنها جمعياً
         if not results.empty:
-            # إعداد بيانات الإدراج
             insert_df = results.copy()
             insert_df['upload_batch_id'] = upload_batch_id
             insert_df['status'] = 'قيد المتابعة'
@@ -364,7 +364,7 @@ def process_excel(uploaded_file, username):
             insert_df['performed_by'] = ''
             insert_df['performed_at'] = ''
             
-            # قائمة الأعمدة الموجودة في قاعدة البيانات (بدون duplicate_warning)
+            # قائمة الأعمدة المعتمدة والمطابقة لهيكل قاعدة البيانات
             valid_columns = [
                 'item_key', 'upload_batch_id', 'order_number', 'invoice_number', 'sku',
                 'product_name', 'salla_product_name', 'abc_product_name', 'pharmacy_name',
@@ -379,13 +379,12 @@ def process_excel(uploaded_file, username):
                 'is_item_locked', 'item_locked_by', 'item_locked_at'
             ]
             
-            # إزالة الأعمدة غير الموجودة في القائمة (مثل duplicate_warning)
+            # تنظيف وفلترة الأعمدة الزائدة
             cols_to_drop = [col for col in insert_df.columns if col not in valid_columns]
             if cols_to_drop:
-                print(f"Dropping columns: {cols_to_drop}")
                 insert_df = insert_df.drop(columns=cols_to_drop)
-            
-            # إضافة الأعمدة المفقودة
+                
+            # تعبئة الأعمدة الغائبة لمنع أخطاء القيمة الفارغة
             for col in valid_columns:
                 if col not in insert_df.columns:
                     if col in ['performed_by', 'performed_at', 'item_locked_by', 'item_locked_at', 'branch_number', 'salla_branch_number']:
@@ -394,65 +393,42 @@ def process_excel(uploaded_file, username):
                         insert_df[col] = 0
                     else:
                         insert_df[col] = ''
-            
-            # التأكد من ترتيب الأعمدة
+                        
+            # إعادة الترتيب النهائي القياسي للأعمدة قبل البث
             insert_df = insert_df[valid_columns]
             
-            # إدراج البيانات
-            # 👇 الحل الجذري والنهائي: إجبار محرك SQLite على استبدال أو تخطي المكرر لتفادي خطأ Unique Constraint
-            import sqlite3
+            # تفعيل محولات البيانات للـ SQLite لمنع أخطاء الكتل المتداخلة
+            sqlite3.register_adapter(int, lambda x: int(x))
+            sqlite3.register_adapter(float, lambda x: float(x))
             
-    # الجزء الأخير الخاص بالحقن الجمعي وقفل المعاملات البرمجية لتلافي الـ SyntaxError
-    db_conn = sqlite3.connect(DB_PATH, timeout=60.0)
-    try:
-        sqlite3.register_adapter(int, lambda x: int(x))
-        sqlite3.register_adapter(float, lambda x: float(x))
-        
-        # 🧠 توليد وتثبيت رقم الجلسة المفقود برمجياً في هذه اللحظة ليكون متاحاً لكافة الأسطر
-        import uuid
-        upload_batch_id = f"batch_{uuid.uuid4().hex[:8]}_{datetime.now().strftime('%m%d%H%M')}"
-        
-        with db_conn:
-            cursor = db_conn.cursor()
-            
-            # حقن وتجهيز الحقول الإضافية المطلوبة لقاعدة البيانات مباشرة داخل فريم النتائج الجاهز
-            results['upload_batch_id'] = upload_batch_id
-            results['status'] = 'قيد المتابعة'
-            results['pharmacist_note'] = ''
-            results['first_seen_at'] = now_str() if 'now_str' in globals() else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            results['last_seen_at'] = now_str() if 'now_str' in globals() else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            results['active'] = 1
-            results['hidden_from_pharmacy'] = 0
-            results['is_item_locked'] = 0
-            
-            # استخراج قائمة أسماء الأعمدة الفعلية لضمان مطابقة الـ SQL
-            columns = list(results.columns)
+            # حقن آلية الإدراج أو الاستبدال الآمن لمنع تعارض قيود المفتاح UNIQUE Constraint
+            columns = list(insert_df.columns)
             placeholders = ", ".join(["?"] * len(columns))
             sql_query = f"INSERT OR REPLACE INTO reconciliation_items ({', '.join(columns)}) VALUES ({placeholders})"
             
-            # تنفيذ الإدراج الجمعي السريع والآمن فورا للسيناريوهات السبعة
-            cursor.executemany(sql_query, results.values.tolist())
-                  
-            # تعطيل العناصر القديمة وتفعيل الجلسة الحالية وإغلاق القديمة عبر الـ cursor الموحد
-            cursor.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
-            cursor.execute("UPDATE uploads SET is_active = 0")
-            cursor.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
+            # التنفيذ الجمعي السريع جداً والمحمي من تجاوز متغيرات الـ SQL Variables Limit
+            cur.executemany(sql_query, insert_df.values.tolist())
             
-            # حساب وتحديث اسم الجلسة الإحصائية الحالية بالتوقيت المستقر
-            session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
-            cursor.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
-            
-            db_conn.commit()
+        # 3. تحديث الجلسات وأرشفة الحالات القديمة وتفعيل الحالية دفعة واحدة
+        cur.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
+        cur.execute("UPDATE uploads SET is_active = 0")
+        cur.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
+        
+        session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
+        cur.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
+        
+        # حفظ المعاملات وتثبيتها بشكل نهائي ومستقر
+        conn.commit()
         
     except Exception as e:
-        print(f"Error in process_excel database chunk processing: {e}")
-        db_conn.rollback()
+        print(f"Error in process_excel database processing block: {e}")
+        conn.rollback()
         raise e
     finally:
-        # إغلاق قاعدة البيانات دائماً وأبداً لمنع تجمد السيرفر السحابي أو حدوث Locked
-        db_conn.close()
-    
-    # سطر الإرجاع النهائي والنظيف للدالة لإرسال النتائج للداشبورد بنجاح
+        # الإغلاق الآمن للمؤشر والاتصال لحماية السيرفر السحابي من الـ Database Lock
+        cur.close()
+        conn.close()
+        
     return results, upload_batch_id
 
 def update_balances(abc_file, salla_file):
