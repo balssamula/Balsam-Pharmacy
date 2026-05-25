@@ -51,7 +51,7 @@ def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
     df["customer_name"] = df[customer_col].apply(normalize_text) if customer_col else ""
     df["customer_phone"] = df[phone_col].apply(normalize_text) if phone_col else ""
     df["city"] = df[city_col].apply(normalize_text) if city_col else ""
-    df["order_status"] = df[status_col].apply(normalize_text) if status_col else ""
+    df["order_status"] = df[status_col].apply(normalize_order_status) if status_col else ""
     df["order_date"] = df[date_col].apply(normalize_text) if date_col else ""
     df["total_amount"] = pd.to_numeric(df[total_col], errors="coerce").fillna(0) if total_col else 0
     df["discount"] = pd.to_numeric(df[discount_col], errors="coerce").fillna(0) if discount_col else 0
