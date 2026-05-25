@@ -246,71 +246,62 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     merged["is_duplicate_warning"] = 0
     
     # ========== التصنيف الصحيح ==========
+    # التطهير المنطقي الكامل لحلقة الفرز والسيناريوهات السبعة لفرز الفروع
     for idx, row in merged.iterrows():
         salla_q = row['salla_qty']
         abc_q = row['abc_qty']
         abc_total = row['abc_total_qty']
         matched = row['total_matched']
-        merge_type = row['_merge']
+        order_num = row['order_number']
+        item_sku = row['sku']
+        current_pharmacy = row['abc_pharmacy_name']
+        diff_calc = salla_q - abc_q # حساب الفرق السطري الصافي
         
-        # 1. فاتورة بدون طلب (موجودة فقط في ABC)
-        if merge_type == "right_only" and abc_q > 0:
-            merged.at[idx, "case_type"] = "orphan_abc"
-            merged.at[idx, "case_reason"] = f"📄 فاتورة توريد في ABC بكمية {int(abc_q)} لا يقابلها أي طلب مبيعات في سلة."
-            continue
-        
-        # 2. طلب بدون فاتورة (موجود فقط في سلة)
-        if merge_type == "left_only" and salla_q > 0:
-            merged.at[idx, "case_type"] = "orphan_salla"
-            merged.at[idx, "case_reason"] = f"🛒 طلب مبيعات مدفوع في سلة بكمية {int(salla_q)} مفقود مستند فاتورته من ABC."
-            continue
-        
-        # 3. الحالات الموجودة في كليهما
-        if merge_type == "both":
-            # الحالة 3a: فرع لا توجد فيه كمية (abc_q = 0) - نتجاهلها تماماً
-            if abc_q == 0:
-                continue
-            
-            # الحالة 3b: كمية ABC أقل من سلة (نقص) -> إضافة
-            if abc_q < salla_q:
-                # التحقق من وجود فروع أخرى بنفس الطلب
-                other_branches = abc_grouped[
-                    (abc_grouped['order_number'] == row['order_number']) & 
-                    (abc_grouped['sku'] == row['sku']) & 
-                    (abc_grouped['abc_qty'] > 0) &
-                    (abc_grouped['abc_pharmacy_name'] != row['abc_pharmacy_name'])
-                ]
+        # أ. فرز حالات التداخل والنزاع بين الفروع (السيناريوهات 1 و 6)
+        if matched and abc_q > 0 and (abc_total > abc_q or current_pharmacy != ""):
+            other_branches_df = abc_grouped[
+                (abc_grouped['order_number'] == order_num) & 
+                (abc_grouped['sku'] == item_sku) & 
+                (abc_grouped['abc_qty'] > 0) & 
+                (abc_grouped['abc_pharmacy_name'] != current_pharmacy)
+            ]
+            if not other_branches_df.empty:
+                if abc_q == 0: continue # تجاهل الأصفار
                 
-                if not other_branches.empty and matched:
-                    # حالة التوزيع على عدة فروع
-                    other_names = ", ".join(other_branches['abc_pharmacy_name'].unique())
-                    merged.at[idx, "case_type"] = "addition"
-                    merged.at[idx, "is_duplicate_warning"] = 1
-                    merged.at[idx, "case_reason"] = (
-                        f"⚠️ تنبيه: الكمية الإجمالية ({int(abc_total)}) مطابقة لطلب سلة ({int(salla_q)})، "
-                        f"ولكنها موزعة على فروع أخرى: {other_names}. يرجى المراجعة."
-                    )
-                else:
-                    # إضافة عادية
-                    merged.at[idx, "case_type"] = "addition"
-                    merged.at[idx, "case_reason"] = (
-                        f"➕ كمية الطلب في سلة ({int(salla_q)}) أكبر من كمية الفاتورة في هذا الفرع ({int(abc_q)}). "
-                        f"العجز {int(salla_q - abc_q)} يتطلب إضافة."
-                    )
+                other_branch_names = ", ".join(other_branches_df['abc_pharmacy_name'].unique())
+                # الحسم الصارم: نوع الحالة ينقاد للإشارة الرقمية وليس ثابتاً
+                merged.at[idx, "case_type"] = "addition" if diff_calc > 0 else "return" if diff_calc < 0 else "addition"
+                merged.at[idx, "is_duplicate_warning"] = 1
+                merged.at[idx, "case_reason"] = f"⚠️ تنبيه للمراجعة والتدقيق: الصنف متداخل مع فروع أخرى وهي ({other_branch_names}). يرجى التحقق من القيد الفعلي للفرع الصحيح."
                 continue
-            
-            # الحالة 3c: كمية ABC أكبر من سلة (زيادة) -> إرجاع
-            if abc_q > salla_q:
-                merged.at[idx, "case_type"] = "return"
-                merged.at[idx, "case_reason"] = (
-                    f"🔄 كمية الفاتورة في هذا الفرع ({int(abc_q)}) أكبر من كمية الطلب في سلة ({int(salla_q)}). "
-                    f"الزيادة {int(abc_q - salla_q)} تتطلب إرجاع."
-                )
-                continue
-            
-            # الحالة 3d: كميات متطابقة -> لا تظهر (نتمها)
-            if abc_q == salla_q:
-                continue
+
+        # ب. السيناريو 2 و 4: تجاهل الفروع الصفرية المتطابقة إجمالياً
+        if matched and abc_q == 0:
+            continue
+        if matched and salla_q == abc_q:
+            continue
+
+        # ج. السيناريوهات 3 و 5: حالات الإضافة الصافية (سلة أكبر من ABC)
+        if diff_calc > 0 and salla_q > 0:
+            if abc_q == 0 and not matched: 
+                continue # استبعاد الفرع صفر بالسيناريو 3
+            merged.at[idx, "case_type"] = "addition"
+            merged.at[idx, "case_reason"] = f"كمية طلب سلة المدفوعة ({int(salla_q)}) أكبر من كمية الفاتورة بالفرع ({int(abc_q)})."
+            continue
+
+        # د. السيناريو 7: حالات الإرجاع الصافية (ABC أكبر من سلة)
+        if diff_calc < 0 and abc_q > 0:
+            merged.at[idx, "case_type"] = "return"
+            merged.at[idx, "case_reason"] = f"كمية الفاتورة الموردة بالفرع ({int(abc_q)}) أكبر من كمية طلب سلة ({int(salla_q)})."
+            continue
+
+        # هـ. الحالات المستندية المعزولة (توحيد المسميات مع قاموس الداشبورد)
+        if row['_merge'] == "right_only" and abc_q > 0:
+            merged.at[idx, "case_type"] = "orphan_abc"
+            merged.at[idx, "case_reason"] = f"فاتورة توريد في ABC بكمية {int(abc_q)} لا يقابلها طلب في سلة."
+        elif row['_merge'] == "left_only" and salla_q > 0:
+            merged.at[idx, "case_type"] = "orphan_salla"
+            merged.at[idx, "case_reason"] = f"طلب مبيعات في سلة بكمية {int(salla_q)} مفقود فاتورته من ABC."
     
     # تصفية النتيجة
     result = merged[merged["case_type"] != ""].copy()
