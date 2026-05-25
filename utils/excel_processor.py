@@ -229,10 +229,18 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         if col not in merged.columns: merged[col] = ""
         merged[col] = merged[col].fillna("").astype(str)
         
-    merged["product_name"] = merged["salla_product_name"].replace("", merged["abc_product_name"])
+    # 👇 الحل البرمجي الجذري: دمج الأسماء والفروع بشكل آمن ومتوافق مع قواعد Pandas
+    # إذا كان اسم منتج سلة فارغاً أو مسافة، يتم أخذ اسم منتج ABC تلقائياً
+    merged["product_name"] = merged["salla_product_name"].where(
+        merged["salla_product_name"].str.strip() != "", 
+        merged["abc_product_name"]
+    )
     
-    # تعيين اسم الصيدلية الافتراضي الحالي للفحص
-    merged["pharmacy_name"] = merged["abc_pharmacy_name"].replace("", merged["salla_pharmacy_name"])
+    # إذا كان فرع ABC فارغاً، يتم إسناد فرع سلة مكانه لتوجيه البطاقة بشكل صحيح
+    merged["pharmacy_name"] = merged["abc_pharmacy_name"].where(
+        merged["abc_pharmacy_name"].str.strip() != "", 
+        merged["salla_pharmacy_name"]
+    )
     
     # حساب الفروقات السطرية الرقمية المباشرة
     merged["difference"] = merged["salla_qty"] - merged["abc_qty"]
