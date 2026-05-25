@@ -246,18 +246,34 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         abc_q = row['abc_qty']
         abc_total = row['abc_total_qty']
         matched = row['total_matched']
+        order_num = row['order_number']
+        item_sku = row['sku']
+        current_pharmacy = row['abc_pharmacy_name']
         
         # السيناريو 1 و 6: سلة=10، فرع1=10 وفرع2=10 أو سلة=10، فرع1=5 وفرع2=5 (المجموع مطابق أو أقل وموزع)
-        if matched and abc_q > 0 and (abc_total > abc_q or row['abc_pharmacy_name'] != ""):
-            branches_with_qty = abc_grouped[(abc_grouped['order_number'] == row['order_number']) & 
-                                            (abc_grouped['sku'] == row['sku']) & 
-                                            (abc_grouped['abc_qty'] > 0)]
-            if len(branches_with_qty) > 1:
+        if matched and abc_q > 0 and (abc_total > abc_q or current_pharmacy != ""):
+            # جلب الفروع الأخرى التي تحتوي على نفس الطلب والصنف وتوريدها أعلى من صفر
+            other_branches_df = abc_grouped[
+                (abc_grouped['order_number'] == order_num) & 
+                (abc_grouped['sku'] == item_sku) & 
+                (abc_grouped['abc_qty'] > 0) & 
+                (abc_grouped['abc_pharmacy_name'] != current_pharmacy)
+            ]
+            
+            if not other_branches_df.empty:
                 if abc_q == 0:
-                    continue # استبعاد وإخفاء الفرع التلقائي صفر لعدم تشتيت الصيدلي
+                    continue # إخفاء وتجاهل السطور الصفرية تماماً لراحة الصيدلي
+                
+                # استخراج أسماء الفروع المتداخلة الأخرى كقائمة نصية مفصولة
+                other_branch_names = ", ".join(other_branches_df['abc_pharmacy_name'].unique())
+                
                 merged.at[idx, "case_type"] = "addition"
                 merged.at[idx, "is_duplicate_warning"] = 1
-                merged.at[idx, "case_reason"] = f"⚠️ تنبيه للمراجعة: الكمية الإجمالية في ABC ({int(abc_total)}) مطابقة لكمية سلة ({int(salla_q)})، ولكنها موزعة على فروع متعددة. يرجى التأكد والتحقق حقيقة من أي فرع تم خروج الصنف منه."
+                merged.at[idx, "case_reason"] = (
+                    f"⚠️ تنبيه للمراجعة والتدقيق: الكمية الإجمالية الموردة في ABC ({int(abc_total)}) مطابقة لطلب سلة ({int(salla_q)})، "
+                    f"ولكن تم رصد حركة بيع مكررة لهذا الصنف في فرع آخر وهو ({other_branch_names}). "
+                    f"يرجى التحقق الفعلي لمعرفة من أي فرع تم خروج الصنف حقيقة وصرف الفاتورة الصحيحة."
+                )
                 continue
 
         # السيناريو 2 و 4: سلة=10، فرع1=10 وفرع2=0 أو سلة=10، فرع1=0 وفرع2=10
@@ -270,9 +286,8 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         # السيناريو 3: سلة=10، فرع1=9 وفرع2=0 (إخفاء من فرع 2 وتظهر كإضافة في فرع 1)
         if not matched and salla_q > 0:
             if abc_q == 0:
-                continue # لا تظهر الحالة نهائياً في فرع 02
+                continue # لا تظهر الحالة نهائياً في فرع 02 لعدم التشتيت
             else:
-                # تظهر في فرع 01 الذي كميته 9 كإضافة عادية
                 merged.at[idx, "case_type"] = "addition"
                 merged.at[idx, "case_reason"] = f"كمية طلب سلة ({int(salla_q)}) أكبر من كمية الفاتورة في هذا الفرع ({int(abc_q)}). إجمالي الفروع (ABC: {int(abc_total)})."
                 continue
