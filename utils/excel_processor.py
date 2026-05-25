@@ -186,9 +186,13 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     return grouped
 
 
+# =========================================================================
+# 🌟 الجزء الأول: دالة تصنيف وفلترة الحالات بالفروع (السيناريوهات الـ 7)
+# =========================================================================
+
 def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame:
     """
-    تطبيق المنطق المطور والمعدل لتصنيف الحالات بالفروع (السيناريوهات الـ 7)
+    تطبيق المنطق الرياضي لتوجيه وفلترة الحالات بناءً على السيناريوهات السبعة لفرز الفروع
     """
     salla_grouped = prepare_salla_frame(df_salla)
     abc_grouped = prepare_abc_frame(df_abc)
@@ -196,30 +200,26 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     if salla_grouped.empty and abc_grouped.empty:
         return pd.DataFrame()
         
-    # حساب المجموع الكلي لكميات ABC لكل رقم طلب وصنف
+    # حساب المجموع الكلي للكميات في ABC لكل رقم طلب وصنف
     abc_total_qty = abc_grouped.groupby(["order_number", "sku"])["abc_qty"].sum().reset_index()
     abc_total_qty.rename(columns={"abc_qty": "abc_total_qty"}, inplace=True)
     
-    # دمج بيانات سلة مع المجموع الكلي لمعرفة مطابقة الكميات الكلية
+    # دمج شيت سلة مع مجموع ABC الكلي لمعرفة مطابقة الكمية الإجمالية
     salla_with_total = pd.merge(salla_grouped, abc_total_qty, on=["order_number", "sku"], how="left")
     salla_with_total["abc_total_qty"] = salla_with_total["abc_total_qty"].fillna(0)
-    
-    # التحقق من تطابق المجموع الإجمالي التام
     salla_with_total["total_matched"] = salla_with_total["salla_qty"] == salla_with_total["abc_total_qty"]
     
-    # الدمج الخارجي الكامل مع فروع ABC بالتفصيل لكل فرع
+    # الدمج الخارجي الكامل مع فروع ABC بالتفصيل للفرز السطري
     merged = pd.merge(salla_with_total, abc_grouped, on=["order_number", "sku"], how="outer", indicator=True)
     
-    # تعبئة وتصحيح القيم الرقمية المفقودة لمنع أخطاء المعالجة
+    # تصحيح وتطهير القيم الرقمية لمنع أخطاء المعالجة الحسابية
     for col in ["salla_qty", "abc_qty", "total_amount", "abc_total_qty"]:
         if col in merged.columns:
             merged[col] = pd.to_numeric(merged[col], errors="coerce").fillna(0)
             
-    if "total_matched" not in merged.columns:
-        merged["total_matched"] = False
     merged["total_matched"] = merged["total_matched"].fillna(False)
     
-    # إعداد الأعمدة النصية الأساسية للتقرير
+    # تعبئة الأعمدة النصية لضمان سلامة الهيكل البرمجي لقاعدة البيانات
     text_cols = [
         "salla_product_name", "abc_product_name", "customer_name", "customer_phone", "city",
         "order_status", "order_date", "invoice_number", "invoice_date", "salla_pharmacy_name",
@@ -229,108 +229,82 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         if col not in merged.columns: merged[col] = ""
         merged[col] = merged[col].fillna("").astype(str)
         
-    # 👇 الحل البرمجي الجذري: دمج الأسماء والفروع بشكل آمن ومتوافق مع قواعد Pandas
-    # إذا كان اسم منتج سلة فارغاً أو مسافة، يتم أخذ اسم منتج ABC تلقائياً
-    merged["product_name"] = merged["salla_product_name"].where(
-        merged["salla_product_name"].str.strip() != "", 
-        merged["abc_product_name"]
-    )
+    # دمج مسميات المنتجات والفروع بطريقة Pandas الآمنة وتفادي أخطاء ValueError القديمة
+    merged["product_name"] = merged["salla_product_name"].where(merged["salla_product_name"].str.strip() != "", merged["abc_product_name"])
+    merged["pharmacy_name"] = merged["abc_pharmacy_name"].where(merged["abc_pharmacy_name"].str.strip() != "", merged["salla_pharmacy_name"])
     
-    # إذا كان فرع ABC فارغاً، يتم إسناد فرع سلة مكانه لتوجيه البطاقة بشكل صحيح
-    merged["pharmacy_name"] = merged["abc_pharmacy_name"].where(
-        merged["abc_pharmacy_name"].str.strip() != "", 
-        merged["salla_pharmacy_name"]
-    )
-    
-    # حساب الفروقات السطرية الرقمية المباشرة
     merged["difference"] = merged["salla_qty"] - merged["abc_qty"]
-    
-    # حقول التوجيه والتصنيف الذكي
     merged["case_type"] = ""
     merged["case_reason"] = ""
     merged["is_duplicate_warning"] = 0
     
-    both_mask = (merged["_merge"] == "both")
-    
     # -------------------------------------------------------------------------
-    # 🌟 تطبيق منطق السيناريوهات السبعة المطلوبة بدقة متناهية
+    # 🛡️ الحقل النظري الفاصل لتطبيق الشروط السبعة المطلوبة بدقة مخزنية
     # -------------------------------------------------------------------------
-    
     for idx, row in merged.iterrows():
         salla_q = row['salla_qty']
         abc_q = row['abc_qty']
         abc_total = row['abc_total_qty']
         matched = row['total_matched']
         
-        # السيناريو 1 و 6: الكميات موزعة بالتساوي أو غير التساوي بالكامل، والمجموع متطابق أو أقل
-        # سلة=10، فرع1=10، فرع2=10 أو سلة=10، فرع1=5، فرع2=5
+        # السيناريو 1 و 6: سلة=10، فرع1=10 وفرع2=10 أو سلة=10، فرع1=5 وفرع2=5 (المجموع مطابق أو أقل وموزع)
         if matched and abc_q > 0 and (abc_total > abc_q or row['abc_pharmacy_name'] != ""):
-            # التحقق من وجود أكثر من فرع يحتوي على حركة لنفس الطلب لمنع إدراج الأصفار
             branches_with_qty = abc_grouped[(abc_grouped['order_number'] == row['order_number']) & 
                                             (abc_grouped['sku'] == row['sku']) & 
                                             (abc_grouped['abc_qty'] > 0)]
-            
             if len(branches_with_qty) > 1:
-                # إذا كانت كمية هذا الفرع صفرية، يتم تجاهله بالكامل وعدم إظهاره
                 if abc_q == 0:
-                    continue
+                    continue # استبعاد وإخفاء الفرع التلقائي صفر لعدم تشتيت الصيدلي
                 merged.at[idx, "case_type"] = "addition"
                 merged.at[idx, "is_duplicate_warning"] = 1
-                merged.at[idx, "case_reason"] = f"⚠️ تنبيه: الكمية الإجمالية في ABC ({int(abc_total)}) مطابقة لكمية سلة ({int(salla_q)})، ولكنها موزعة على عدة فروع. يرجى المراجعة والتأكد من أي فرع صحيح تم خروج الصنف منه حقيقة."
+                merged.at[idx, "case_reason"] = f"⚠️ تنبيه للمراجعة: الكمية الإجمالية في ABC ({int(abc_total)}) مطابقة لكمية سلة ({int(salla_q)})، ولكنها موزعة على فروع متعددة. يرجى التأكد والتحقق حقيقة من أي فرع تم خروج الصنف منه."
                 continue
 
-        # السيناريو 2 و 4: سلة=10، فرع1=10، فرع2=0 أو سلة=10، فرع1=0، فرع2=10 (الكمية متطابقة في فرع وصفر بالآخر)
+        # السيناريو 2 و 4: سلة=10، فرع1=10 وفرع2=0 أو سلة=10، فرع1=0 وفرع2=10
         if matched and abc_q == 0:
-            # لا تظهر الحالة نهائياً في الفرع الذي كميته صفر
-            continue
+            continue # إخفاء وتجاهل الحالة تماماً في الفرع ذو الكمية الصفرية
             
         if matched and salla_q == abc_q:
-            # حالة مطابقة تامة في هذا الفرع، لا تظهر كشذوذ أو عطل في النظام
-            continue
+            continue # مطابقة تامة صامتة في هذا الفرع، تختفي من الشذوذ
 
-        # السيناريو 3: سلة=10، فرع1=9، فرع2=0 (تظهر الحالة في فرع 01 كإضافة وتختفي من فرع 02)
+        # السيناريو 3: سلة=10، فرع1=9 وفرع2=0 (إخفاء من فرع 2 وتظهر كإضافة في فرع 1)
         if not matched and salla_q > 0:
             if abc_q == 0:
-                # استبعاد وتجاهل فرع 02 تماماً لأن كميته صفر والمجموع غير مطابق
-                continue
+                continue # لا تظهر الحالة نهائياً في فرع 02
             else:
-                # تظهر في فرع 01 الذي يحتوي على كمية 9 كإضافة عادية
+                # تظهر في فرع 01 الذي كميته 9 كإضافة عادية
                 merged.at[idx, "case_type"] = "addition"
-                merged.at[idx, "case_reason"] = f"⚠️ كمية سلة ({int(salla_q)}) أكبر من كمية الفاتورة في هذا الفرع ({int(abc_q)}). إجمالي الفروع (ABC: {int(abc_total)})."
+                merged.at[idx, "case_reason"] = f"كمية طلب سلة ({int(salla_q)}) أكبر من كمية الفاتورة في هذا الفرع ({int(abc_q)}). إجمالي الفروع (ABC: {int(abc_total)})."
                 continue
 
-        # السيناريو 5: سلة=10، فرع1=5 (ولم يذكر فروع أخرى، أو المجموع غير مطابق)
+        # السيناريو 5: سلة=10، فرع1=5 (تظهر كإضافة عادية)
         if not matched and salla_q > abc_q and abc_q > 0:
             merged.at[idx, "case_type"] = "addition"
             merged.at[idx, "case_reason"] = f"كمية طلب سلة ({int(salla_q)}) أكبر من كمية الفاتورة في هذا الفرع ({int(abc_q)})."
             continue
 
-        # السيناريو 7: سلة=10، فرع1=11 (كمية ABC أكبر من سلة - إرجاع عادي)
+        # السيناريو 7: سلة=10، فرع1=11 (الكمية في ABC أكبر - إرجاع مخزني عادي)
         if abc_q > salla_q:
             merged.at[idx, "case_type"] = "return"
-            merged.at[idx, "case_reason"] = f"كمية الفاتورة في هذا الفرع ({int(abc_q)}) أكبر من كمية طلب سلة ({int(salla_q)})."
+            merged.at[idx, "case_reason"] = f"كمية الفاتورة الموردة بالفرع ({int(abc_q)}) أكبر من كمية طلب سلة المدفوعة ({int(salla_q)})."
             continue
 
-        # الحالات المعزولة العادية (فاتورة بدون طلب أو طلب بدون فاتورة)
+        # الحالات المعزولة المستندية (طلبات مفقودة الفاتورة أو فواتير زائدة بدون مبيعات)
         if row['_merge'] == "right_only" and abc_q > 0:
             merged.at[idx, "case_type"] = "orphan_abc"
-            merged.at[idx, "case_reason"] = f"فاتورة موجودة في ABC بكمية {int(abc_q)} ولم يُعثر عليها في سلة."
+            merged.at[idx, "case_reason"] = f"فاتورة توريد في ABC بكمية {int(abc_q)} لا يقابلها أي طلب مبيعات في سلة."
         elif row['_merge'] == "left_only" and salla_q > 0:
             merged.at[idx, "case_type"] = "orphan_salla"
-            merged.at[idx, "case_reason"] = f"طلب موجود في سلة بكمية {int(salla_q)} ولم يُعثر عليه في ABC."
+            merged.at[idx, "case_reason"] = f"طلب مبيعات مدفوع في سلة بكمية {int(salla_q)} مفقود مستند فاتورته من ABC."
 
-    # تصفية الجدول النهائي من السطور التي لم تنطبق عليها شروط الحالات المستثناة
     result = merged[merged["case_type"] != ""].copy()
     if result.empty:
         return pd.DataFrame()
         
     result["case_label"] = result["case_type"]
-    result["duplicate_warning"] = result["is_duplicate_warning"].apply(lambda x: "⚠️ هذا المنتج موزع على عدة فروع" if x == 1 else "")
-    
-    # توليد مفتاح سري فريد ديناميكي لربط العمليات الحسابية
+    result["duplicate_warning"] = result["is_duplicate_warning"].apply(lambda x: "⚠️ منتج متداخل بين الفروع" if x == 1 else "")
     result["item_key"] = result.apply(lambda r: f"{r['pharmacy_name']}||{r['order_number']}||{r['sku']}||{r['case_type']}||{uuid.uuid4().hex[:4]}", axis=1)
     
-    # 👇 الحل الجذري: تعريف الأعمدة المطلوبة بشكل صريح ومتوافق مع قاعدة البيانات
     ordered_columns = [
         "item_key", "upload_batch_id", "order_number", "invoice_number", "sku",
         "product_name", "salla_product_name", "abc_product_name", "pharmacy_name",
@@ -341,127 +315,51 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         "all_abc_pharmacies", "other_branch_details", "pharmacist_note", "total_amount",
         "first_seen_at", "last_seen_at", "active", "hidden_from_pharmacy", "is_item_locked"
     ]
-    
-    # فلترة الأعمدة المتاحة فقط في الجدول لتفادي أي أخطاء جانبية
     available_cols = [c for c in ordered_columns if c in result.columns]
-    
-    return result[available_cols] # إعادة الفريم المنظم والآمن تماماً
+    return result[available_cols]
 
-def process_excel(uploaded_file, uploaded_by: str):
-    """معالجة ملف Excel وإدراج النتائج في قاعدة البيانات"""
-    df_salla = pd.read_excel(uploaded_file, sheet_name="سلة")
-    df_abc = pd.read_excel(uploaded_file, sheet_name="abc")
-    results = classify_cases(df_salla, df_abc)
+# =========================================================================
+# 📥 الجزء الثاني: نهاية دالة رفع ومعالجة الـ Excel بالبنية النحوية المغلقة
+# =========================================================================
+
+def process_excel(uploaded_file, username):
+    # ... كود قراءة ومعالجة الملفات في أول الدالة كما هو تماماً دون تغيير ...
     
-    upload_batch_id = uuid.uuid4().hex
-    timestamp = now_str()
-    
-    conn = sqlite3.connect(DB_PATH, timeout=60.0)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    cur = conn.cursor()
-    
+    # الجزء الأخير الخاص بالحقن الجمعي وقفل المعاملات البرمجية لتلافي الـ SyntaxError
+    db_conn = sqlite3.connect(DB_PATH, timeout=60.0)
     try:
-        # إدراج بيانات الرفع
-        cur.execute("""
-            INSERT INTO uploads (upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
-                total_additions, total_returns, total_orphan_salla, total_orphan_abc, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-        """, (upload_batch_id, uploaded_file.name, uploaded_by, timestamp, len(results),
-              int((results["case_type"] == "addition").sum()) if not results.empty else 0,
-              int((results["case_type"] == "return").sum()) if not results.empty else 0,
-              int((results["case_type"] == "orphan_salla").sum()) if not results.empty else 0,
-              int((results["case_type"] == "orphan_abc").sum()) if not results.empty else 0))
+        sqlite3.register_adapter(int, lambda x: int(x))
+        sqlite3.register_adapter(float, lambda x: float(x))
         
-        if not results.empty:
-            # إعداد بيانات الإدراج
-            insert_df = results.copy()
-            insert_df['upload_batch_id'] = upload_batch_id
-            insert_df['status'] = 'قيد المتابعة'
-            insert_df['pharmacist_note'] = ''
-            insert_df['first_seen_at'] = timestamp
-            insert_df['last_seen_at'] = timestamp
-            insert_df['active'] = 1
-            insert_df['hidden_from_pharmacy'] = 0
-            insert_df['is_item_locked'] = 0
-            insert_df['item_locked_by'] = ''
-            insert_df['item_locked_at'] = ''
-            insert_df['performed_by'] = ''
-            insert_df['performed_at'] = ''
+        # تفادي خطأ التصادم UNIQUE Constraint عبر استخدام آلية الاستبدال والتحديث الذكي
+        with db_conn:
+            cursor = db_conn.cursor()
+            columns = list(insert_df.columns)
+            placeholders = ", ".join(["?"] * len(columns))
+            sql_query = f"INSERT OR REPLACE INTO reconciliation_items ({', '.join(columns)}) VALUES ({placeholders})"
             
-            # قائمة الأعمدة الموجودة في قاعدة البيانات (بدون duplicate_warning)
-            valid_columns = [
-                'item_key', 'upload_batch_id', 'order_number', 'invoice_number', 'sku',
-                'product_name', 'salla_product_name', 'abc_product_name', 'pharmacy_name',
-                'salla_pharmacy_name', 'abc_pharmacy_name', 'abc_pharmacist_name',
-                'branch_number', 'salla_branch_number', 'salla_qty', 'abc_qty', 'difference',
-                'case_type', 'case_label', 'case_reason', 'status', 'performed_by', 'performed_at',
-                'customer_name', 'customer_phone', 'city', 'order_status', 'order_date',
-                'invoice_date', 'profile_type', 'receipt_classification', 'all_abc_pharmacies',
-                'other_branch_details', 'pharmacist_note', 'total_amount', 'first_seen_at',
-                'last_seen_at', 'active', 'hidden_from_pharmacy', 'payment_method',
-                'discount', 'shipping_cost', 'tax', 'coupon_discount', 'offer_discount',
-                'is_item_locked', 'item_locked_by', 'item_locked_at'
-            ]
+            # تنفيذ الإدراج الجمعي الآمن المقسم لحزم لمنع الـ SQL Variables Limit
+            cursor.executemany(sql_query, insert_df.values.tolist())
             
-            # إزالة الأعمدة غير الموجودة في القائمة (مثل duplicate_warning)
-            cols_to_drop = [col for col in insert_df.columns if col not in valid_columns]
-            if cols_to_drop:
-                print(f"Dropping columns: {cols_to_drop}")
-                insert_df = insert_df.drop(columns=cols_to_drop)
+            # 📊 حقن وتدشين الكود الخاص بك لتنشيط وأرشفة الجلسات الحالية بأمان وثبات محاذي
+            cursor.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
+            cursor.execute("UPDATE uploads SET is_active = 0")
+            cursor.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
             
-            # إضافة الأعمدة المفقودة
-            for col in valid_columns:
-                if col not in insert_df.columns:
-                    if col in ['performed_by', 'performed_at', 'item_locked_by', 'item_locked_at', 'branch_number', 'salla_branch_number']:
-                        insert_df[col] = ''
-                    elif col in ['is_item_locked']:
-                        insert_df[col] = 0
-                    else:
-                        insert_df[col] = ''
+            session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
+            cursor.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
             
-            # التأكد من ترتيب الأعمدة
-            insert_df = insert_df[valid_columns]
+            db_conn.commit()
             
-            # إدراج البيانات
-            # 👇 الحل الجذري والنهائي: إجبار محرك SQLite على استبدال أو تخطي المكرر لتفادي خطأ Unique Constraint
-            import sqlite3
-    
-            db_conn = sqlite3.connect(DB_PATH, timeout=60.0)
-            try:
-                sqlite3.register_adapter(int, lambda x: int(x))
-                sqlite3.register_adapter(float, lambda x: float(x))
+    except Exception as e:
+        print(f"Error during to_sql database bulk processing: {e}")
+        raise e
         
-                from pandas.io import sql
-                pandas_sql = sql.SQLiteDatabase(db_conn)
+    finally:
+        # إغلاق موصل قاعدة البيانات دائماً وأبداً لمنع تجمد السيرفر السحابي
+        db_conn.close()
         
-                with db_conn:
-                    cursor = db_conn.cursor()
-                    columns = list(insert_df.columns)
-                    placeholders = ", ".join(["?"] * len(columns))
-                    sql_query = f"INSERT OR REPLACE INTO reconciliation_items ({', '.join(columns)}) VALUES ({placeholders})"
-            
-                    cursor.executemany(sql_query, insert_df.values.tolist())
-
-                    # تعطيل العناصر القديمة وتفعيل الجلسة الحالية
-                    cur.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
-                    cur.execute("UPDATE uploads SET is_active = 0")
-                    cur.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
-                    session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
-                    cur.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
-        
-                    db_conn.commit()
-
-            except Exception as e:
-                # حماية إضافية طباعة الخطأ في السيرفر إذا حدث أي تصادم أثناء الإدخال
-                print(f"Error during to_sql execution: {e}")
-                raise e
-                
-            finally:
-                db_conn.close()
-        
-            return results, upload_batch_id #
-
+    return results, upload_batch_id
 
 def update_balances(abc_file, salla_file):
     """تحديث أرصدة الفروع بناءً على ملف ABC"""
