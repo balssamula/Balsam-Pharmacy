@@ -220,14 +220,20 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
                 save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value)
                 st.toast("📋 تم حفظ الملاحظة بنجاح!", icon="💾")
                 
-        if allow_actions and row.get("status") != "تم" and diff_value != 0 and case_type in {"addition", "return", "orphan_salla", "orphan_abc"}:
-            button_label = "✅ تأكيد الإضافة" if diff_value > 0 else "🔄 تأكيد الإرجاع"
+        # 👇 تحديث شروط رسم الأزرار لتطابق التوزيع الجديد داخل التبويبات المدمجة
+        if allow_actions and row.get("status") != "تم" and case_type in {"addition", "return", "orphan_salla", "orphan_abc"}:
+            # إذا كان نوع الحالة البرمجي addition يكون الزر "تأكيد الإضافة"
+            if case_type in {"addition", "orphan_salla"}:
+                button_label = "✅ تأكيد الإضافة"
+            else:
+                button_label = "🔄 تأكيد الإرجاع"
+                
             with btn_col2:
                 if st.button(button_label, key=f"done_{idx}_{note_key}", use_container_width=True):
                     from utils.database import save_case_note, mark_case_done
                     save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value)
                     mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
-                    st.toast("🚀 تم تأكيد الحالة بنجاح!", icon="✅")
+                    st.toast("🚀 تم تأكيد وتحديث الحالة بنجاح!", icon="✅")
                     st.rerun()
                     
         st.markdown("---")
