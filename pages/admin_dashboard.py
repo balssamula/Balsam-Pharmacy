@@ -124,14 +124,14 @@ def styled_dataframe(input_df):
     
     display_df = input_df.copy()
     
-    # إضافة عمود type_label لتوضيح نوع الحالة
+    # توحيد روابط المسميات لمنع سقوط الإحصائيات في الداشبورد الإداري
     if 'case_type' in display_df.columns:
-        display_df['type_label'] = display_df['case_type'].map({
-            'addition': '➕ إضافة عادية',
-            'return': '🔄 إرجاع عادي',
-            'orphan_salla': '🛒 طلب بدون فاتورة (سلة)',
-            'orphan_abc': '📄 فاتورة بدون طلب (ABC)',
-            'post_cutoff_abc': '⏰ فاتورة بعد آخر طلب'
+        display_df['label_type'] = display_df['case_type'].map({
+            'addition': 'إضافة عادية ➕',
+            'return': 'إرجاع عادي 🔄',
+            'orphan_salla': 'طلب بدون فاتورة (سلة) 🛒',
+            'orphan_abc': 'فاتورة بدون طلب (ABC) 📄',
+            'post_cutoff_abc': 'فاتورة بعد آخر طلب ⏰'
         }).fillna(display_df['case_type'])
     
     display_df = display_df.rename(columns={
