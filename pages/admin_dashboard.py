@@ -598,17 +598,24 @@ def show():
     # قناع تصفية الحالات النشطة (بانتظار المراجعة أو المتابعة)
     active_mask_filtered = filtered_df['status_clean'].isin(['قيد المتابعة', 'بانتظار المراجعة', 'معلق', ''])
 
-    # تجميع التبويبات المدمجة بناءً على الأقنعة المطهرة الجديدة
-    additions_merged_df = filtered_df[filtered_df['case_type'].isin(['addition', 'orphan_salla']) & active_mask_filtered].copy()
-    additions_merged_df = exclude_old_items(additions_merged_df)
-    total_additions_merged = len(additions_merged_df)
-    completed_additions_merged = len(additions_merged_df[additions_merged_df["status"] == "تم"])
-    
-    returns_merged_df = filtered_df[filtered_df['case_type'].isin(['return', 'orphan_abc']) & active_mask_filtered].copy()
-    returns_merged_df = exclude_old_items(returns_merged_df)
-    total_returns_merged = len(returns_merged_df)
-    completed_returns_merged = len(returns_merged_df[returns_merged_df["status"] == "تم"])
-    
+    # 1. تجميع فريم الإضافات الأولي بناءً على نوع الحالة والأقنعة النشطة
+    additions_base_df = filtered_df[filtered_df['case_type'].isin(['addition', 'orphan_salla']) & active_mask_filtered].copy()
+
+    # 2. 🔥 التعديل الحاسم: استبعاد الملغي والمسترجع من الفريم الرئيسي قبل حساب العدادات
+    if not additions_base_df.empty and 'order_status' in additions_base_df.columns:
+        additions_base_df['order_status_clean'] = additions_base_df['order_status'].astype(str).str.strip()
+        cancelled_mask = additions_base_df['order_status_clean'].str.contains("ملغي|مسترجع|cancelled|returned|refunded", na=False, case=False)
+        additions_base_df = additions_base_df[~cancelled_mask].copy()
+
+    # 3. حساب العدادات الرقمية الحقيقية بدقة متناهية بناءً على البيانات المطهرة
+    total_additions_merged = len(additions_base_df)
+    completed_additions_merged = int((additions_base_df['status_clean'] == 'تم').sum())
+
+    # 4. تجميع فريم الإرجاعات بشكل مستقر وحساب عداداته
+    returns_base_df = filtered_df[filtered_df['case_type'].isin(['return', 'orphan_abc']) & active_mask_filtered].copy()
+    total_returns_merged = len(returns_base_df)
+    completed_returns_merged = int((returns_base_df['status_clean'] == 'تم').sum())
+   
     post_cutoff_filtered = filtered_df[(filtered_df["case_type"] == "post_cutoff_abc") & active_mask_filtered].copy()
     post_cutoff_filtered = exclude_old_items(post_cutoff_filtered)
     total_post_cutoff = len(post_cutoff_filtered)
@@ -715,23 +722,13 @@ def show():
         st.markdown("""
         <div style="background: linear-gradient(135deg, #0f4c5c10, #1f7a8c10); padding: 0.75rem; border-radius: 12px; margin-bottom: 1rem;">
             <p style="margin: 0; font-weight: 500; font-size:0.9rem;">
-                <strong>📥 قسم الإضافات المدمج:</strong> يشمل النواقص التي تتطلب إضافات مخزنية بالفروع.<br>
-                <span style="font-size: 0.85rem;">🔵 الإضافات العادية: كمية الطلب أعلى من الفاتورة | 🟡 الطلبات بدون فاتورة: طلب موجود في سلة وغير موجود في (ABC) </span>
-                <span style="color:#d9534f;">⚠️ تم استبعاد كامل الطلبات الملغية والمسترجعة من هذا التبويب لضمان دقة التعديلات.</span>
+                <strong>📥 قسم الإضافات المدمج:</strong> تم تصفية العداد والجدول بالكامل لحظر الحالات غير النشطة.
             </p>
         </div>
         """, unsafe_allow_html=True)
     
-        # 1. تجميع الحالات النشطة الخاصة بالإضافات
-        additions_merged_df = filtered_df[filtered_df['case_type'].isin(['addition', 'orphan_salla']) & active_mask_filtered].copy()
-        additions_merged_df = exclude_old_items(additions_merged_df)
-    
-        # 2. التطهير والفلترة الصارمة لحظر الملغي والمسترجع تماماً من العرض الإداري
-        if not additions_merged_df.empty and 'order_status' in additions_merged_df.columns:
-            additions_merged_df['order_status_clean'] = additions_merged_df['order_status'].astype(str).str.strip()
-            # تصفية الفريم بناءً على الكلمات المفتاحية العكسية
-            cancelled_mask = additions_merged_df['order_status_clean'].str.contains("ملغي|مسترجع|cancelled|returned|refunded", na=False, case=False)
-            additions_merged_df = additions_merged_df[~cancelled_mask].copy()
+        # استبعاد العناصر القديمة التاريخية فقط وعرض الجدول فوراً
+        additions_merged_df = exclude_old_items(additions_base_df)
     
         if not additions_merged_df.empty:
             additions_merged_df['case_label'] = additions_merged_df['case_type'].map({
