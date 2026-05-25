@@ -403,6 +403,12 @@ def process_excel(uploaded_file, uploaded_by: str):
             
             # إدراج البيانات
             insert_df.to_sql('reconciliation_items', conn, if_exists='append', index=False, method='multi')
+            db_conn = sqlite3.connect(DB_PATH, timeout=60.0)
+            try:
+                # chunksize=500 يضمن إدراج 500 صف في المرة الواحدة وهو آمن ومستقر جداً مع SQLite
+                insert_df.to_sql('reconciliation_items', db_conn, if_exists='append', index=False, chunksize=500)
+            finally:
+                db_conn.close()
         
         # تعطيل العناصر القديمة وتفعيل الجلسة الحالية
         cur.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
