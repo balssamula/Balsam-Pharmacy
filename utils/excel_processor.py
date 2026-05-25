@@ -352,24 +352,25 @@ def process_excel(uploaded_file, username):
             # تنفيذ الإدراج الجمعي السريع والآمن فورا
             cursor.executemany(sql_query, results.values.tolist())
             
-            # 📊 أسطر تفعيل الجلسة الحالية وأرشفة الملفات القديمة
-            cursor.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
-            cursor.execute("UPDATE uploads SET is_active = 0")
-            cursor.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
-            
-            session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
-            cursor.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
-            
-            db_conn.commit()
-            
+            finally:
+                db_conn.close()
+        
+        # تعطيل العناصر القديمة وتفعيل الجلسة الحالية
+        cur.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
+        cur.execute("UPDATE uploads SET is_active = 0")
+        cur.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
+        session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
+        cur.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
+        
+        conn.commit()
+        
     except Exception as e:
-        print(f"Error during database bulk insertion: {e}")
-        raise e
-        
+        print(f"Error in process_excel: {e}")
+        conn.rollback()
+        raise
     finally:
-        # إغلاق موصل قاعدة البيانات دائماً وأبداً لمنع تجمد السيرفر السحابي
-        db_conn.close()
-        
+        conn.close()
+    
     return results, upload_batch_id
 
 def update_balances(abc_file, salla_file):
