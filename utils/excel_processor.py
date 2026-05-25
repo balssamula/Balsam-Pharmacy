@@ -51,7 +51,7 @@ def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
     df["customer_name"] = df[customer_col].apply(normalize_text) if customer_col else ""
     df["customer_phone"] = df[phone_col].apply(normalize_text) if phone_col else ""
     df["city"] = df[city_col].apply(normalize_text) if city_col else ""
-    df["order_status"] = df[status_col].apply(normalize_order_status) if status_col else ""
+    df["order_status"] = df[status_col].apply(normalize_text) if status_col else ""
     df["order_date"] = df[date_col].apply(normalize_text) if date_col else ""
     df["total_amount"] = pd.to_numeric(df[total_col], errors="coerce").fillna(0) if total_col else 0
     df["discount"] = pd.to_numeric(df[discount_col], errors="coerce").fillna(0) if discount_col else 0
@@ -77,8 +77,7 @@ def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
     df["pharmacy_name"] = branch_info.apply(lambda x: x[0])
     df["branch_number"] = branch_info.apply(lambda x: x[1])
     
-    # تجميع البيانات حسب رقم الطلب و SKU فقط (بدون فرع)
-    # لأن السلة تحدد فرع واحد لكل طلب
+    # تجميع البيانات حسب رقم الطلب و SKU
     grouped = df.groupby(["order_number", "sku"], as_index=False).agg({
         "product_name": "first",
         "quantity": "sum",
@@ -107,7 +106,7 @@ def prepare_salla_frame(df_salla: pd.DataFrame) -> pd.DataFrame:
 
 
 def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
-    """معالجة شيت ABC - تجميع كميات نفس SKU لنفس رقم الطلب لكل فرع على حدة"""
+    """معالجة شيت ABC - الحفاظ على كل فرع كسطر منفصل"""
     df = df_abc.copy()
     
     # إزالة صفوف الإجمالي (subtotal)
@@ -126,15 +125,15 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     
     # إذا لم يتم العثور على الأعمدة بأسمائها، نستخدم المواقع
     if order_col is None and len(df.columns) > 30:
-        order_col = df.columns[30]  # العمود AE
-        invoice_col = df.columns[28]  # العمود AC
-        date_col = df.columns[29]  # العمود AD
-        profile_col = df.columns[0]  # العمود A
-        sku_col = df.columns[1]  # العمود B
-        product_col = df.columns[2]  # العمود C
-        qty_col = df.columns[9] if len(df.columns) > 9 else None  # العمود J
-        pharmacy_col = df.columns[37] if len(df.columns) > 37 else None  # العمود AL
-        pharmacist_col = df.columns[44] if len(df.columns) > 44 else None  # العمود AS
+        order_col = df.columns[30]
+        invoice_col = df.columns[28]
+        date_col = df.columns[29]
+        profile_col = df.columns[0]
+        sku_col = df.columns[1]
+        product_col = df.columns[2]
+        qty_col = df.columns[9] if len(df.columns) > 9 else None
+        pharmacy_col = df.columns[37] if len(df.columns) > 37 else None
+        pharmacist_col = df.columns[44] if len(df.columns) > 44 else None
     
     if order_col is None:
         raise ValueError("لم يتم العثور على عمود رقم الطلب في شيت ABC")
@@ -172,11 +171,10 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
     
-    # ========== التجميع الجديد: حسب رقم الطلب، SKU، والفرع ==========
-    # هذا يضمن أن كل فرع له سطر منفصل لنفس رقم الطلب و SKU
+    # تجميع البيانات حسب رقم الطلب، SKU، والفرع (كل فرع على حدة)
     grouped = df.groupby(["order_number", "sku", "abc_pharmacy_name"], as_index=False).agg({
-        "abc_qty": "sum",  # تجميع الكمية لكل فرع
-        "invoice_number": lambda x: " | ".join(sorted(set(str(v) for v in x if v))),  # دمج أرقام الفواتير
+        "abc_qty": "sum",
+        "invoice_number": lambda x: " | ".join(sorted(set(str(v) for v in x if v))),
         "invoice_date": "first",
         "abc_product_name": "first",
         "abc_pharmacist_name": "first",
@@ -189,34 +187,56 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
 
 
 def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame:
-    """تصنيف الحالات - مقارنة لكل فرع على حدة بدون تجميع"""
+    """
+    تصنيف الحالات حسب المنطق المطلوب:
+    1. مقارنة لكل فرع على حدة
+    2. إذا كان المجموع الكلي لكميات ABC يساوي كمية سلة ولكن موزع على عدة فروع، تظهر الحالة في جميع الفروع مع تنبيه
+    3. إذا كان المجموع الكلي لا يساوي، تظهر الحالة في الفروع التي بها كميات
+    """
     salla_grouped = prepare_salla_frame(df_salla)
     abc_grouped = prepare_abc_frame(df_abc)
     
     if salla_grouped.empty and abc_grouped.empty:
         return pd.DataFrame()
     
-    # ========== إنشاء قائمة بجميع الفروع من ABC ==========
-    # نأخذ كل فرع كسطر منفصل
-    abc_by_branch = abc_grouped.copy()
+    # حساب المجموع الكلي لكميات ABC لكل order_number و sku
+    abc_total_qty = abc_grouped.groupby(["order_number", "sku"])["abc_qty"].sum().reset_index()
+    abc_total_qty.rename(columns={"abc_qty": "abc_total_qty"}, inplace=True)
     
-    # ========== دمج سلة مع ABC لكل فرع على حدة ==========
-    # نستخدم merge بحيث كل فرع في ABC له سطر منفصل
-    merged = pd.merge(salla_grouped, abc_by_branch, on=["order_number", "sku"], how="outer", indicator=True)
+    # دمج سلة مع المجموع الكلي لمعرفة إذا كان المجموع مطابقاً
+    salla_with_total = pd.merge(salla_grouped, abc_total_qty, on=["order_number", "sku"], how="left")
+    salla_with_total["abc_total_qty"] = salla_with_total["abc_total_qty"].fillna(0)
+    
+    # تحديد ما إذا كان المجموع الكلي مطابقاً لكمية سلة
+    salla_with_total["total_matched"] = salla_with_total["salla_qty"] == salla_with_total["abc_total_qty"]
+    
+    # دمج مع بيانات ABC لكل فرع على حدة
+    merged = pd.merge(
+        salla_with_total, 
+        abc_grouped, 
+        on=["order_number", "sku"], 
+        how="outer", 
+        indicator=True
+    )
     
     # تعبئة القيم المفقودة
-    for col in ["salla_qty", "abc_qty", "total_amount"]:
+    for col in ["salla_qty", "abc_qty", "total_amount", "abc_total_qty"]:
         if col in merged.columns:
             merged[col] = pd.to_numeric(merged[col], errors="coerce").fillna(0)
         else:
             merged[col] = 0
+    
+    # تعبئة عمود total_matched للصفوف التي ليس لها سلة
+    if "total_matched" not in merged.columns:
+        merged["total_matched"] = False
+    merged["total_matched"] = merged["total_matched"].fillna(False)
     
     # الأعمدة النصية
     text_cols = [
         "salla_product_name", "abc_product_name", "customer_name", "customer_phone", "city",
         "order_status", "order_date", "invoice_number", "invoice_date", "salla_pharmacy_name",
         "abc_pharmacy_name", "abc_pharmacist_name", "profile_type", "receipt_classification",
-        "all_abc_pharmacies", "other_branch_details", "payment_method"
+        "all_abc_pharmacies", "other_branch_details", "payment_method", "salla_pharmacy_name"
     ]
     for col in text_cols:
         if col not in merged.columns:
@@ -227,51 +247,85 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     merged["product_name"] = merged["salla_product_name"]
     merged.loc[merged["product_name"].eq(""), "product_name"] = merged.loc[merged["product_name"].eq(""), "abc_product_name"]
     
-    # تعبئة اسم الصيدلية - نستخدم اسم الفرع من ABC إذا موجود
+    # تعبئة اسم الصيدلية
     merged["pharmacy_name"] = merged["salla_pharmacy_name"]
     abc_mask = (merged["abc_pharmacy_name"] != "") & (merged["abc_pharmacy_name"] != "nan")
     merged.loc[abc_mask, "pharmacy_name"] = merged.loc[abc_mask, "abc_pharmacy_name"]
-    
     empty_mask = (merged["pharmacy_name"] == "") | (merged["pharmacy_name"] == "nan")
     merged.loc[empty_mask, "pharmacy_name"] = merged.loc[empty_mask, "salla_pharmacy_name"]
     
-    # حساب الفرق (لكل فرع على حدة)
+    # حساب الفرق
     merged["difference"] = merged["salla_qty"] - merged["abc_qty"]
     
-    # ========== المنطق الجديد: مقارنة لكل فرع على حدة ==========
+    # ========== المنطق الأساسي للتصنيف ==========
     merged["case_type"] = ""
     merged["case_reason"] = ""
+    merged["is_duplicate_warning"] = 0  # تنبيه للتوزيع على عدة فروع
     
-    # حالة: العنصر موجود في سلة فقط (لا يوجد في أي فرع من ABC)
-    orphan_salla_mask = (merged["_merge"] == "left_only") & (merged["salla_qty"] > 0)
-    merged.loc[orphan_salla_mask, "case_type"] = "orphan_salla"
-    merged.loc[orphan_salla_mask, "case_reason"] = f"طلب موجود في سلة بكمية {merged.loc[orphan_salla_mask, 'salla_qty']} ولم يُعثر عليه في ABC."
-    
-    # حالة: العنصر موجود في ABC فقط (لا يوجد في سلة)
+    # 1. العنصر موجود فقط في ABC (فاتورة بدون طلب)
     orphan_abc_mask = (merged["_merge"] == "right_only") & (merged["abc_qty"] != 0)
     merged.loc[orphan_abc_mask, "case_type"] = "orphan_abc"
     merged.loc[orphan_abc_mask, "case_reason"] = f"فاتورة موجودة في ABC بكمية {merged.loc[orphan_abc_mask, 'abc_qty']} ولم يُعثر عليها في سلة."
     
-    # حالة: العنصر موجود في كليهما مع اختلاف في الكمية
-    both_mask = (merged["_merge"] == "both") & (merged["salla_qty"] != merged["abc_qty"])
+    # 2. العنصر موجود فقط في سلة (طلب بدون فاتورة)
+    orphan_salla_mask = (merged["_merge"] == "left_only") & (merged["salla_qty"] > 0)
+    merged.loc[orphan_salla_mask, "case_type"] = "orphan_salla"
+    merged.loc[orphan_salla_mask, "case_reason"] = f"طلب موجود في سلة بكمية {merged.loc[orphan_salla_mask, 'salla_qty']} ولم يُعثر عليه في ABC."
     
-    # إضافة (كمية سلة أكبر من كمية ABC)
-    addition_mask = both_mask & (merged["salla_qty"] > merged["abc_qty"])
+    # 3. العنصر موجود في كليهما
+    both_mask = (merged["_merge"] == "both")
+    
+    # 3a. إذا كان المجموع الكلي مطابقاً لكمية سلة ولكن موزع على عدة فروع
+    multiple_branches_mask = both_mask & (merged["total_matched"] == True) & (merged["abc_qty"] > 0)
+    merged.loc[multiple_branches_mask, "case_type"] = "addition"  # أو case_type خاص
+    merged.loc[multiple_branches_mask, "is_duplicate_warning"] = 1
+    merged.loc[multiple_branches_mask, "case_reason"] = (
+        f"⚠️ تنبيه: الكمية الإجمالية في ABC ({merged.loc[multiple_branches_mask, 'abc_total_qty']}) "
+        f"مطابقة لكمية سلة ({merged.loc[multiple_branches_mask, 'salla_qty']})، ولكنها موزعة على عدة فروع. "
+        f"هذا الفرع تظهر فيه كمية {merged.loc[multiple_branches_mask, 'abc_qty']}. "
+        f"يرجى المراجعة والتأكد من أي فرع صحيح تم خروج الصنف منه حقيقة."
+    )
+    
+    # 3b. إضافة عادية (كمية سلة أكبر من كمية ABC في هذا الفرع، والمجموع الكلي غير مطابق)
+    addition_mask = (
+        both_mask & 
+        (merged["total_matched"] == False) & 
+        (merged["salla_qty"] > merged["abc_qty"]) &
+        (merged["abc_qty"] > 0)
+    )
     merged.loc[addition_mask, "case_type"] = "addition"
     merged.loc[addition_mask, "case_reason"] = (
         f"كمية الطلب في سلة ({merged.loc[addition_mask, 'salla_qty']}) "
-        f"أكبر من كمية الفاتورة في هذا الفرع ({merged.loc[addition_mask, 'abc_qty']})."
+        f"أكبر من كمية الفاتورة في هذا الفرع ({merged.loc[addition_mask, 'abc_qty']}). "
+        f"(إجمالي ABC: {merged.loc[addition_mask, 'abc_total_qty']})"
     )
     
-    # إرجاع (كمية ABC أكبر من كمية سلة)
-    return_mask = both_mask & (merged["abc_qty"] > merged["salla_qty"])
+    # 3c. إضافة مع فرع لا توجد فيه كمية (abc_qty = 0) ولكن المجموع الكلي غير مطابق
+    zero_in_branch_mask = (
+        both_mask & 
+        (merged["total_matched"] == False) & 
+        (merged["salla_qty"] > 0) &
+        (merged["abc_qty"] == 0)
+    )
+    merged.loc[zero_in_branch_mask, "case_type"] = "addition"
+    merged.loc[zero_in_branch_mask, "case_reason"] = (
+        f"⚠️ تنبيه: الطلب موجود في سلة بكمية {merged.loc[zero_in_branch_mask, 'salla_qty']} "
+        f"ولكن هذا الفرع لا تظهر فيه أي كمية في ABC. "
+        f"(إجمالي ABC في جميع الفروع: {merged.loc[zero_in_branch_mask, 'abc_total_qty']})"
+    )
+    
+    # 3d. إرجاع عادي (كمية ABC أكبر من كمية سلة في هذا الفرع)
+    return_mask = (
+        both_mask & 
+        (merged["abc_qty"] > merged["salla_qty"])
+    )
     merged.loc[return_mask, "case_type"] = "return"
     merged.loc[return_mask, "case_reason"] = (
         f"كمية الفاتورة في هذا الفرع ({merged.loc[return_mask, 'abc_qty']}) "
         f"أكبر من كمية الطلب في سلة ({merged.loc[return_mask, 'salla_qty']})."
     )
     
-    # تصفية النتيجة: فقط الحالات التي case_type ليس فارغاً
+    # تصفية النتيجة
     result = merged[merged["case_type"] != ""].copy()
     
     if result.empty:
@@ -279,13 +333,18 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     
     result["case_label"] = result["case_type"]
     
+    # إضافة عمود للتنبيه في الواجهة
+    result["duplicate_warning"] = result["is_duplicate_warning"].apply(
+        lambda x: "⚠️ هذا المنتج موزع على عدة ف branches" if x == 1 else ""
+    )
+    
     # إنشاء item_key فريد
     result["item_key"] = result.apply(
         lambda r: f"{r['pharmacy_name']}||{r['order_number']}||{r['sku']}||{r['case_type']}", 
         axis=1
     )
     
-    # الأعمدة المطلوبة للنتيجة
+    # الأعمدة المطلوبة
     ordered_columns = [
         "item_key", "order_number", "invoice_number", "sku", "product_name",
         "salla_product_name", "abc_product_name", "pharmacy_name",
@@ -296,7 +355,7 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         "invoice_date", "profile_type", "receipt_classification",
         "all_abc_pharmacies", "other_branch_details", "total_amount",
         "payment_method", "discount", "shipping_cost", "tax",
-        "coupon_discount", "offer_discount"
+        "coupon_discount", "offer_discount", "duplicate_warning"
     ]
     
     for col in ordered_columns:
@@ -306,6 +365,7 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     result = result[ordered_columns]
     
     return result
+
 
 def process_excel(uploaded_file, uploaded_by: str):
     """معالجة ملف Excel وإدراج النتائج في قاعدة البيانات"""
@@ -334,7 +394,6 @@ def process_excel(uploaded_file, uploaded_by: str):
               int((results["case_type"] == "orphan_abc").sum()) if not results.empty else 0))
         
         if not results.empty:
-            # إعداد بيانات الإدراج
             insert_df = results.copy()
             insert_df['upload_batch_id'] = upload_batch_id
             insert_df['status'] = 'قيد المتابعة'
@@ -349,7 +408,6 @@ def process_excel(uploaded_file, uploaded_by: str):
             insert_df['performed_by'] = ''
             insert_df['performed_at'] = ''
             
-            # قائمة الأعمدة المطلوبة
             valid_columns = [
                 'item_key', 'upload_batch_id', 'order_number', 'invoice_number', 'sku',
                 'product_name', 'salla_product_name', 'abc_product_name', 'pharmacy_name',
@@ -361,18 +419,16 @@ def process_excel(uploaded_file, uploaded_by: str):
                 'other_branch_details', 'pharmacist_note', 'total_amount', 'first_seen_at',
                 'last_seen_at', 'active', 'hidden_from_pharmacy', 'payment_method',
                 'discount', 'shipping_cost', 'tax', 'coupon_discount', 'offer_discount',
-                'is_item_locked', 'item_locked_by', 'item_locked_at'
+                'is_item_locked', 'item_locked_by', 'item_locked_at', 'duplicate_warning'
             ]
             
-            # إزالة الأعمدة غير الموجودة
             cols_to_drop = [col for col in insert_df.columns if col not in valid_columns]
             if cols_to_drop:
                 insert_df = insert_df.drop(columns=cols_to_drop)
             
-            # إضافة الأعمدة المفقودة
             for col in valid_columns:
                 if col not in insert_df.columns:
-                    if col in ['performed_by', 'performed_at', 'item_locked_by', 'item_locked_at', 'branch_number', 'salla_branch_number']:
+                    if col in ['performed_by', 'performed_at', 'item_locked_by', 'item_locked_at', 'branch_number', 'salla_branch_number', 'duplicate_warning']:
                         insert_df[col] = ''
                     elif col in ['is_item_locked']:
                         insert_df[col] = 0
@@ -382,7 +438,6 @@ def process_excel(uploaded_file, uploaded_by: str):
             insert_df = insert_df[valid_columns]
             insert_df.to_sql('reconciliation_items', conn, if_exists='append', index=False, method='multi')
         
-        # تعطيل العناصر القديمة وتفعيل الجلسة الحالية
         cur.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
         cur.execute("UPDATE uploads SET is_active = 0")
         cur.execute("UPDATE uploads SET is_active = 1 WHERE upload_batch_id = ?", (upload_batch_id,))
