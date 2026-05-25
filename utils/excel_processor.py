@@ -443,7 +443,12 @@ def process_excel(uploaded_file, uploaded_by: str):
                     sql_query = f"INSERT OR REPLACE INTO reconciliation_items ({', '.join(columns)}) VALUES ({placeholders})"
             
                     cursor.executemany(sql_query, insert_df.values.tolist())
-            
+
+            except Exception as e:
+                # حماية إضافية طباعة الخطأ في السيرفر إذا حدث أي تصادم أثناء الإدخال
+                print(f"Error during to_sql execution: {e}")
+                raise e
+                
             finally:
                 db_conn.close()
         
