@@ -709,38 +709,37 @@ def show():
     ])
     
        
-with tab_additions:
-    st.markdown("""
-    <div style="background: linear-gradient(135deg, #0f4c5c10, #1f7a8c10); padding: 0.75rem; border-radius: 12px; margin-bottom: 1rem;">
-        <p style="margin: 0; font-weight: 500; font-size:0.9rem;">
-            <strong>📥 قسم الإضافات المدمج:</strong> يشمل النواقص التي تتطلب إضافات مخزنية بالفروع.<br>
-            <span style="font-size: 0.85rem;">🔵 الإضافات العادية: كمية الطلب أعلى من الفاتورة | 🟡 الطلبات بدون فاتورة: طلب موجود في سلة وغير موجود في (ABC) </span>
-            <span style="color:#d9534f;">⚠️ تم استبعاد كامل الطلبات الملغية والمسترجعة من هذا التبويب لضمان دقة التعديلات.</span>
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    with tab_additions:
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #0f4c5c10, #1f7a8c10); padding: 0.75rem; border-radius: 12px; margin-bottom: 1rem;">
+            <p style="margin: 0; font-weight: 500; font-size:0.9rem;">
+                <strong>📥 قسم الإضافات المدمج:</strong> يشمل النواقص التي تتطلب إضافات مخزنية بالفروع.<br>
+                <span style="font-size: 0.85rem;">🔵 الإضافات العادية: كمية الطلب أعلى من الفاتورة | 🟡 الطلبات بدون فاتورة: طلب موجود في سلة وغير موجود في (ABC) </span>
+                <span style="color:#d9534f;">⚠️ تم استبعاد كامل الطلبات الملغية والمسترجعة من هذا التبويب لضمان دقة التعديلات.</span>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
     
-    # 1. تجميع الحالات النشطة الخاصة بالإضافات
-    additions_merged_df = filtered_df[filtered_df['case_type'].isin(['addition', 'orphan_salla']) & active_mask_filtered].copy()
-    additions_merged_df = exclude_old_items(additions_merged_df)
+        # 1. تجميع الحالات النشطة الخاصة بالإضافات
+        additions_merged_df = filtered_df[filtered_df['case_type'].isin(['addition', 'orphan_salla']) & active_mask_filtered].copy()
+        additions_merged_df = exclude_old_items(additions_merged_df)
     
-    # 2. التطهير والفلترة الصارمة لحظر الملغي والمسترجع تماماً من العرض الإداري
-    if not additions_merged_df.empty and 'order_status' in additions_merged_df.columns:
-        additions_merged_df['order_status_clean'] = additions_merged_df['order_status'].astype(str).str.strip()
-        # تصفية الفريم بناءً على الكلمات المفتاحية العكسية
-        cancelled_mask = additions_merged_df['order_status_clean'].str.contains("ملغي|مسترجع|cancelled|returned|refunded", na=False, case=False)
-        additions_merged_df = additions_merged_df[~cancelled_mask].copy()
+        # 2. التطهير والفلترة الصارمة لحظر الملغي والمسترجع تماماً من العرض الإداري
+        if not additions_merged_df.empty and 'order_status' in additions_merged_df.columns:
+            additions_merged_df['order_status_clean'] = additions_merged_df['order_status'].astype(str).str.strip()
+            # تصفية الفريم بناءً على الكلمات المفتاحية العكسية
+            cancelled_mask = additions_merged_df['order_status_clean'].str.contains("ملغي|مسترجع|cancelled|returned|refunded", na=False, case=False)
+            additions_merged_df = additions_merged_df[~cancelled_mask].copy()
     
-    if not additions_merged_df.empty:
-        additions_merged_df['case_label'] = additions_merged_df['case_type'].map({
-            'addition': '➕ إضافة مخزنية عادية',
-            'orphan_salla': '🛒 سلة: طلب بدون فاتورة'
-        }).fillna(additions_merged_df['case_label'])
+        if not additions_merged_df.empty:
+            additions_merged_df['case_label'] = additions_merged_df['case_type'].map({
+                'addition': '➕ إضافة مخزنية عادية',
+                'orphan_salla': '🛒 سلة: طلب بدون فاتورة'
+            }).fillna(additions_merged_df['case_label'])
         
-        render_table_with_click(additions_merged_df, "additions_merged", allow_move=True)
-    else:
-        st.success("🎉 لا توجد طلبات إضافات أو نواقص قائمة حالياً.")
-
+            render_table_with_click(additions_merged_df, "additions_merged", allow_move=True)
+        else:
+            st.success("🎉 لا توجد طلبات إضافات أو نواقص قائمة حالياً.")
     
     with tab_returns:
         st.markdown("""
