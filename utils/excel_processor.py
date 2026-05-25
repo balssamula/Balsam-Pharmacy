@@ -399,7 +399,7 @@ def process_excel(uploaded_file, uploaded_by: str):
             insert_df['performed_by'] = ''
             insert_df['performed_at'] = ''
             
-            # قائمة الأعمدة الموجودة في قاعدة البيانات (بدون duplicate_warning)
+            # قائمة الأعمدة الموجودة في قاعدة البيانات
             valid_columns = [
                 'item_key', 'upload_batch_id', 'order_number', 'invoice_number', 'sku',
                 'product_name', 'salla_product_name', 'abc_product_name', 'pharmacy_name',
@@ -414,10 +414,9 @@ def process_excel(uploaded_file, uploaded_by: str):
                 'is_item_locked', 'item_locked_by', 'item_locked_at'
             ]
             
-            # إزالة الأعمدة غير الموجودة في القائمة (مثل duplicate_warning)
+            # إزالة الأعمدة غير الموجودة
             cols_to_drop = [col for col in insert_df.columns if col not in valid_columns]
             if cols_to_drop:
-                print(f"Dropping columns: {cols_to_drop}")
                 insert_df = insert_df.drop(columns=cols_to_drop)
             
             # إضافة الأعمدة المفقودة
@@ -430,11 +429,18 @@ def process_excel(uploaded_file, uploaded_by: str):
                     else:
                         insert_df[col] = ''
             
-            # التأكد من ترتيب الأعمدة
+            # ترتيب الأعمدة
             insert_df = insert_df[valid_columns]
             
-            # إدراج البيانات
-            insert_df.to_sql('reconciliation_items', conn, if_exists='append', index=False, method='multi')
+            # ========== الإدراج على دفعات (batches) لتجنب "too many SQL variables" ==========
+            batch_size = 500  # عدد الصفوف في كل دفعة
+            total_rows = len(insert_df)
+            
+            for start in range(0, total_rows, batch_size):
+                end = min(start + batch_size, total_rows)
+                batch_df = insert_df.iloc[start:end]
+                batch_df.to_sql('reconciliation_items', conn, if_exists='append', index=False, method='multi')
+                print(f"Inserted rows {start} to {end} of {total_rows}")
         
         # تعطيل العناصر القديمة وتفعيل الجلسة الحالية
         cur.execute("UPDATE reconciliation_items SET active = CASE WHEN upload_batch_id = ? THEN 1 ELSE 0 END", (upload_batch_id,))
