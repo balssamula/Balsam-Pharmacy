@@ -323,8 +323,85 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
 # =========================================================================
 
 def process_excel(uploaded_file, username):
-    # ... كود قراءة ومعالجة الملفات في أول الدالة كما هو تماماً دون تغيير ...
+    """معالجة ملف Excel وإدراج النتائج في قاعدة البيانات"""
+    df_salla = pd.read_excel(uploaded_file, sheet_name="سلة")
+    df_abc = pd.read_excel(uploaded_file, sheet_name="abc")
+    results = classify_cases(df_salla, df_abc)
     
+    upload_batch_id = uuid.uuid4().hex
+    timestamp = now_str()
+    
+    conn = sqlite3.connect(DB_PATH, timeout=60.0)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    cur = conn.cursor()
+    
+    try:
+        # إدراج بيانات الرفع
+        cur.execute("""
+            INSERT INTO uploads (upload_batch_id, file_name, uploaded_by, uploaded_at, total_cases,
+                total_additions, total_returns, total_orphan_salla, total_orphan_abc, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        """, (upload_batch_id, uploaded_file.name, uploaded_by, timestamp, len(results),
+              int((results["case_type"] == "addition").sum()) if not results.empty else 0,
+              int((results["case_type"] == "return").sum()) if not results.empty else 0,
+              int((results["case_type"] == "orphan_salla").sum()) if not results.empty else 0,
+              int((results["case_type"] == "orphan_abc").sum()) if not results.empty else 0))
+        
+        if not results.empty:
+            # إعداد بيانات الإدراج
+            insert_df = results.copy()
+            insert_df['upload_batch_id'] = upload_batch_id
+            insert_df['status'] = 'قيد المتابعة'
+            insert_df['pharmacist_note'] = ''
+            insert_df['first_seen_at'] = timestamp
+            insert_df['last_seen_at'] = timestamp
+            insert_df['active'] = 1
+            insert_df['hidden_from_pharmacy'] = 0
+            insert_df['is_item_locked'] = 0
+            insert_df['item_locked_by'] = ''
+            insert_df['item_locked_at'] = ''
+            insert_df['performed_by'] = ''
+            insert_df['performed_at'] = ''
+            
+            # قائمة الأعمدة الموجودة في قاعدة البيانات (بدون duplicate_warning)
+            valid_columns = [
+                'item_key', 'upload_batch_id', 'order_number', 'invoice_number', 'sku',
+                'product_name', 'salla_product_name', 'abc_product_name', 'pharmacy_name',
+                'salla_pharmacy_name', 'abc_pharmacy_name', 'abc_pharmacist_name',
+                'branch_number', 'salla_branch_number', 'salla_qty', 'abc_qty', 'difference',
+                'case_type', 'case_label', 'case_reason', 'status', 'performed_by', 'performed_at',
+                'customer_name', 'customer_phone', 'city', 'order_status', 'order_date',
+                'invoice_date', 'profile_type', 'receipt_classification', 'all_abc_pharmacies',
+                'other_branch_details', 'pharmacist_note', 'total_amount', 'first_seen_at',
+                'last_seen_at', 'active', 'hidden_from_pharmacy', 'payment_method',
+                'discount', 'shipping_cost', 'tax', 'coupon_discount', 'offer_discount',
+                'is_item_locked', 'item_locked_by', 'item_locked_at'
+            ]
+            
+            # إزالة الأعمدة غير الموجودة في القائمة (مثل duplicate_warning)
+            cols_to_drop = [col for col in insert_df.columns if col not in valid_columns]
+            if cols_to_drop:
+                print(f"Dropping columns: {cols_to_drop}")
+                insert_df = insert_df.drop(columns=cols_to_drop)
+            
+            # إضافة الأعمدة المفقودة
+            for col in valid_columns:
+                if col not in insert_df.columns:
+                    if col in ['performed_by', 'performed_at', 'item_locked_by', 'item_locked_at', 'branch_number', 'salla_branch_number']:
+                        insert_df[col] = ''
+                    elif col in ['is_item_locked']:
+                        insert_df[col] = 0
+                    else:
+                        insert_df[col] = ''
+            
+            # التأكد من ترتيب الأعمدة
+            insert_df = insert_df[valid_columns]
+            
+            # إدراج البيانات
+            # 👇 الحل الجذري والنهائي: إجبار محرك SQLite على استبدال أو تخطي المكرر لتفادي خطأ Unique Constraint
+            import sqlite3
+            
     # الجزء الأخير الخاص بالحقن الجمعي وقفل المعاملات البرمجية لتلافي الـ SyntaxError
     db_conn = sqlite3.connect(DB_PATH, timeout=60.0)
     try:
