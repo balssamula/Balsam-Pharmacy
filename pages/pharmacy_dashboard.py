@@ -84,41 +84,53 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
 
 
 def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_name):
-    """عرض بطاقة حالة واحدة مطورة - تلوين رقم الفرق وإضافة حقل المطلوب ديناميكياً"""
+    """عرض بطاقة حالة ديناميكية بالكامل تنقاد خلف إشارة الفرق الفعلي"""
     
-    # 1. تعيين النص واللون حسب نوع الحالة
-    case_type = row.get('case_type', '')
-    
-    if case_type == 'addition':
-        badge_text = "إضافة مخزنية عادية ➕"
-        badge_color = "#dff1ff"
-        badge_text_color = "#084298"
-    elif case_type == 'orphan_salla':
-        badge_text = "طلب مبيعات مفقود الفاتورة 🛒"
-        badge_color = "#fff3cd"
-        badge_text_color = "#856404"
-    elif case_type == 'return':
-        badge_text = "إرجاع مخزني عادي 🔄"
-        badge_color = "#ffe0df"
-        badge_text_color = "#491217"
-    elif case_type == 'orphan_abc':
-        badge_text = "فاتورة توريد مفقودة الطلب 📄"
-        badge_color = "#f8d7da"
-        badge_text_color = "#721c24"
-    elif case_type == 'post_cutoff_abc':
-        badge_text = "فاتورة بعد آخر طلب ⏰"
-        badge_color = "#e2e8f0"
-        badge_text_color = "#475569"
-    else:
-        badge_text = row.get('case_label', 'حالة عامة')
-        badge_color = "#e2e8f0"
-        badge_text_color = "#475569"
-
-    # 2. حساب الفروقات بدقة رقمية
+    # 1. حساب الفروقات بدقة رقمية أولاً وقبل أي شيء
     salla_numeric = int(row.get('salla_qty', 0)) if pd.notna(row.get('salla_qty', 0)) else 0
     abc_numeric = int(row.get('abc_qty', 0)) if pd.notna(row.get('abc_qty', 0)) else 0
     diff_value = salla_numeric - abc_numeric
     
+    case_type = row.get('case_type', '')
+
+    # 2. تعيين المسميات والشارات والأزرار بناءً على ناتج الطرح الفعلي الحالي بالمليمتر
+    if diff_value > 0:
+        # العميل دفع أكثر -> المطلوب إضافة مخزنية حتماً
+        badge_text = "إضافة مخزنية عادية ➕"
+        badge_color = "#dff1ff"
+        badge_text_color = "#084298"
+        diff_style = "color: #28a745; font-weight: bold;"
+        required_action = "<span style='color: #28a745; font-weight: bold;'>إضافة</span>"
+        button_label = "✅ تأكيد الإضافة"
+        
+    elif diff_value < 0:
+        # الفرع صرف أكثر -> المطلوب إرجاع مخزني حتماً
+        badge_text = "إرجاع مخزني عادي 🔄"
+        badge_color = "#ffe0df"
+        badge_text_color = "#491217"
+        diff_style = "color: #dc3545; font-weight: bold;"
+        required_action = "<span style='color: #dc3545; font-weight: bold;'>إرجاع</span>"
+        button_label = "🔄 تأكيد الإرجاع"
+        
+    else:
+        # الكميات متطابقة (حالات الفواتير والطلبات المفقودة مستندياً)
+        diff_style = "color: #6c757d; font-weight: bold;"
+        required_action = "<span style='color: #6c757d; font-weight: bold;'>مطابق</span>"
+        button_label = None
+        
+        if case_type == 'orphan_salla':
+            badge_text = "طلب مبيعات مفقود الفاتورة 🛒"
+            badge_color = "#fff3cd"
+            badge_text_color = "#856404"
+        elif case_type == 'orphan_abc':
+            badge_text = "فاتورة توريد مفقودة الطلب 📄"
+            badge_color = "#f8d7da"
+            badge_text_color = "#721c24"
+        else:
+            badge_text = "حالة تسوية عامة"
+            badge_color = "#e2e8f0"
+            badge_text_color = "#475569"
+   
     order_status = row.get('order_status', 'غير متوفرة')
     invoice_date = row.get('invoice_date', '')
     order_date = row.get('order_date', '')
