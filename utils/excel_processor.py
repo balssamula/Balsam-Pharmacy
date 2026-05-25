@@ -188,183 +188,141 @@ def prepare_abc_frame(df_abc: pd.DataFrame) -> pd.DataFrame:
 
 def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame:
     """
-    تصنيف الحالات حسب المنطق المطلوب:
-    1. مقارنة لكل فرع على حدة
-    2. إذا كان المجموع الكلي لكميات ABC يساوي كمية سلة ولكن موزع على عدة فروع، تظهر الحالة في جميع الفروع مع تنبيه
-    3. إذا كان المجموع الكلي لا يساوي، تظهر الحالة في الفروع التي بها كميات
+    تطبيق المنطق المطور والمعدل لتصنيف الحالات بالفروع (السيناريوهات الـ 7)
     """
     salla_grouped = prepare_salla_frame(df_salla)
     abc_grouped = prepare_abc_frame(df_abc)
     
     if salla_grouped.empty and abc_grouped.empty:
         return pd.DataFrame()
-    
-    # حساب المجموع الكلي لكميات ABC لكل order_number و sku
+        
+    # حساب المجموع الكلي لكميات ABC لكل رقم طلب وصنف
     abc_total_qty = abc_grouped.groupby(["order_number", "sku"])["abc_qty"].sum().reset_index()
     abc_total_qty.rename(columns={"abc_qty": "abc_total_qty"}, inplace=True)
     
-    # دمج سلة مع المجموع الكلي لمعرفة إذا كان المجموع مطابقاً
+    # دمج بيانات سلة مع المجموع الكلي لمعرفة مطابقة الكميات الكلية
     salla_with_total = pd.merge(salla_grouped, abc_total_qty, on=["order_number", "sku"], how="left")
     salla_with_total["abc_total_qty"] = salla_with_total["abc_total_qty"].fillna(0)
     
-    # تحديد ما إذا كان المجموع الكلي مطابقاً لكمية سلة
+    # التحقق من تطابق المجموع الإجمالي التام
     salla_with_total["total_matched"] = salla_with_total["salla_qty"] == salla_with_total["abc_total_qty"]
     
-    # دمج مع بيانات ABC لكل فرع على حدة
-    merged = pd.merge(
-        salla_with_total, 
-        abc_grouped, 
-        on=["order_number", "sku"], 
-        how="outer", 
-        indicator=True
-    )
+    # الدمج الخارجي الكامل مع فروع ABC بالتفصيل لكل فرع
+    merged = pd.merge(salla_with_total, abc_grouped, on=["order_number", "sku"], how="outer", indicator=True)
     
-    # تعبئة القيم المفقودة
+    # تعبئة وتصحيح القيم الرقمية المفقودة لمنع أخطاء المعالجة
     for col in ["salla_qty", "abc_qty", "total_amount", "abc_total_qty"]:
         if col in merged.columns:
             merged[col] = pd.to_numeric(merged[col], errors="coerce").fillna(0)
-        else:
-            merged[col] = 0
-    
-    # تعبئة عمود total_matched للصفوف التي ليس لها سلة
+            
     if "total_matched" not in merged.columns:
         merged["total_matched"] = False
     merged["total_matched"] = merged["total_matched"].fillna(False)
     
-    # الأعمدة النصية
+    # إعداد الأعمدة النصية الأساسية للتقرير
     text_cols = [
         "salla_product_name", "abc_product_name", "customer_name", "customer_phone", "city",
         "order_status", "order_date", "invoice_number", "invoice_date", "salla_pharmacy_name",
-        "abc_pharmacy_name", "abc_pharmacist_name", "profile_type", "receipt_classification",
-        "all_abc_pharmacies", "other_branch_details", "payment_method"
+        "abc_pharmacy_name", "abc_pharmacist_name", "profile_type", "receipt_classification"
     ]
     for col in text_cols:
-        if col not in merged.columns:
-            merged[col] = ""
+        if col not in merged.columns: merged[col] = ""
         merged[col] = merged[col].fillna("").astype(str)
+        
+    merged["product_name"] = merged["salla_product_name"].replace("", merged["abc_product_name"])
     
-    # تعبئة اسم المنتج
-    merged["product_name"] = merged["salla_product_name"]
-    merged.loc[merged["product_name"].eq(""), "product_name"] = merged.loc[merged["product_name"].eq(""), "abc_product_name"]
+    # تعيين اسم الصيدلية الافتراضي الحالي للفحص
+    merged["pharmacy_name"] = merged["abc_pharmacy_name"].replace("", merged["salla_pharmacy_name"])
     
-    # تعبئة اسم الصيدلية
-    merged["pharmacy_name"] = merged["salla_pharmacy_name"]
-    abc_mask = (merged["abc_pharmacy_name"] != "") & (merged["abc_pharmacy_name"] != "nan")
-    merged.loc[abc_mask, "pharmacy_name"] = merged.loc[abc_mask, "abc_pharmacy_name"]
-    empty_mask = (merged["pharmacy_name"] == "") | (merged["pharmacy_name"] == "nan")
-    merged.loc[empty_mask, "pharmacy_name"] = merged.loc[empty_mask, "salla_pharmacy_name"]
-    
-    # حساب الفرق
+    # حساب الفروقات السطرية الرقمية المباشرة
     merged["difference"] = merged["salla_qty"] - merged["abc_qty"]
     
-    # ========== المنطق الأساسي للتصنيف ==========
+    # حقول التوجيه والتصنيف الذكي
     merged["case_type"] = ""
     merged["case_reason"] = ""
-    merged["is_duplicate_warning"] = 0  # تنبيه للتوزيع على عدة فروع
+    merged["is_duplicate_warning"] = 0
     
-    # 1. العنصر موجود فقط في ABC (فاتورة بدون طلب)
-    orphan_abc_mask = (merged["_merge"] == "right_only") & (merged["abc_qty"] != 0)
-    merged.loc[orphan_abc_mask, "case_type"] = "orphan_abc"
-    merged.loc[orphan_abc_mask, "case_reason"] = f"فاتورة موجودة في ABC بكمية {merged.loc[orphan_abc_mask, 'abc_qty']} ولم يُعثر عليها في سلة."
-    
-    # 2. العنصر موجود فقط في سلة (طلب بدون فاتورة)
-    orphan_salla_mask = (merged["_merge"] == "left_only") & (merged["salla_qty"] > 0)
-    merged.loc[orphan_salla_mask, "case_type"] = "orphan_salla"
-    merged.loc[orphan_salla_mask, "case_reason"] = f"طلب موجود في سلة بكمية {merged.loc[orphan_salla_mask, 'salla_qty']} ولم يُعثر عليه في ABC."
-    
-    # 3. العنصر موجود في كليهما
     both_mask = (merged["_merge"] == "both")
     
-    # 3a. إذا كان المجموع الكلي مطابقاً لكمية سلة ولكن موزع على عدة فروع
-    multiple_branches_mask = both_mask & (merged["total_matched"] == True) & (merged["abc_qty"] > 0)
-    merged.loc[multiple_branches_mask, "case_type"] = "addition"  # أو case_type خاص
-    merged.loc[multiple_branches_mask, "is_duplicate_warning"] = 1
-    merged.loc[multiple_branches_mask, "case_reason"] = (
-        f"⚠️ تنبيه: الكمية الإجمالية في ABC ({merged.loc[multiple_branches_mask, 'abc_total_qty']}) "
-        f"مطابقة لكمية سلة ({merged.loc[multiple_branches_mask, 'salla_qty']})، ولكنها موزعة على عدة فروع. "
-        f"هذا الفرع تظهر فيه كمية {merged.loc[multiple_branches_mask, 'abc_qty']}. "
-        f"يرجى المراجعة والتأكد من أي فرع صحيح تم خروج الصنف منه حقيقة."
-    )
+    # -------------------------------------------------------------------------
+    # 🌟 تطبيق منطق السيناريوهات السبعة المطلوبة بدقة متناهية
+    # -------------------------------------------------------------------------
     
-    # 3b. إضافة عادية (كمية سلة أكبر من كمية ABC في هذا الفرع، والمجموع الكلي غير مطابق)
-    addition_mask = (
-        both_mask & 
-        (merged["total_matched"] == False) & 
-        (merged["salla_qty"] > merged["abc_qty"]) &
-        (merged["abc_qty"] > 0)
-    )
-    merged.loc[addition_mask, "case_type"] = "addition"
-    merged.loc[addition_mask, "case_reason"] = (
-        f"كمية الطلب في سلة ({merged.loc[addition_mask, 'salla_qty']}) "
-        f"أكبر من كمية الفاتورة في هذا الفرع ({merged.loc[addition_mask, 'abc_qty']}). "
-        f"(إجمالي ABC: {merged.loc[addition_mask, 'abc_total_qty']})"
-    )
-    
-    # 3c. إضافة مع فرع لا توجد فيه كمية (abc_qty = 0) ولكن المجموع الكلي غير مطابق
-    zero_in_branch_mask = (
-        both_mask & 
-        (merged["total_matched"] == False) & 
-        (merged["salla_qty"] > 0) &
-        (merged["abc_qty"] == 0)
-    )
-    merged.loc[zero_in_branch_mask, "case_type"] = "addition"
-    merged.loc[zero_in_branch_mask, "case_reason"] = (
-        f"⚠️ تنبيه: الطلب موجود في سلة بكمية {merged.loc[zero_in_branch_mask, 'salla_qty']} "
-        f"ولكن هذا الفرع لا تظهر فيه أي كمية في ABC. "
-        f"(إجمالي ABC في جميع الفروع: {merged.loc[zero_in_branch_mask, 'abc_total_qty']})"
-    )
-    
-    # 3d. إرجاع عادي (كمية ABC أكبر من كمية سلة في هذا الفرع)
-    return_mask = (
-        both_mask & 
-        (merged["abc_qty"] > merged["salla_qty"])
-    )
-    merged.loc[return_mask, "case_type"] = "return"
-    merged.loc[return_mask, "case_reason"] = (
-        f"كمية الفاتورة في هذا الفرع ({merged.loc[return_mask, 'abc_qty']}) "
-        f"أكبر من كمية الطلب في سلة ({merged.loc[return_mask, 'salla_qty']})."
-    )
-    
-    # تصفية النتيجة
+    for idx, row in merged.iterrows():
+        salla_q = row['salla_qty']
+        abc_q = row['abc_qty']
+        abc_total = row['abc_total_qty']
+        matched = row['total_matched']
+        
+        # السيناريو 1 و 6: الكميات موزعة بالتساوي أو غير التساوي بالكامل، والمجموع متطابق أو أقل
+        # سلة=10، فرع1=10، فرع2=10 أو سلة=10، فرع1=5، فرع2=5
+        if matched and abc_q > 0 and (abc_total > abc_q or row['abc_pharmacy_name'] != ""):
+            # التحقق من وجود أكثر من فرع يحتوي على حركة لنفس الطلب لمنع إدراج الأصفار
+            branches_with_qty = abc_grouped[(abc_grouped['order_number'] == row['order_number']) & 
+                                            (abc_grouped['sku'] == row['sku']) & 
+                                            (abc_grouped['abc_qty'] > 0)]
+            
+            if len(branches_with_qty) > 1:
+                # إذا كانت كمية هذا الفرع صفرية، يتم تجاهله بالكامل وعدم إظهاره
+                if abc_q == 0:
+                    continue
+                merged.at[idx, "case_type"] = "addition"
+                merged.at[idx, "is_duplicate_warning"] = 1
+                merged.at[idx, "case_reason"] = f"⚠️ تنبيه: الكمية الإجمالية في ABC ({int(abc_total)}) مطابقة لكمية سلة ({int(salla_q)})، ولكنها موزعة على عدة فروع. يرجى المراجعة والتأكد من أي فرع صحيح تم خروج الصنف منه حقيقة."
+                continue
+
+        # السيناريو 2 و 4: سلة=10، فرع1=10، فرع2=0 أو سلة=10، فرع1=0، فرع2=10 (الكمية متطابقة في فرع وصفر بالآخر)
+        if matched and abc_q == 0:
+            # لا تظهر الحالة نهائياً في الفرع الذي كميته صفر
+            continue
+            
+        if matched and salla_q == abc_q:
+            # حالة مطابقة تامة في هذا الفرع، لا تظهر كشذوذ أو عطل في النظام
+            continue
+
+        # السيناريو 3: سلة=10، فرع1=9، فرع2=0 (تظهر الحالة في فرع 01 كإضافة وتختفي من فرع 02)
+        if not matched and salla_q > 0:
+            if abc_q == 0:
+                # استبعاد وتجاهل فرع 02 تماماً لأن كميته صفر والمجموع غير مطابق
+                continue
+            else:
+                # تظهر في فرع 01 الذي يحتوي على كمية 9 كإضافة عادية
+                merged.at[idx, "case_type"] = "addition"
+                merged.at[idx, "case_reason"] = f"⚠️ كمية سلة ({int(salla_q)}) أكبر من كمية الفاتورة في هذا الفرع ({int(abc_q)}). إجمالي الفروع (ABC: {int(abc_total)})."
+                continue
+
+        # السيناريو 5: سلة=10، فرع1=5 (ولم يذكر فروع أخرى، أو المجموع غير مطابق)
+        if not matched and salla_q > abc_q and abc_q > 0:
+            merged.at[idx, "case_type"] = "addition"
+            merged.at[idx, "case_reason"] = f"كمية طلب سلة ({int(salla_q)}) أكبر من كمية الفاتورة في هذا الفرع ({int(abc_q)})."
+            continue
+
+        # السيناريو 7: سلة=10، فرع1=11 (كمية ABC أكبر من سلة - إرجاع عادي)
+        if abc_q > salla_q:
+            merged.at[idx, "case_type"] = "return"
+            merged.at[idx, "case_reason"] = f"كمية الفاتورة في هذا الفرع ({int(abc_q)}) أكبر من كمية طلب سلة ({int(salla_q)})."
+            continue
+
+        # الحالات المعزولة العادية (فاتورة بدون طلب أو طلب بدون فاتورة)
+        if row['_merge'] == "right_only" and abc_q > 0:
+            merged.at[idx, "case_type"] = "orphan_abc"
+            merged.at[idx, "case_reason"] = f"فاتورة موجودة في ABC بكمية {int(abc_q)} ولم يُعثر عليها في سلة."
+        elif row['_merge'] == "left_only" and salla_q > 0:
+            merged.at[idx, "case_type"] = "orphan_salla"
+            merged.at[idx, "case_reason"] = f"طلب موجود في سلة بكمية {int(salla_q)} ولم يُعثر عليه في ABC."
+
+    # تصفية الجدول النهائي من السطور التي لم تنطبق عليها شروط الحالات المستثناة
     result = merged[merged["case_type"] != ""].copy()
-    
     if result.empty:
         return pd.DataFrame()
-    
+        
     result["case_label"] = result["case_type"]
+    result["duplicate_warning"] = result["is_duplicate_warning"].apply(lambda x: "⚠️ هذا المنتج موزع على عدة فروع" if x == 1 else "")
     
-    # إضافة عمود للتنبيه في الواجهة
-    result["duplicate_warning"] = result["is_duplicate_warning"].apply(
-        lambda x: "⚠️ هذا المنتج موزع على عدة ف branches" if x == 1 else ""
-    )
+    # توليد مفتاح سري فريد ديناميكي لربط العمليات الحسابية
+    result["item_key"] = result.apply(lambda r: f"{r['pharmacy_name']}||{r['order_number']}||{r['sku']}||{r['case_type']}||{uuid.uuid4().hex[:4]}", axis=1)
     
-    # إنشاء item_key فريد
-    result["item_key"] = result.apply(
-        lambda r: f"{r['pharmacy_name']}||{r['order_number']}||{r['sku']}||{r['case_type']}", 
-        axis=1
-    )
-    
-    # الأعمدة المطلوبة
-    ordered_columns = [
-        "item_key", "order_number", "invoice_number", "sku", "product_name",
-        "salla_product_name", "abc_product_name", "pharmacy_name",
-        "salla_pharmacy_name", "abc_pharmacy_name", "abc_pharmacist_name",
-        "salla_qty", "abc_qty", "difference",
-        "case_type", "case_label", "case_reason", "customer_name",
-        "customer_phone", "city", "order_status", "order_date",
-        "invoice_date", "profile_type", "receipt_classification",
-        "all_abc_pharmacies", "other_branch_details", "total_amount",
-        "payment_method", "discount", "shipping_cost", "tax",
-        "coupon_discount", "offer_discount", "duplicate_warning"
-    ]
-    
-    for col in ordered_columns:
-        if col not in result.columns:
-            result[col] = ""
-    
-    result = result[ordered_columns]
-    
-    return result
+    return result[ordered_columns] # إعادة الفريم المنظم والمفلتر بالكامل
 
 
 def process_excel(uploaded_file, uploaded_by: str):
