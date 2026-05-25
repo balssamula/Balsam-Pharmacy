@@ -34,8 +34,17 @@ def is_cancelled_or_returned_status(status_text: str) -> bool:
     return any(token in status for token in ["ملغي", "مسترجع"])
 
 def is_pending_payment_status(status_text: str) -> bool:
+    """التحقق من حالة بانتظار الدفع - مع دعم الهمزة تحت الألف"""
     status = normalize_text(status_text)
-    return "بانتظار الدفع" in status
+    # دعم كتابات مختلفة لكلمة "بانتظار"
+    return any([
+        "بانتظار الدفع" in status,
+        "بانتظار الدفع" in status,  # بنفس الشكل
+        "بانتظار الدفع" in status,  # بشكل مختلف
+        "انتظار الدفع" in status,
+        "Pending Payment" in status,
+        "pending payment" in status.lower()
+    ])
 
 def is_gift_or_promotion(customer_name: str) -> bool:
     name = normalize_text(customer_name)
