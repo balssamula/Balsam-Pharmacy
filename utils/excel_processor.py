@@ -363,7 +363,7 @@ def process_excel(uploaded_file, username):
         
     except Exception as e:
         print(f"Error in process_excel: {e}")
-        conn.rollback()
+        db_conn.rollback()
         raise
     finally:
         db_conn.close()
