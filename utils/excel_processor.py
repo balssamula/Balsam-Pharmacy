@@ -424,11 +424,33 @@ def process_excel(uploaded_file, uploaded_by: str):
             insert_df = insert_df[valid_columns]
             
             # إدراج البيانات
-            insert_df.to_sql('reconciliation_items', conn, if_exists='append', index=False, method='multi')
+            # 👇 الحل الجذري والنهائي: إجبار محرك SQLite على استبدال أو تخطي المكرر لتفادي خطأ Unique Constraint
+            import sqlite3
+    
             db_conn = sqlite3.connect(DB_PATH, timeout=60.0)
             try:
-                # chunksize=500 يضمن إدراج 500 صف في المرة الواحدة وهو آمن ومستقر جداً مع SQLite
-                insert_df.to_sql('reconciliation_items', db_conn, if_exists='append', index=False, chunksize=500)
+                # تحويل خيار الإدراج في SQLite ليتعامل مع التصادم بمرونة (بدون انهيار السيرفر)
+                # خيار 'INSERT OR REPLACE' يقوم بتحديث البيانات إذا تكرر المفتاح، و 'INSERT OR IGNORE' يتخطاه بأمان
+                sqlite3.register_adapter(int, lambda x: int(x))
+                sqlite3.register_adapter(float, lambda x: float(x))
+        
+                # تنفيذ الإدراج الآمن عبر الحزم
+                from pandas.io import sql
+                pandas_sql = sql.SQLiteDatabase(db_conn)
+        
+                # حقن آلية الاستبدال الذكي عند تصادم المفاتيح الفريدة
+                with db_conn:
+                    # نقوم بإنشاء جدول مؤقت أو إدراج مباشر مع تغيير جملة الإدخال الافتراضية للـ SQLite
+                    cursor = db_conn.cursor()
+            
+                    # استخراج أسماء الأعمدة وقيمها كقائمة لتجهيز الاستعلام الجمعي الآمن
+                    columns = list(insert_df.columns)
+                    placeholders = ", ".join(["?"] * len(columns))
+                    sql_query = f"INSERT OR REPLACE INTO reconciliation_items ({', '.join(columns)}) VALUES ({placeholders})"
+            
+                    # تنفيذ الإدخال الجمعي فائق السرعة والأمان
+                    cursor.executemany(sql_query, insert_df.values.tolist())
+            
             finally:
                 db_conn.close()
         
