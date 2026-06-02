@@ -616,6 +616,10 @@ def show():
     total_returns_merged = len(returns_base_df)
     completed_returns_merged = int((returns_base_df['status_clean'] == 'تم').sum())
    
+    # 💡 [إصلاح التداخل] تعريف إطارات البيانات المدمجة هنا قبل استخدامها في زر التصدير أو التبويبات
+    additions_merged_df = exclude_old_items(additions_base_df)
+    returns_merged_df = exclude_old_items(returns_base_df)
+
     post_cutoff_filtered = filtered_df[(filtered_df["case_type"] == "post_cutoff_abc") & active_mask_filtered].copy()
     post_cutoff_filtered = exclude_old_items(post_cutoff_filtered)
     total_post_cutoff = len(post_cutoff_filtered)
@@ -726,9 +730,6 @@ def show():
             </p>
         </div>
         """, unsafe_allow_html=True)
-    
-        # استبعاد العناصر القديمة التاريخية فقط وعرض الجدول فوراً
-        additions_merged_df = exclude_old_items(additions_base_df)
     
         if not additions_merged_df.empty:
             additions_merged_df['case_label'] = additions_merged_df['case_type'].map({
