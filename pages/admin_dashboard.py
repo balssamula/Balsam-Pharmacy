@@ -103,6 +103,12 @@ def styled_dataframe(input_df):
     if input_df.empty:
         return None
         
+    # 💡 [الإصلاح الجذري]: إعادة ضبط الفهارس لتجنب انهيار Streamlit عند التلوين
+    display_df = input_df.copy().reset_index(drop=True)
+    
+    # 💡 [حماية إضافية]: إزالة أي أعمدة متكررة قد توقف عملية العرض
+    display_df = display_df.loc[:, ~display_df.columns.duplicated()]
+
     def highlight_rows(row):
         # تحويل القيم إلى سلاسل نصية للتعامل الآمن
         case_type = str(row.get('case_type', '')).strip() if 'case_type' in row else ''
@@ -121,8 +127,6 @@ def styled_dataframe(input_df):
             return ['background-color: #dff1ff; color: #084298;'] * len(row)
             
         return [''] * len(row)
-    
-    display_df = input_df.copy()
     
     # توحيد روابط المسميات لمنع سقوط الإحصائيات في الداشبورد الإداري
     if 'case_type' in display_df.columns:
@@ -147,6 +151,10 @@ def styled_dataframe(input_df):
         "type_label": "نوع الحالة",
         "status": "الحالة"
     })
+    
+    # التأكد مرة أخرى من عدم وجود أعمدة تحمل نفس الاسم بعد الترجمة
+    display_df = display_df.loc[:, ~display_df.columns.duplicated()]
+    
     return display_df.style.apply(highlight_rows, axis=1)
 
 def render_table_with_click(df, tab_name, allow_move: bool = True):
