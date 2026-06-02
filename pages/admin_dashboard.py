@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+# 💡 [إصلاح مشكلة حجم الجدول]: زيادة الحد الأقصى للخلايا التي يمكن تلوينها في الواجهة
+pd.set_option("styler.render.max_elements", 5000000)
 from io import BytesIO
 import plotly.express as px
 import plotly.graph_objects as go
