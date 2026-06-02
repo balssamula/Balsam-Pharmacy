@@ -629,59 +629,54 @@ def show():
             result_temp = result_temp[~result_temp['invoice_number'].astype(str).isin(old_invoice_numbers)]
         return result_temp
     
-    # ========== حساب الإحصائيات الصحيحة للتبويبات ==========
-    # 👇 التصحيح الفاصل: إزالة المسافات وتطهير النصوص لإظهار الطلبات بانتظار المراجعة والتحليل
+# ========== حساب الإحصائيات الصحيحة للتبويبات بناءً على الشروط الدقيقة والمحدثة ==========
     filtered_df['status_clean'] = filtered_df['status'].astype(str).str.strip()
-
-    # قناع تصفية الحالات النشطة (بانتظار المراجعة أو المتابعة)
     active_mask_filtered = filtered_df['status_clean'].isin(['قيد المتابعة', 'بانتظار المراجعة', 'معلق', ''])
 
-    # 💡 [تطبيق شروطك الدقيقة]: تجميع فريم الإضافات (الطلبات في سلة التي ليس لها فاتورة في ABC أو كميتها أعلى)
+    # 1️⃣ بناء أقنعة الفرز الصارمة بناءً على حالة الطلب (لمنع تداخل الصفوف تاريخياً)
+    is_cancelled_returned = filtered_df["order_status"].apply(is_cancelled_or_returned_status)
+    is_pending_payment = filtered_df["order_status"].apply(is_pending_payment_status)
+    is_normal_order = ~(is_cancelled_returned | is_pending_payment)
+
+    # 2️⃣ تبويب الإضافات والطلبات المفقودة: أصناف سلة بدون فواتير أو كميتها أكبر (شرط أن تكون عادية وليست ملغية/معلقة)
     additions_base_df = filtered_df[
-        ((filtered_df['case_type'] == 'orphan_salla') | 
-         ((filtered_df['case_type'] == 'addition') & (filtered_df['difference'] > 0))) & 
-        active_mask_filtered
+        is_normal_order & 
+        active_mask_filtered & 
+        (
+            (filtered_df['case_type'] == 'orphan_salla') | 
+            ((filtered_df['case_type'] == 'addition') & (filtered_df['difference'] > 0))
+        )
     ].copy()
 
-    # استبعاد الملغي والمسترجع من الفريم الرئيسي قبل حساب العدادات لضمان دقة الأرقام
-    if not additions_base_df.empty and 'order_status' in additions_base_df.columns:
-        additions_base_df['order_status_clean'] = additions_base_df['order_status'].astype(str).str.strip()
-        cancelled_mask = additions_base_df['order_status_clean'].str.contains("ملغي|مسترجع|cancelled|returned|refunded", na=False, case=False)
-        additions_base_df = additions_base_df[~cancelled_mask].copy()
-
-    # حساب العدادات الرقمية الحقيقية لتبويب الإضافات
-    total_additions_merged = len(additions_base_df)
-    completed_additions_merged = int((additions_base_df['status_clean'] == 'تم').sum())
-
-    # 💡 [تطبيق شروطك الدقيقة]: تجميع فريم الإرجاعات (الفواتير في ABC التي ليس لها طلب في سلة أو كميتها أعلى)
-    returns_base_df = filtered_df[
-        ((filtered_df['case_type'] == 'orphan_abc') | 
-         ((filtered_df['case_type'] == 'return') & (filtered_df['difference'] < 0))) & 
-        active_mask_filtered
-    ].copy()
-    
-    # حساب العدادات الرقمية الحقيقية لتبويب الإرجاعات
-    total_returns_merged = len(returns_base_df)
-    completed_returns_merged = int((returns_base_df['status_clean'] == 'تم').sum())
-   
-    # 💡 [إصلاح التداخل] تعريف إطارات البيانات المدمجة هنا قبل استخدامها في زر التصدير أو التبويبات
     additions_merged_df = exclude_old_items(additions_base_df)
-    returns_merged_df = exclude_old_items(returns_base_df)
+    total_additions_merged = len(additions_merged_df)
+    completed_additions_merged = int((additions_merged_df['status_clean'] == 'تم').sum())
 
+    # 3️⃣ تبويب الإرجاعات والفواتير المعلقة: فواتير ABC بدون طلب أو كميتها أكبر + فواتير الطلبات الملغية أو المسترجعة لـتأكيد الإرجاع
+    returns_base_df = filtered_df[
+        active_mask_filtered & (
+            (is_normal_order & ((filtered_df['case_type'] == 'orphan_abc') | ((filtered_df['case_type'] == 'return') & (filtered_df['difference'] < 0)))) |
+            (is_cancelled_returned & filtered_df['case_type'].isin(['orphan_abc', 'return']))
+        )
+    ].copy()
+
+    returns_merged_df = exclude_old_items(returns_base_df)
+    total_returns_merged = len(returns_merged_df)
+    completed_returns_merged = int((returns_merged_df['status_clean'] == 'تم').sum())
+
+    # 4️⃣ تبويب فواتير بعد آخر طلب (ABC)
     post_cutoff_filtered = filtered_df[(filtered_df["case_type"] == "post_cutoff_abc") & active_mask_filtered].copy()
     post_cutoff_filtered = exclude_old_items(post_cutoff_filtered)
     total_post_cutoff = len(post_cutoff_filtered)
     completed_post_cutoff = len(post_cutoff_filtered[post_cutoff_filtered["status"] == "تم"])
     
-    payment_mask_safe = filtered_df["order_status"].apply(is_pending_payment_status).values
-    active_mask_safe = active_mask_filtered.values
-    
-    payment_filtered = filtered_df[payment_mask_safe & active_mask_safe].copy()
+    # 5️⃣ تبويب بانتظار الدفع (مستبعد بالكامل من الإضافات والإرجاعات)
+    payment_filtered = filtered_df[is_pending_payment & active_mask_filtered].copy()
     payment_filtered = exclude_old_items(payment_filtered)
     total_payment = len(payment_filtered)
     
-    cancelled_mask_safe = filtered_df["order_status"].apply(is_cancelled_or_returned_status).values
-    cancelled_filtered = filtered_df[cancelled_mask_safe].copy()
+    # 6️⃣ تبويب ملغي ومسترجع (يحتوي على كافة الحالات الملغية والمسترجعة للأرشفة والمتابعة)
+    cancelled_filtered = filtered_df[is_cancelled_returned].copy()
     cancelled_filtered = exclude_old_items(cancelled_filtered)
     total_cancelled = len(cancelled_filtered)
     
