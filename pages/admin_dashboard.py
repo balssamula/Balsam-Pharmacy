@@ -625,11 +625,14 @@ def show():
     total_post_cutoff = len(post_cutoff_filtered)
     completed_post_cutoff = len(post_cutoff_filtered[post_cutoff_filtered["status"] == "تم"])
     
-    payment_filtered = filtered_df[payment_mask & active_mask_filtered].copy()
+    # 💡 الإصلاح الجذري: توليد شروط الفلترة بشكل لحظي لتجنب تعارض فهارس Pandas
+    payment_mask_safe = filtered_df["order_status"].apply(is_pending_payment_status)
+    payment_filtered = filtered_df[payment_mask_safe & active_mask_filtered].copy()
     payment_filtered = exclude_old_items(payment_filtered)
     total_payment = len(payment_filtered)
     
-    cancelled_filtered = filtered_df[cancelled_mask].copy()
+    cancelled_mask_safe = filtered_df["order_status"].apply(is_cancelled_or_returned_status)
+    cancelled_filtered = filtered_df[cancelled_mask_safe].copy()
     cancelled_filtered = exclude_old_items(cancelled_filtered)
     total_cancelled = len(cancelled_filtered)
     
