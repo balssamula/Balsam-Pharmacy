@@ -160,12 +160,21 @@ def styled_dataframe(input_df):
     return display_df.style.apply(highlight_rows, axis=1)
 
 def render_table_with_click(df, tab_name, allow_move: bool = True):
-    """عرض جدول مع إمكانية تحديد الصف وإظهار إجراءات منبثقة"""
+    """عرض جدول مع إمكانية تحديد الصف وإظهار إجراءات منبثقة مع حماية الذاكرة التامة"""
     if df.empty:
         st.success("لا توجد بيانات في هذا القسم.")
         return
     
-    styled_df = styled_dataframe(df)
+    # 💡 [الحل الجذري والنهائي لمنع انهيار السيرفر والذاكرة]:
+    # نحدد سقفاً أقصى للعرض المرئي داخل المتصفح، مع بقاء زر التصدير محتفظاً بالبيانات كاملة
+    MAX_ROWS_TO_RENDER = 500
+    if len(df) > MAX_ROWS_TO_RENDER:
+        st.warning(f"⚠️ يحتوي هذا القسم على {len(df)} صف. لحماية أداء التطبيق ومنع الانهيار المجمّع، تم عرض أول {MAX_ROWS_TO_RENDER} صف فقط بالجدول التفاعلي. يمكنك تصدير الملف بصيغة Excel لقراءة التقرير الكامل بكل سلاسة.")
+        display_subset_df = df.head(MAX_ROWS_TO_RENDER).copy()
+    else:
+        display_subset_df = df.copy()
+        
+    styled_df = styled_dataframe(display_subset_df)
     if styled_df is not None:
         event = st.dataframe(
             styled_df,
@@ -177,14 +186,12 @@ def render_table_with_click(df, tab_name, allow_move: bool = True):
         
         if event.selection.rows:
             selected_idx = event.selection.rows[0]
-            if 0 <= selected_idx < len(df):
-                row = df.iloc[selected_idx]
-                item_key = row.get('item_key', '')
-                # 👇 حل مشكلة التبويبات القديمة: البحث عن المعرف الرقمي id كبديل أمان في حال غياب الـ item_key
+            if 0 <= selected_idx < len(display_subset_df):
+                row = display_subset_df.iloc[selected_idx]
                 item_key = row.get('item_key', row.get('id', ''))
                 if pd.isna(item_key) or item_key == '':
-                    item_key = f"old_row_{selected_idx}" # مفتاح أمان افتراضي لمنع انهيار الرسم
-                    
+                    item_key = f"old_row_{selected_idx}"
+                               
                 # ========== التحقق من وجود مكررات ==========
                 order_number = str(row.get('order_number', ''))
                 sku = str(row.get('sku', ''))
@@ -538,24 +545,45 @@ def show():
         if st.button("📥 تصدير إلى Excel", use_container_width=True):
             st.session_state.show_export = True
 
-    # ========== الفلاتر ==========
-    col1, col2, col3 = st.columns(3)
+    # ========== الفلاتر المتقدمة وعزل الجلسات ==========
+    sessions_list = get_all_sessions()
+    
+    # صف الفلاتر الأول: يحتوي على فلتر عزل الجلسات لمنع تكدس صفوف الملفات القديمة
+    col_sess, col1, col2 = st.columns(3)
+    with col_sess:
+        if not sessions_list.empty:
+            session_options = {"📋 كل الجلسات التاريخية": "الكل"}
+            for _, s_row in sessions_list.iterrows():
+                s_name = s_row.get('session_name', s_row['upload_batch_id'][:8]) or "جلسة غير مسماة"
+                session_options[f"📂 {s_name} ({str(s_row['uploaded_at'])[:10]})"] = s_row['upload_batch_id']
+            selected_session_label = st.selectbox("📂 فلتر الجلسة / الملف المرفوع", list(session_options.keys()))
+            selected_session_id = session_options[selected_session_label]
+        else:
+            selected_session_id = "الكل"
+            st.selectbox("📂 فلتر الجلسة / الملف المرفوع", ["لا توجد جلسات مرفوعة"])
+            
     with col1:
         branch_options = ["الكل"] + sorted(df["pharmacy_name"].dropna().astype(str).unique().tolist())
         selected_branch = st.selectbox("🏥 فلتر الفرع", branch_options)
     with col2:
         status_filter = st.selectbox("📌 فلتر حالة الإجراء", ["الكل", "قيد المتابعة", "تم"])
+
+    # صف الفلاتر الثاني
+    col3, col4, col5, col6 = st.columns(4)
     with col3:
         order_status_options = ["الكل", "تم التوصيل", "ملغي", "مسترجع", "بانتظار الدفع", "تم الاستلام من فرع"]
         selected_order_status = st.selectbox("📋 فلتر حالة الطلب", order_status_options)
-
-    col4, col5, col6 = st.columns(3)
     with col4:
         search_order = st.text_input("🔢 رقم الطلب", placeholder="بحث برقم الطلب...")
     with col5:
         search_invoice = st.text_input("🧾 رقم الفاتورة", placeholder="بحث برقم الفاتورة...")
     with col6:
         search_sku = st.text_input("🏷️ SKU", placeholder="بحث بـ SKU...")
+
+    # تطبيق الفلاتر ديناميكياً
+    filtered_df = df.copy()
+    if selected_session_id != "الكل":
+        filtered_df = filtered_df[filtered_df["upload_batch_id"] == selected_session_id]
 
     filtered_df = df.copy()
     if selected_branch != "الكل":
@@ -608,21 +636,31 @@ def show():
     # قناع تصفية الحالات النشطة (بانتظار المراجعة أو المتابعة)
     active_mask_filtered = filtered_df['status_clean'].isin(['قيد المتابعة', 'بانتظار المراجعة', 'معلق', ''])
 
-    # 1. تجميع فريم الإضافات الأولي بناءً على نوع الحالة والأقنعة النشطة
-    additions_base_df = filtered_df[filtered_df['case_type'].isin(['addition', 'orphan_salla']) & active_mask_filtered].copy()
+    # 💡 [تطبيق شروطك الدقيقة]: تجميع فريم الإضافات (الطلبات في سلة التي ليس لها فاتورة في ABC أو كميتها أعلى)
+    additions_base_df = filtered_df[
+        ((filtered_df['case_type'] == 'orphan_salla') | 
+         ((filtered_df['case_type'] == 'addition') & (filtered_df['difference'] > 0))) & 
+        active_mask_filtered
+    ].copy()
 
-    # 2. 🔥 التعديل الحاسم: استبعاد الملغي والمسترجع من الفريم الرئيسي قبل حساب العدادات
+    # استبعاد الملغي والمسترجع من الفريم الرئيسي قبل حساب العدادات لضمان دقة الأرقام
     if not additions_base_df.empty and 'order_status' in additions_base_df.columns:
         additions_base_df['order_status_clean'] = additions_base_df['order_status'].astype(str).str.strip()
         cancelled_mask = additions_base_df['order_status_clean'].str.contains("ملغي|مسترجع|cancelled|returned|refunded", na=False, case=False)
         additions_base_df = additions_base_df[~cancelled_mask].copy()
 
-    # 3. حساب العدادات الرقمية الحقيقية بدقة متناهية بناءً على البيانات المطهرة
+    # حساب العدادات الرقمية الحقيقية لتبويب الإضافات
     total_additions_merged = len(additions_base_df)
     completed_additions_merged = int((additions_base_df['status_clean'] == 'تم').sum())
 
-    # 4. تجميع فريم الإرجاعات بشكل مستقر وحساب عداداته
-    returns_base_df = filtered_df[filtered_df['case_type'].isin(['return', 'orphan_abc']) & active_mask_filtered].copy()
+    # 💡 [تطبيق شروطك الدقيقة]: تجميع فريم الإرجاعات (الفواتير في ABC التي ليس لها طلب في سلة أو كميتها أعلى)
+    returns_base_df = filtered_df[
+        ((filtered_df['case_type'] == 'orphan_abc') | 
+         ((filtered_df['case_type'] == 'return') & (filtered_df['difference'] < 0))) & 
+        active_mask_filtered
+    ].copy()
+    
+    # حساب العدادات الرقمية الحقيقية لتبويب الإرجاعات
     total_returns_merged = len(returns_base_df)
     completed_returns_merged = int((returns_base_df['status_clean'] == 'تم').sum())
    
