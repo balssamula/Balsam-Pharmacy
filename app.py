@@ -168,7 +168,12 @@ with st.sidebar:
             if st.button("📦 تفصيلي المنتجات من سلة", use_container_width=True):
                 st.session_state.page = "product_details"
                 st.rerun()
-        
+
+            # 💡 إضافة زر تحليل المبيعات
+            if st.button("📊 تحليل مبيعات الشهور", use_container_width=True):
+                st.session_state.page = "sales_analysis"
+                st.rerun()
+                
         st.markdown("---")
         if st.button("🚪 تسجيل خروج", use_container_width=True):
             for key in ["logged_in", "username", "user_role", "pharmacist_name", "page"]:
@@ -230,6 +235,11 @@ else:  # admin or manager
     elif page == "product_details" and st.session_state.user_role in ["admin", "manager"]:
         from pages import product_details
         product_details.show()
+
+    # 💡 توجيه صفحة تحليل مبيعات الشهور
+    elif page == "sales_analysis" and st.session_state.user_role in ["admin", "manager"]:
+        from pages import sales_analysis
+        sales_analysis.show()
     else:
         if permissions and permissions.get("can_view_dashboard"):
             from pages import admin_dashboard
