@@ -18,6 +18,15 @@ from utils.helpers import (
 )
 from utils.ui_components import render_metrics, render_completed_table
 
+def to_safe_int(val):
+    """تحويل آمن ومطلق لأي قيمة نصية أو فارغة إلى عدد صحيح لمنع الانهيار الحسابي"""
+    if pd.isna(val) or str(val).strip() in ["", "nan", "None"]:
+        return 0
+    try:
+        return int(float(str(val).strip()))
+    except:
+        return 0
+        
 def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
     """تصدير البيانات إلى ملف Excel مع تنسيق احترافي"""
     output = BytesIO()
@@ -86,8 +95,9 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
     """عرض بطاقة حالة ديناميكية بالكامل تنقاد خلف إشارة الفرق الفعلي"""
     
     # 1. حساب الفروقات بدقة رقمية في البايثون لحل مشكلة الحساب نهائياً
-    salla_numeric = int(row.get('salla_qty', 0)) if pd.notna(row.get('salla_qty', 0)) else 0
-    abc_numeric = int(row.get('abc_qty', 0)) if pd.notna(row.get('abc_qty', 0)) else 0
+    # إعادة احتساب الفرق برمجياً بالاعتماد على المفسر الآمن لحل مشكلة الحساب نهائياً
+    salla_numeric = to_safe_int(row.get('salla_qty', 0))
+    abc_numeric = to_safe_int(row.get('abc_qty', 0))
     diff_value = salla_numeric - abc_numeric
     
     case_type = row.get('case_type', '')
@@ -240,9 +250,9 @@ def render_old_orders_pharmacy(old_orders_df, pharmacy_name, pharmacist_name):
         days_old = int(row['days_old'])
         badge = "🔴 قديم جداً" if days_old > 365 else "🟠 قديم" if days_old > 180 else "🟡 يحتاج مراجعة"
         
-        # إعادة احتساب الفرق برمجياً لضمان الدقة المطلقة
-        salla_numeric = int(row.get('salla_qty', 0)) if pd.notna(row.get('salla_qty', 0)) else 0
-        abc_numeric = int(row.get('abc_qty', 0)) if pd.notna(row.get('abc_qty', 0)) else 0
+        # إعادة احتساب الفرق برمجياً بالاعتماد على المفسر الآمن لحل مشكلة الحساب نهائياً
+        salla_numeric = to_safe_int(row.get('salla_qty', 0))
+        abc_numeric = to_safe_int(row.get('abc_qty', 0))
         diff_value = salla_numeric - abc_numeric
         
         diff_style = "color: #28a745; font-weight: bold;" if diff_value > 0 else "color: #dc3545; font-weight: bold;" if diff_value < 0 else "color: #6c757d; font-weight: bold;"
@@ -334,9 +344,9 @@ def render_old_invoices_pharmacy(old_invoices_df, pharmacy_name, pharmacist_name
         days_old = int(row['days_old'])
         badge = "🔴 قديم جداً" if days_old > 365 else "🟠 قديم" if days_old > 180 else "🟡 يحتاج مراجعة"
         
-        # إعادة احتساب الفرق برمجياً لضمان الدقة المطلقة
-        salla_numeric = int(row.get('salla_qty', 0)) if pd.notna(row.get('salla_qty', 0)) else 0
-        abc_numeric = int(row.get('abc_qty', 0)) if pd.notna(row.get('abc_qty', 0)) else 0
+        # إعادة احتساب الفرق برمجياً بالاعتماد على المفسر الآمن لحل مشكلة الحساب نهائياً
+        salla_numeric = to_safe_int(row.get('salla_qty', 0))
+        abc_numeric = to_safe_int(row.get('abc_qty', 0))
         diff_value = salla_numeric - abc_numeric
         
         diff_style = "color: #28a745; font-weight: bold;" if diff_value > 0 else "color: #dc3545; font-weight: bold;" if diff_value < 0 else "color: #6c757d; font-weight: bold;"
