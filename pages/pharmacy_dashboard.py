@@ -82,38 +82,32 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
     output.seek(0)
     return output.getvalue()
 
-
 def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_name):
     """عرض بطاقة حالة ديناميكية بالكامل تنقاد خلف إشارة الفرق الفعلي"""
     
-    # 1. حساب الفروقات بدقة رقمية أولاً وقبل أي شيء
+    # 1. حساب الفروقات بدقة رقمية في البايثون لحل مشكلة الحساب نهائياً
     salla_numeric = int(row.get('salla_qty', 0)) if pd.notna(row.get('salla_qty', 0)) else 0
     abc_numeric = int(row.get('abc_qty', 0)) if pd.notna(row.get('abc_qty', 0)) else 0
     diff_value = salla_numeric - abc_numeric
     
     case_type = row.get('case_type', '')
 
-    # 2. تعيين المسميات والشارات والأزرار بناءً على ناتج الطرح الفعلي الحالي بالمليمتر
+    # 2. تعيين المسميات والشارات والأزرار بناءً على ناتج الطرح الفعلي الحالي
     if diff_value > 0:
-        # العميل دفع أكثر -> المطلوب إضافة مخزنية حتماً
         badge_text = "إضافة مخزنية عادية ➕"
         badge_color = "#dff1ff"
         badge_text_color = "#084298"
         diff_style = "color: #28a745; font-weight: bold;"
         required_action = "<span style='color: #28a745; font-weight: bold;'>إضافة</span>"
         button_label = "✅ تأكيد الإضافة"
-        
     elif diff_value < 0:
-        # الفرع صرف أكثر -> المطلوب إرجاع مخزني حتماً
         badge_text = "إرجاع مخزني عادي 🔄"
         badge_color = "#ffe0df"
         badge_text_color = "#491217"
         diff_style = "color: #dc3545; font-weight: bold;"
         required_action = "<span style='color: #dc3545; font-weight: bold;'>إرجاع</span>"
         button_label = "🔄 تأكيد الإرجاع"
-        
     else:
-        # الكميات متطابقة (حالات الفواتير والطلبات المفقودة مستندياً)
         diff_style = "color: #6c757d; font-weight: bold;"
         required_action = "<span style='color: #6c757d; font-weight: bold;'>مطابق</span>"
         button_label = None
@@ -134,19 +128,8 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
     order_status = row.get('order_status', 'غير متوفرة')
     invoice_date = row.get('invoice_date', '')
     order_date = row.get('order_date', '')
-    
-    # 3. تحديد لون رقم الفرق والنص المطلوب برمجياً
-    if diff_value > 0:
-        diff_style = "color: #28a745; font-weight: bold;" # لون أخضر للرقم الموجب
-        required_action = "<span style='color: #28a745; font-weight: bold;'>إضافة</span>"
-    elif diff_value < 0:
-        diff_style = "color: #dc3545; font-weight: bold;" # لون أحمر للرقم السالب
-        required_action = "<span style='color: #dc3545; font-weight: bold;'>إرجاع</span>"
-    else:
-        diff_style = "color: #6c757d; font-weight: bold;" # لون رمادي للصفر
-        required_action = "<span style='color: #6c757d; font-weight: bold;'>مطابق</span>"
 
-    # 4. التحقق من وجود مكررات عبر الفروع
+    # 3. التحقق من وجود مكررات عبر الفروع
     order_number = str(row.get('order_number', ''))
     sku = str(row.get('sku', ''))
     
@@ -157,7 +140,7 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
     except:
         pass
     
-    # 5. رسم الحاوية البصرية للبطاقة الرئيسية
+    # 4. رسم الحاوية البصرية للبطاقة الرئيسية
     with st.container():
         st.markdown(f"""
         <div style="background:#f8f9fa; border-radius:16px; padding:1rem; margin-bottom:1rem; border-right:5px solid #1f7a8c; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
@@ -170,25 +153,20 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             </div>
         """, unsafe_allow_html=True)
         
-        # تقسيم تفاصيل البطاقة التوضيحية إلى 3 أعمدة انسيابية
         col1, col2, col3 = st.columns([2, 1, 1.5])
-        
         with col1:
             st.markdown(f"""
             - **📋 رقم الطلب:** {row.get('order_number', 'N/A')}
             - **🏷️ SKU:** {row.get('sku', 'N/A')}
             - **📦 المنتج:** {str(row.get('product_name', 'N/A'))[:60]}
             """)
-            
         with col2:
-            # هنا تم دمج تلوين الرقم الصافي وإدراج خانة المطلوب النصية الملونة بدقة
             st.markdown(f"""
             - **🛒 كمية سلة:** {salla_numeric}
             - **📄 كمية ABC:** {abc_numeric}
             - **📊 الفرق:** <span style="{diff_style}">{'+' if diff_value > 0 else ''}{diff_value}</span>
             - **🎯 المطلوب:** {required_action}
             """, unsafe_allow_html=True)
-            
         with col3:
             st.markdown(f"""
             - **🧾 رقم الفاتورة:** {row.get('invoice_number', 'N/A')}
@@ -196,18 +174,25 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             - **⚙️ حالة الطلب:** {order_status}
             """)
             
-        # 6. قسم عرض تنبيهات المكررات بين الفروع إن وجدت
+        # 5. [تحديث موحد]: إظهار تنبيه المكررات بتصميم HTML احترافي لافت للانتباه
         if duplicates:
-            st.warning(f"⚠️ **تنبيه:** يوجد نفس المنتج (SKU: {sku}) في الفروع التالية:")
+            dup_warning_html = f"""
+            <div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem;">
+                <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+                    <span style="font-size:1.2rem;">⚠️</span>
+                    <span style="color:#856404; font-weight:bold;">تنبيه هام: هذا الصنف مكرر بموجب نفس رقم الطلب في فروع أخرى!</span>
+                </div>
+                <div style="margin-right:1.5rem;">
+            """
             for dup in duplicates:
-                dup_pharmacy = dup.get('pharmacy', 'غير معروف')
-                dup_status = dup.get('status', 'غير معروف')
-                dup_case = dup.get('case_type', 'غير معروف')
-                dup_invoice = dup.get('invoice_date', '')
-                st.markdown(f"- **{dup_pharmacy}** | 🏥 الحالة: {dup_status} | النوع: {dup_case} {f'| 📅 تاريخ الفاتورة: {dup_invoice[:16]}' if dup_invoice else ''}")
-            st.caption("💡 يرجى مراجعة هذه الفروع لتجنب ازدواجية المعالجة.")
+                dup_warning_html += f"""
+                <div style="font-size:0.85rem; margin-bottom:0.3rem; color:#66521a;">
+                    🏥 <strong>{dup.get('pharmacy', 'غير معروف')}</strong> | الإجراء الحالي: {dup.get('status', 'غير معروف')} | تصنيف الحالة: {dup.get('case_type', 'غير معروف')}
+                </div>
+                """
+            dup_warning_html += "</div></div>"
+            st.markdown(dup_warning_html, unsafe_allow_html=True)
             
-        # 7. إظهار صناديق تحذيرات النزاع والربط بين الفروع
         if row.get('is_duplicate_warning') == 1 or "تنبيه للمراجعة والتدقيق" in str(row.get('case_reason', '')):
             st.markdown(f"""
             <div style="background-color: #fff5f5; border: 1px solid #fc8181; padding: 0.75rem; border-radius: 10px; margin-top: 0.5rem; margin-bottom: 0.5rem;">
@@ -219,22 +204,17 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             
         st.markdown("</div>", unsafe_allow_html=True)
         
-        # 8. حقل الملاحظات مع حماية مفتاح الكي الموحد لكل كارت
         note_key = f"note_{idx}_{row.get('order_number', '')}_{row.get('sku', '')}"
-        note_value = st.text_area("📝 ملحوظة الصيدلي", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
+        note_value = st.text_area("📝 :ملحوظة الصيدلي", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
         
-        # 9. رسم وتفعيل الأزرار التفاعلية
-        btn_col1, btn_col2, btn_col3 = st.columns([1, 1.5, 3])
-        
+        btn_col1, btn_col2, _ = st.columns([1, 1.5, 3])
         with btn_col1:
             if st.button("💾 حفظ", key=f"save_{idx}_{note_key}", use_container_width=True):
                 from utils.database import save_case_note
                 save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value)
                 st.toast("📋 تم حفظ الملاحظة بنجاح!", icon="💾")
                 
-        # 👇 تحديث شروط رسم الأزرار لتطابق التوزيع الجديد داخل التبويبات المدمجة
         if allow_actions and row.get("status") != "تم" and case_type in {"addition", "return", "orphan_salla", "orphan_abc"}:
-            # إذا كان نوع الحالة البرمجي addition يكون الزر "تأكيد الإضافة"
             if case_type in {"addition", "orphan_salla"}:
                 button_label = "✅ تأكيد الإضافة"
             else:
@@ -251,41 +231,40 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
         st.markdown("---")
 
 
-def render_case_cards_pharmacy(df: pd.DataFrame, allow_actions: bool, pharmacist_name: str, pharmacy_name: str):
-    """عرض بطاقات الحالات للصيدلي"""
-    if df.empty:
-        st.success("🎉 لا توجد حالات في هذا القسم.")
-        return
-
-    for idx, row in df.iterrows():
-        render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_name)
-
-
 def render_old_orders_pharmacy(old_orders_df, pharmacy_name, pharmacist_name):
-    """عرض الطلبات القديمة للصيدلي"""
+    """عرض الطلبات القديمة للصيدلي مع إصلاح الحسابات والتحذيرات"""
     if old_orders_df.empty:
         return
     
     for idx, row in old_orders_df.iterrows():
         days_old = int(row['days_old'])
-        if days_old > 365:
-            badge = "🔴 قديم جداً"
-        elif days_old > 180:
-            badge = "🟠 قديم"
-        else:
-            badge = "🟡 يحتاج مراجعة"
+        badge = "🔴 قديم جداً" if days_old > 365 else "🟠 قديم" if days_old > 180 else "🟡 يحتاج مراجعة"
         
-        diff_value = numeric_value(row['difference'])
+        # إعادة احتساب الفرق برمجياً لضمان الدقة المطلقة
+        salla_numeric = int(row.get('salla_qty', 0)) if pd.notna(row.get('salla_qty', 0)) else 0
+        abc_numeric = int(row.get('abc_qty', 0)) if pd.notna(row.get('abc_qty', 0)) else 0
+        diff_value = salla_numeric - abc_numeric
+        
+        diff_style = "color: #28a745; font-weight: bold;" if diff_value > 0 else "color: #dc3545; font-weight: bold;" if diff_value < 0 else "color: #6c757d; font-weight: bold;"
         required_action = "إضافة" if diff_value > 0 else "إرجاع" if diff_value < 0 else "مطابق"
+        
+        # فحص المكررات
+        order_number = str(row.get('order_number', ''))
+        sku = str(row.get('sku', ''))
+        duplicates = []
+        try:
+            from utils.database import check_duplicate_across_branches
+            duplicates = check_duplicate_across_branches(order_number, sku, pharmacy_name)
+        except:
+            pass
         
         with st.container():
             st.markdown(f"""
-            <div style="background:#fff3cd; border-radius:16px; padding:1rem; margin-bottom:1rem; border-right:4px solid #dc3545;">
+            <div style="background:#fff3cd30; border-radius:16px; padding:1rem; margin-bottom:1rem; border-right:5px solid #dc3545; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
                 <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-                    <span style="background:#dc3545; color:white; padding:0.2rem 0.8rem; border-radius:20px; font-size:0.8rem;">{badge}</span>
-                    <span style="color:#6c757d;">📅 {row['order_date'][:16] if row['order_date'] else ''} | ⏰ {days_old} يوم</span>
+                    <span style="background:#dc3545; color:white; padding:0.2rem 0.8rem; border-radius:20px; font-size:0.8rem; font-weight:bold;">{badge}</span>
+                    <span style="color:#6c757d; font-size:0.8rem;">📅 {row['order_date'][:16] if row['order_date'] else ''} | ⏰ {days_old} يوم</span>
                 </div>
-            </div>
             """, unsafe_allow_html=True)
             
             col1, col2 = st.columns(2)
@@ -294,17 +273,30 @@ def render_old_orders_pharmacy(old_orders_df, pharmacy_name, pharmacist_name):
                 - **📋 رقم الطلب:** {row['order_number']}
                 - **🏷️ SKU:** {row['sku']}
                 - **📦 المنتج:** {row['product_name'][:60]}
-                - **🛒 كمية سلة:** {int(row['salla_qty'])}
-                - **📄 كمية ABC:** {int(row['abc_qty'])}
+                - **🛒 كمية سلة:** {salla_numeric}
+                - **📄 كمية ABC:** {abc_numeric}
                 """)
             with col2:
                 st.markdown(f"""
                 - **🧾 الفاتورة:** {row['invoice_number']}
                 - **👤 الصيدلي:** {row['abc_pharmacist_name'] or 'غير معروف'}
                 - **📌 حالة الطلب:** {row['order_status']}
-                - **📊 الفرق:** {diff_value}
-                - **🎯 المطلوب:** {required_action}
-                """)
+                - **📊 الفرق:** <span style="{diff_style}">{'+' if diff_value > 0 else ''}{diff_value}</span>
+                - **🎯 المطلوب:** <span style="{diff_style}">{required_action}</span>
+                """, unsafe_allow_html=True)
+            
+            if duplicates:
+                dup_warning_html = f"""
+                <div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.6rem; margin-top:0.5rem; border-radius:10px; margin-bottom:0.5rem;">
+                    <span style="color:#856404; font-weight:bold; font-size:0.85rem;">⚠️ صنف مكرر في فروع أخرى بموجب نفس الطلب:</span>
+                    <div style="margin-right:1rem; font-size:0.8rem; color:#66521a;">
+                """
+                for dup in duplicates:
+                    dup_warning_html += f"📍 <strong>{dup.get('pharmacy')}</strong> (الحالة: {dup.get('status')})<br>"
+                dup_warning_html += "</div></div>"
+                st.markdown(dup_warning_html, unsafe_allow_html=True)
+                
+            st.markdown("</div>", unsafe_allow_html=True)
             
             note_key = f"old_note_{idx}"
             note_value = st.text_area("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=note_key, height=60)
@@ -313,44 +305,53 @@ def render_old_orders_pharmacy(old_orders_df, pharmacy_name, pharmacist_name):
             with col_btn1:
                 if st.button("💾 حفظ", key=f"save_old_{idx}"):
                     save_case_note(row['order_number'], row['sku'], pharmacy_name, row['case_type'], note_value)
-                    st.success("✅ تم حفظ الملحوظة")
+                    st.toast("✅ تم حفظ الملحوظة")
                     st.rerun()
             
             if row['status'] != "تم":
                 with col_btn2:
                     if st.button("✅ تأكيد الإكمال", key=f"complete_old_{idx}"):
                         mark_case_done(row['order_number'], row['sku'], pharmacy_name, row['case_type'], pharmacist_name)
-                        st.success("✅ تم تأكيد إكمال الطلب")
+                        st.toast("✅ تم تأكيد إكمال الطلب")
                         st.rerun()
             st.markdown("---")
 
 
 def render_old_invoices_pharmacy(old_invoices_df, pharmacy_name, pharmacist_name):
-    """عرض الفواتير القديمة للصيدلي"""
+    """عرض الفواتير القديمة للصيدلي مع إصلاح الحسابات والتحذيرات"""
     if old_invoices_df.empty:
         return
     
     for idx, row in old_invoices_df.iterrows():
         days_old = int(row['days_old'])
-        if days_old > 365:
-            badge = "🔴 قديم جداً"
-        elif days_old > 180:
-            badge = "🟠 قديم"
-        else:
-            badge = "🟡 يحتاج مراجعة"
+        badge = "🔴 قديم جداً" if days_old > 365 else "🟠 قديم" if days_old > 180 else "🟡 يحتاج مراجعة"
         
-        diff_value = numeric_value(row['difference'])
+        # إعادة احتساب الفرق برمجياً لضمان الدقة المطلقة
+        salla_numeric = int(row.get('salla_qty', 0)) if pd.notna(row.get('salla_qty', 0)) else 0
+        abc_numeric = int(row.get('abc_qty', 0)) if pd.notna(row.get('abc_qty', 0)) else 0
+        diff_value = salla_numeric - abc_numeric
+        
+        diff_style = "color: #28a745; font-weight: bold;" if diff_value > 0 else "color: #dc3545; font-weight: bold;" if diff_value < 0 else "color: #6c757d; font-weight: bold;"
         required_action = "إضافة" if diff_value > 0 else "إرجاع" if diff_value < 0 else "مطابق"
         invoice_date = row.get('invoice_date', '')
         
+        # فحص المكررات
+        order_number = str(row.get('order_number', ''))
+        sku = str(row.get('sku', ''))
+        duplicates = []
+        try:
+            from utils.database import check_duplicate_across_branches
+            duplicates = check_duplicate_across_branches(order_number, sku, pharmacy_name)
+        except:
+            pass
+        
         with st.container():
             st.markdown(f"""
-            <div style="background:#fff3cd; border-radius:16px; padding:1rem; margin-bottom:1rem; border-right:4px solid #dc3545;">
+            <div style="background:#fff3cd30; border-radius:16px; padding:1rem; margin-bottom:1rem; border-right:5px solid #dc3545; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
                 <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-                    <span style="background:#dc3545; color:white; padding:0.2rem 0.8rem; border-radius:20px; font-size:0.8rem;">{badge}</span>
-                    <span style="color:#6c757d;">📅 تاريخ الفاتورة: {invoice_date[:16] if invoice_date else ''} | ⏰ {days_old} يوم</span>
+                    <span style="background:#dc3545; color:white; padding:0.2rem 0.8rem; border-radius:20px; font-size:0.8rem; font-weight:bold;">{badge}</span>
+                    <span style="color:#6c757d; font-size:0.8rem;">📅 تاريخ الفاتورة: {invoice_date[:16] if invoice_date else ''} | ⏰ {days_old} يوم</span>
                 </div>
-            </div>
             """, unsafe_allow_html=True)
             
             col1, col2 = st.columns(2)
@@ -359,17 +360,30 @@ def render_old_invoices_pharmacy(old_invoices_df, pharmacy_name, pharmacist_name
                 - **📋 رقم الفاتورة:** {row['invoice_number']}
                 - **🏷️ SKU:** {row['sku']}
                 - **📦 المنتج:** {row['product_name'][:60]}
-                - **🛒 كمية سلة:** {int(row['salla_qty'])}
-                - **📄 كمية ABC:** {int(row['abc_qty'])}
+                - **🛒 كمية سلة:** {salla_numeric}
+                - **📄 كمية ABC:** {abc_numeric}
                 """)
             with col2:
                 st.markdown(f"""
                 - **📋 رقم الطلب:** {row['order_number']}
                 - **👤 الصيدلي:** {row['abc_pharmacist_name'] or 'غير معروف'}
                 - **📌 حالة الطلب:** {row['order_status']}
-                - **📊 الفرق:** {diff_value}
-                - **🎯 المطلوب:** {required_action}
-                """)
+                - **📊 الفرق:** <span style="{diff_style}">{'+' if diff_value > 0 else ''}{diff_value}</span>
+                - **🎯 المطلوب:** <span style="{diff_style}">{required_action}</span>
+                """, unsafe_allow_html=True)
+            
+            if duplicates:
+                dup_warning_html = f"""
+                <div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.6rem; margin-top:0.5rem; border-radius:10px; margin-bottom:0.5rem;">
+                    <span style="color:#856404; font-weight:bold; font-size:0.85rem;">⚠️ صنف مكرر في فروع أخرى بموجب نفس الفاتورة:</span>
+                    <div style="margin-right:1rem; font-size:0.8rem; color:#66521a;">
+                """
+                for dup in duplicates:
+                    dup_warning_html += f"📍 <strong>{dup.get('pharmacy')}</strong> (الحالة: {dup.get('status')})<br>"
+                dup_warning_html += "</div></div>"
+                st.markdown(dup_warning_html, unsafe_allow_html=True)
+                
+            st.markdown("</div>", unsafe_allow_html=True)
             
             note_key = f"old_invoice_note_{idx}"
             note_value = st.text_area("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=note_key, height=60)
@@ -378,17 +392,27 @@ def render_old_invoices_pharmacy(old_invoices_df, pharmacy_name, pharmacist_name
             with col_btn1:
                 if st.button("💾 حفظ", key=f"save_old_invoice_{idx}"):
                     save_case_note(row['order_number'], row['sku'], pharmacy_name, row['case_type'], note_value)
-                    st.success("✅ تم حفظ الملحوظة")
+                    st.toast("✅ تم حفظ الملحوظة")
                     st.rerun()
             
             if row['status'] != "تم":
                 with col_btn2:
                     if st.button("✅ تأكيد الإكمال", key=f"complete_old_invoice_{idx}"):
                         mark_case_done(row['order_number'], row['sku'], pharmacy_name, row['case_type'], pharmacist_name)
-                        st.success("✅ تم تأكيد إكمال الفاتورة")
+                        st.toast("✅ تم تأكيد إكمال الفاتورة")
                         st.rerun()
             st.markdown("---")
 
+
+
+def render_case_cards_pharmacy(df: pd.DataFrame, allow_actions: bool, pharmacist_name: str, pharmacy_name: str):
+    """عرض بطاقات الحالات للصيدلي"""
+    if df.empty:
+        st.success("🎉 لا توجد حالات في هذا القسم.")
+        return
+
+    for idx, row in df.iterrows():
+        render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_name)
 
 def show():
     pharmacy_name = st.session_state.username
