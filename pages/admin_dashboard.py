@@ -582,12 +582,11 @@ def show():
     with col6:
         search_sku = st.text_input("🏷️ SKU", placeholder="بحث بـ SKU...")
 
-    # تطبيق الفلاتر ديناميكياً
+    # تطبيق الفلاتر ديناميكياً (تم حذق السطر المتكرر المسبب للمشكلة التاريخية)
     filtered_df = df.copy()
     if selected_session_id != "الكل":
         filtered_df = filtered_df[filtered_df["upload_batch_id"] == selected_session_id]
 
-    filtered_df = df.copy()
     if selected_branch != "الكل":
         filtered_df = filtered_df[filtered_df["pharmacy_name"] == selected_branch]
     if status_filter != "الكل":
