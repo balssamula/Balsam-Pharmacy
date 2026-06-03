@@ -285,16 +285,24 @@ def render_old_orders_pharmacy(old_orders_df, pharmacy_name, pharmacist_name):
                 - **🎯 المطلوب:** <span style="{diff_style}">{required_action}</span>
                 """, unsafe_allow_html=True)
             
-            if duplicates:
-                dup_warning_html = f"""
-                <div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.6rem; margin-top:0.5rem; border-radius:10px; margin-bottom:0.5rem;">
-                    <span style="color:#856404; font-weight:bold; font-size:0.85rem;">⚠️ صنف مكرر في فروع أخرى بموجب نفس الطلب:</span>
-                    <div style="margin-right:1rem; font-size:0.8rem; color:#66521a;">
-                """
-                for dup in duplicates:
-                    dup_warning_html += f"📍 <strong>{dup.get('pharmacy')}</strong> (الحالة: {dup.get('status')})<br>"
-                dup_warning_html += "</div></div>"
-                st.markdown(dup_warning_html, unsafe_allow_html=True)
+        # إظهار تنبيه المكررات بتصميم سطري آمن متوافق مع الماركداون لصفحة الصيدلي
+        if duplicates:
+            dup_warning_html = (
+                '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem; direction:rtl; text-align:right;">'
+                '<div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">'
+                '<span style="font-size:1.2rem;">⚠️</span>'
+                '<span style="color:#856404; font-weight:bold;">تنبيه هام: هذا الصنف مكرر بموجب نفس رقم الطلب في فروع أخرى!</span>'
+                '</div>'
+                '<div style="margin-right:1.5rem;">'
+            )
+            for dup in duplicates:
+                dup_warning_html += (
+                    '<div style="font-size:0.85rem; margin-bottom:0.3rem; color:#66521a;">'
+                    f'🏥 <strong>{dup.get("pharmacy", "غير معروف")}</strong> | الإجراء الحالي: {dup.get("status", "غير معروف")} | تصنيف الحالة: {dup.get("case_type", "غير معروف")}'
+                    '</div>'
+                )
+            dup_warning_html += '</div></div>'
+            st.markdown(dup_warning_html, unsafe_allow_html=True)
                 
             st.markdown("</div>", unsafe_allow_html=True)
             
