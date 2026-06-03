@@ -95,9 +95,8 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
     """عرض بطاقة حالة ديناميكية بالكامل تنقاد خلف إشارة الفرق الفعلي"""
     
     # 1. حساب الفروقات بدقة رقمية في البايثون لحل مشكلة الحساب نهائياً
-    # إعادة احتساب الفرق برمجياً بالاعتماد على المفسر الآمن لحل مشكلة الحساب نهائياً
-    salla_numeric = to_safe_int(row.get('salla_qty', 0))
-    abc_numeric = to_safe_int(row.get('abc_qty', 0))
+    salla_numeric = int(row.get('salla_qty', 0)) if pd.notna(row.get('salla_qty', 0)) else 0
+    abc_numeric = int(row.get('abc_qty', 0)) if pd.notna(row.get('abc_qty', 0)) else 0
     diff_value = salla_numeric - abc_numeric
     
     case_type = row.get('case_type', '')
@@ -157,7 +156,7 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; flex-wrap:wrap;">
                 <span style="background:{badge_color}; color:{badge_text_color}; padding:0.25rem 0.75rem; border-radius:20px; font-size:0.8rem; font-weight:bold;">{badge_text}</span>
                 <div>
-                    <span style="color:#6c757d; font-size:0.75rem;">📅 الطلب: {order_date[:16] if order_date else 'غير محدد'}</span>
+                    <span style="color:#6c757d; font-size:0.75rem;">📅 الطلب: {order_date[:16] if order_date else 'غير مححدد'}</span>
                     <span style="color:#6c757d; font-size:0.75rem; margin-right:0.5rem;">📅 الفاتورة: {invoice_date[:16] if invoice_date else 'غير محدد'}</span>
                 </div>
             </div>
@@ -184,23 +183,23 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             - **⚙️ حالة الطلب:** {order_status}
             """)
             
-        # 5. [تحديث موحد]: إظهار تنبيه المكررات بتصميم HTML احترافي لافت للانتباه
+        # 5. [إصلاح دائم]: بناء التنبيه للمكررات بدون مسافات بادئة تكسر مفسر السيرفر
         if duplicates:
-            dup_warning_html = f"""
-            <div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem;">
-                <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
-                    <span style="font-size:1.2rem;">⚠️</span>
-                    <span style="color:#856404; font-weight:bold;">تنبيه هام: هذا الصنف مكرر بموجب نفس رقم الطلب في فروع أخرى!</span>
-                </div>
-                <div style="margin-right:1.5rem;">
-            """
+            dup_warning_html = (
+                '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem; direction:rtl; text-align:right;">'
+                '<div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">'
+                '<span style="font-size:1.2rem;">⚠️</span>'
+                '<span style="color:#856404; font-weight:bold;">تنبيه هام: هذا الصنف مكرر بموجب نفس رقم الطلب في فروع أخرى!</span>'
+                '</div>'
+                '<div style="margin-right:1.5rem;">'
+            )
             for dup in duplicates:
-                dup_warning_html += f"""
-                <div style="font-size:0.85rem; margin-bottom:0.3rem; color:#66521a;">
-                    🏥 <strong>{dup.get('pharmacy', 'غير معروف')}</strong> | الإجراء الحالي: {dup.get('status', 'غير معروف')} | تصنيف الحالة: {dup.get('case_type', 'غير معروف')}
-                </div>
-                """
-            dup_warning_html += "</div></div>"
+                dup_warning_html += (
+                    '<div style="font-size:0.85rem; margin-bottom:0.3rem; color:#66521a;">'
+                    f'🏥 <strong>{dup.get("pharmacy", "غير معروف")}</strong> | الإجراء الحالي: {dup.get("status", "غير معروف")} | تصنيف الحالة: {dup.get("case_type", "غير معروف")}'
+                    '</div>'
+                )
+            dup_warning_html += '</div></div>'
             st.markdown(dup_warning_html, unsafe_allow_html=True)
             
         if row.get('is_duplicate_warning') == 1 or "تنبيه للمراجعة والتدقيق" in str(row.get('case_reason', '')):
@@ -215,7 +214,7 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
         st.markdown("</div>", unsafe_allow_html=True)
         
         note_key = f"note_{idx}_{row.get('order_number', '')}_{row.get('sku', '')}"
-        note_value = st.text_area("📝 :ملحوظة الصيدلي", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
+        note_value = st.text_area("📝 ملحوظة الصيدلي:", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
         
         btn_col1, btn_col2, _ = st.columns([1, 1.5, 3])
         with btn_col1:
@@ -250,15 +249,13 @@ def render_old_orders_pharmacy(old_orders_df, pharmacy_name, pharmacist_name):
         days_old = int(row['days_old'])
         badge = "🔴 قديم جداً" if days_old > 365 else "🟠 قديم" if days_old > 180 else "🟡 يحتاج مراجعة"
         
-        # إعادة احتساب الفرق برمجياً بالاعتماد على المفسر الآمن لحل مشكلة الحساب نهائياً
-        salla_numeric = to_safe_int(row.get('salla_qty', 0))
-        abc_numeric = to_safe_int(row.get('abc_qty', 0))
+        salla_numeric = int(row.get('salla_qty', 0)) if pd.notna(row.get('salla_qty', 0)) else 0
+        abc_numeric = int(row.get('abc_qty', 0)) if pd.notna(row.get('abc_qty', 0)) else 0
         diff_value = salla_numeric - abc_numeric
         
         diff_style = "color: #28a745; font-weight: bold;" if diff_value > 0 else "color: #dc3545; font-weight: bold;" if diff_value < 0 else "color: #6c757d; font-weight: bold;"
         required_action = "إضافة" if diff_value > 0 else "إرجاع" if diff_value < 0 else "مطابق"
         
-        # فحص المكررات
         order_number = str(row.get('order_number', ''))
         sku = str(row.get('sku', ''))
         duplicates = []
@@ -295,25 +292,26 @@ def render_old_orders_pharmacy(old_orders_df, pharmacy_name, pharmacist_name):
                 - **🎯 المطلوب:** <span style="{diff_style}">{required_action}</span>
                 """, unsafe_allow_html=True)
             
-        # إظهار تنبيه المكررات بتصميم سطري آمن متوافق مع الماركداون لصفحة الصيدلي
-        if duplicates:
-            dup_warning_html = (
-                '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem; direction:rtl; text-align:right;">'
-                '<div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">'
-                '<span style="font-size:1.2rem;">⚠️</span>'
-                '<span style="color:#856404; font-weight:bold;">تنبيه هام: هذا الصنف مكرر بموجب نفس رقم الطلب في فروع أخرى!</span>'
-                '</div>'
-                '<div style="margin-right:1.5rem;">'
-            )
-            for dup in duplicates:
-                dup_warning_html += (
-                    '<div style="font-size:0.85rem; margin-bottom:0.3rem; color:#66521a;">'
-                    f'🏥 <strong>{dup.get("pharmacy", "غير معروف")}</strong> | الإجراء الحالي: {dup.get("status", "غير معروف")} | تصنيف الحالة: {dup.get("case_type", "غير معروف")}'
+            # [إصلاح دائم وهيكلي]: بناء التنبيه للمكررات بدون مسافات بادئة تكسر مفسر السيرفر
+            if duplicates:
+                dup_warning_html = (
+                    '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem; direction:rtl; text-align:right;">'
+                    '<div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">'
+                    '<span style="font-size:1.2rem;">⚠️</span>'
+                    '<span style="color:#856404; font-weight:bold;">تنبيه هام: هذا الصنف مكرر بموجب نفس رقم الطلب في فروع أخرى!</span>'
                     '</div>'
+                    '<div style="margin-right:1.5rem;">'
                 )
-            dup_warning_html += '</div></div>'
-            st.markdown(dup_warning_html, unsafe_allow_html=True)
+                for dup in duplicates:
+                    dup_warning_html += (
+                        '<div style="font-size:0.85rem; margin-bottom:0.3rem; color:#66521a;">'
+                        f'🏥 <strong>{dup.get("pharmacy", "غير معروف")}</strong> | الإجراء الحالي: {dup.get("status", "غير معروف")} | تصنيف الحالة: {dup.get("case_type", "غير معروف")}'
+                        '</div>'
+                    )
+                dup_warning_html += '</div></div>'
+                st.markdown(dup_warning_html, unsafe_allow_html=True)
                 
+            # 💡 [إصلاح التموضع الحرج]: نقل إغلاق حاوية الـ div الرئيسية لتكون خارج شرط الـ duplicates تماماً لإنهاء مشكلة التداخل وانهيار السيرفر
             st.markdown("</div>", unsafe_allow_html=True)
             
             note_key = f"old_note_{idx}"
@@ -344,16 +342,14 @@ def render_old_invoices_pharmacy(old_invoices_df, pharmacy_name, pharmacist_name
         days_old = int(row['days_old'])
         badge = "🔴 قديم جداً" if days_old > 365 else "🟠 قديم" if days_old > 180 else "🟡 يحتاج مراجعة"
         
-        # إعادة احتساب الفرق برمجياً بالاعتماد على المفسر الآمن لحل مشكلة الحساب نهائياً
-        salla_numeric = to_safe_int(row.get('salla_qty', 0))
-        abc_numeric = to_safe_int(row.get('abc_qty', 0))
+        salla_numeric = int(row.get('salla_qty', 0)) if pd.notna(row.get('salla_qty', 0)) else 0
+        abc_numeric = int(row.get('abc_qty', 0)) if pd.notna(row.get('abc_qty', 0)) else 0
         diff_value = salla_numeric - abc_numeric
         
         diff_style = "color: #28a745; font-weight: bold;" if diff_value > 0 else "color: #dc3545; font-weight: bold;" if diff_value < 0 else "color: #6c757d; font-weight: bold;"
         required_action = "إضافة" if diff_value > 0 else "إرجاع" if diff_value < 0 else "مطابق"
         invoice_date = row.get('invoice_date', '')
         
-        # فحص المكررات
         order_number = str(row.get('order_number', ''))
         sku = str(row.get('sku', ''))
         duplicates = []
@@ -390,15 +386,23 @@ def render_old_invoices_pharmacy(old_invoices_df, pharmacy_name, pharmacist_name
                 - **🎯 المطلوب:** <span style="{diff_style}">{required_action}</span>
                 """, unsafe_allow_html=True)
             
+            # [إصلاح دائم وهيكلي]: بناء التنبيه للمكررات بدون مسافات بادئة تكسر مفسر السيرفر
             if duplicates:
-                dup_warning_html = f"""
-                <div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.6rem; margin-top:0.5rem; border-radius:10px; margin-bottom:0.5rem;">
-                    <span style="color:#856404; font-weight:bold; font-size:0.85rem;">⚠️ صنف مكرر في فروع أخرى بموجب نفس الفاتورة:</span>
-                    <div style="margin-right:1rem; font-size:0.8rem; color:#66521a;">
-                """
+                dup_warning_html = (
+                    '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem; direction:rtl; text-align:right;">'
+                    '<div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">'
+                    '<span style="font-size:1.2rem;">⚠️</span>'
+                    '<span style="color:#856404; font-weight:bold;">تنبيه هام: هذا الصنف مكرر بموجب نفس رقم الطلب في فروع أخرى!</span>'
+                    '</div>'
+                    '<div style="margin-right:1.5rem;">'
+                )
                 for dup in duplicates:
-                    dup_warning_html += f"📍 <strong>{dup.get('pharmacy')}</strong> (الحالة: {dup.get('status')})<br>"
-                dup_warning_html += "</div></div>"
+                    dup_warning_html += (
+                        '<div style="font-size:0.85rem; margin-bottom:0.3rem; color:#66521a;">'
+                        f'🏥 <strong>{dup.get("pharmacy", "غير معروف")}</strong> | الإجراء الحالي: {dup.get("status", "غير معروف")} | تصنيف الحالة: {dup.get("case_type", "غير معروف")}'
+                        '</div>'
+                    )
+                dup_warning_html += '</div></div>'
                 st.markdown(dup_warning_html, unsafe_allow_html=True)
                 
             st.markdown("</div>", unsafe_allow_html=True)
@@ -420,8 +424,6 @@ def render_old_invoices_pharmacy(old_invoices_df, pharmacy_name, pharmacist_name
                         st.toast("✅ تم تأكيد إكمال الفاتورة")
                         st.rerun()
             st.markdown("---")
-
-
 
 def render_case_cards_pharmacy(df: pd.DataFrame, allow_actions: bool, pharmacist_name: str, pharmacy_name: str):
     """عرض بطاقات الحالات للصيدلي"""
