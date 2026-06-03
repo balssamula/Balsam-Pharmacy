@@ -207,7 +207,7 @@ def render_table_with_click(df, tab_name, allow_move: bool = True):
                         <div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem;">
                             <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
                                 <span style="font-size:1.2rem;">⚠️</span>
-                                <span style="color:#856404; font-weight:bold;">تنبيه هام: يوجد نفس المنتج (SKU: {sku}) بموجب نفس رقم الطلب في فروع أخرى!</span>
+                                <span style="color:#856404; font-weight:bold;">تنبيه: يوجد نفس المنتج (SKU: {sku}) في فروع أخرى بموجب نفس رقم الطلب!</span>
                             </div>
                             <div style="margin-right:1.5rem;">
                         """
@@ -218,8 +218,8 @@ def render_table_with_click(df, tab_name, allow_move: bool = True):
                             dup_invoice = dup.get('invoice_date', '')
                             
                             duplicate_warning += f"""
-                            <div style="font-size:0.85rem; margin-bottom:0.4rem; padding:0.3rem 0; border-bottom:1px dashed #ffe0a3;">
-                                🏥 <strong>{dup_pharmacy}</strong> | الإجراء: {dup_status} | تصنيف الحالة: {dup_case}
+                            <div style="font-size:0.85rem; margin-bottom:0.4rem; padding:0.3rem 0; border-bottom:1px dashed #ffe0a3; color:#66521a;">
+                                🏥 <strong>{dup_pharmacy}</strong> | الحالة: {dup_status} | النوع: {dup_case}
                                 {f' | تاريخ الفاتورة: {dup_invoice[:16]}' if dup_invoice else ''}
                             </div>
                             """
@@ -227,13 +227,14 @@ def render_table_with_click(df, tab_name, allow_move: bool = True):
                             </div>
                         </div>
                         """
-                        
-                        # 💡 [السطر المفقود المستهدف]: إظهار التنبيه فوراً تحت تفاصيل الصنف عند الضغط عليه
-                        st.markdown(duplicate_warning, unsafe_allow_html=True)
-                        
                 except Exception as e:
                     pass
                 
+                # 💡 [الإصلاح الجذري المفقود]: طباعة رسالة التنبيه فوراً إذا كانت تحتوي على بيانات مكررة
+                if duplicate_warning:
+                    st.markdown(duplicate_warning, unsafe_allow_html=True)
+                
+                # صندوق الإجراءات الإدارية الذي يليه مباشرة
                 st.markdown(f"""
                 <div style="background:#f0f2f6;border-radius:10px;padding:1rem;margin-top:1rem;border-right:4px solid #1f7a8c;">
                     <h4 style="margin:0 0 0.5rem 0;">🛠️ إجراءات الصف المحدد (الأرشيف التاريخي)</h4>
