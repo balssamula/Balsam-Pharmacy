@@ -568,7 +568,7 @@ def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) 
     query = """
         SELECT order_number, invoice_number, sku, product_name, pharmacy_name, branch_number,
                salla_qty, abc_qty, 
-               (salla_qty - abc_qty) as difference,
+               (COALESCE(salla_qty, 0) - COALESCE(abc_qty, 0)) as difference,
                case_type, case_label, case_reason, status,
                performed_by, performed_at, customer_name, customer_phone, city, order_status,
                order_date, invoice_date, total_amount, profile_type, receipt_classification,
@@ -734,7 +734,7 @@ def get_old_orders(pharmacy_name: str = None, months: int = 6) -> pd.DataFrame:
     
     query = """
         SELECT order_number, invoice_number, sku, product_name, pharmacy_name, branch_number,
-               salla_qty, abc_qty, COALESCE(salla_qty, 0) - COALESCE(abc_qty, 0) AS difference, case_type, case_label, case_reason, status,
+               salla_qty, abc_qty, (COALESCE(salla_qty, 0) - COALESCE(abc_qty, 0)) as difference, case_type, case_label, case_reason, status,
                performed_by, performed_at, customer_name, customer_phone, city, order_status,
                order_date, invoice_date, profile_type, receipt_classification,
                pharmacist_note, item_key, abc_pharmacist_name,
@@ -786,7 +786,7 @@ def get_old_invoices(pharmacy_name: str = None, months: int = 6) -> pd.DataFrame
     
     query = """
         SELECT order_number, invoice_number, sku, product_name, pharmacy_name, branch_number,
-               salla_qty, abc_qty, difference, case_type, case_label, case_reason, status,
+               salla_qty, abc_qty, (COALESCE(salla_qty, 0) - COALESCE(abc_qty, 0)) AS difference, case_type, case_label, case_reason, status,
                performed_by, performed_at, customer_name, customer_phone, city, order_status,
                order_date, invoice_date, profile_type, receipt_classification,
                pharmacist_note, item_key, abc_pharmacist_name,
