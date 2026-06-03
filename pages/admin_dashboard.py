@@ -192,7 +192,7 @@ def render_table_with_click(df, tab_name, allow_move: bool = True):
                 if pd.isna(item_key) or item_key == '':
                     item_key = f"old_row_{selected_idx}"
                                
-                # ========== التحقق من وجود مكررات ==========
+# ========== التحقق من وجود مكررات (النسخة المحمية من المسافات البادئة) ==========
                 order_number = str(row.get('order_number', ''))
                 sku = str(row.get('sku', ''))
                 current_pharmacy = row.get('pharmacy_name', '')
@@ -203,34 +203,31 @@ def render_table_with_click(df, tab_name, allow_move: bool = True):
                     duplicates = check_duplicate_across_branches(order_number, sku, current_pharmacy)
                     
                     if duplicates:
-                        duplicate_warning = f"""
-                        <div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem;">
-                            <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
-                                <span style="font-size:1.2rem;">⚠️</span>
-                                <span style="color:#856404; font-weight:bold;">تنبيه: يوجد نفس المنتج (SKU: {sku}) في فروع أخرى بموجب نفس رقم الطلب!</span>
-                            </div>
-                            <div style="margin-right:1.5rem;">
-                        """
+                        duplicate_warning = (
+                            '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem; direction:rtl; text-align:right;">'
+                            '<div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">'
+                            '<span style="font-size:1.2rem;">⚠️</span>'
+                            f'<span style="color:#856404; font-weight:bold;">تنبيه: يوجد نفس المنتج (SKU: {sku}) في فروع أخرى بموجب نفس رقم الطلب!</span>'
+                            '</div>'
+                            '<div style="margin-right:1.5rem;">'
+                        )
                         for dup in duplicates:
                             dup_pharmacy = dup.get('pharmacy', 'غير معروف')
                             dup_status = dup.get('status', 'غير معروف')
                             dup_case = dup.get('case_type', 'غير معروف')
                             dup_invoice = dup.get('invoice_date', '')
+                            invoice_str = f' | تاريخ الفاتورة: {dup_invoice[:16]}' if dup_invoice else ''
                             
-                            duplicate_warning += f"""
-                            <div style="font-size:0.85rem; margin-bottom:0.4rem; padding:0.3rem 0; border-bottom:1px dashed #ffe0a3; color:#66521a;">
-                                🏥 <strong>{dup_pharmacy}</strong> | الحالة: {dup_status} | النوع: {dup_case}
-                                {f' | تاريخ الفاتورة: {dup_invoice[:16]}' if dup_invoice else ''}
-                            </div>
-                            """
-                        duplicate_warning += """
-                            </div>
-                        </div>
-                        """
+                            duplicate_warning += (
+                                '<div style="font-size:0.85rem; margin-bottom:0.4rem; padding:0.3rem 0; border-bottom:1px dashed #ffe0a3; color:#66521a;">'
+                                f'🏥 <strong>{dup_pharmacy}</strong> | الحالة: {dup_status} | النوع: {dup_case}{invoice_str}'
+                                '</div>'
+                            )
+                        duplicate_warning += '</div></div>'
                 except Exception as e:
                     pass
                 
-                # 💡 [الإصلاح الجذري المفقود]: طباعة رسالة التنبيه فوراً إذا كانت تحتوي على بيانات مكررة
+                # عرض التنبيه بشكل سليم وبدون مسافات بادئة تكسر مفسر الماركداون
                 if duplicate_warning:
                     st.markdown(duplicate_warning, unsafe_allow_html=True)
                 
