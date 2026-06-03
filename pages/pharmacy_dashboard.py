@@ -563,9 +563,19 @@ def show():
     tab_additions_count = f"{completed_additions_merged}/{total_additions_merged}" if total_additions_merged > 0 else "0"
     tab_returns_count = f"{completed_returns_merged}/{total_returns_merged}" if total_returns_merged > 0 else "0"
     
-    # تصدير Excel
+    # ========== تصدير Excel المطور (استبعاد الملغي والمسترجع والمحذوف من الإضافات) ==========
     if st.session_state.get('show_export_pharmacy', False):
+        # 💡 [تطبيق التصفية الصارمة]: جلب الإضافات والطلبات المفقودة وتطهيرها من الحالات غير النشطة
         additions_merged = df[df['case_type'].isin(['addition', 'orphan_salla'])].copy()
+        
+        if not additions_merged.empty and 'order_status' in additions_merged.columns:
+            # قناع استبعاد الكلمات الافتتاحية للملغي والمسترجع والمحذوف باللغتين العربية والإنجليزية
+            exclude_condition = additions_merged['order_status'].astype(str).str.contains(
+                "ملغي|مسترجع|محذوف|cancelled|returned|deleted|refunded", na=False, case=False
+            )
+            additions_merged = additions_merged[~exclude_condition].copy()
+        
+        # 💡 الإرجاعات تترك مع الفواتير الملغية والمسترجعة لتأكيد إرجاعها ماليًا بالمخزن كما صممنا سابقًا
         returns_merged = df[df['case_type'].isin(['return', 'orphan_abc'])].copy()
         
         additions_merged['نوع التفصيلي'] = additions_merged['case_type'].map({
