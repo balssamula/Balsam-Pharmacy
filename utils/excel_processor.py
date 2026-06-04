@@ -246,13 +246,25 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         merged["salla_pharmacy_name"]
     )
     
-    merged["difference"] = merged["salla_qty"] - merged["abc_qty"]
+merged["difference"] = merged["salla_qty"] - merged["abc_qty"]
     merged["case_type"] = ""
     merged["case_reason"] = ""
     merged["is_duplicate_warning"] = 0
     
+    # 💡 [تطبيق شرطك الصارم]: استخراج توقيت آخر طلب + قائمة بجميع أرقام الطلبات الموجودة في سلة
+    max_salla_date = None
+    salla_order_numbers = set()
+    
+    if not salla_grouped.empty:
+        if "order_date" in salla_grouped.columns:
+            salla_dates = pd.to_datetime(salla_grouped["order_date"], errors="coerce")
+            if not salla_dates.isna().all():
+                max_salla_date = salla_dates.max()
+        if "order_number" in salla_grouped.columns:
+            salla_order_numbers = set(salla_grouped["order_number"].astype(str).str.strip().unique())
+    
     # -------------------------------------------------------------------------
-    # 🧠 تطبيق منطق الفرز الصارم وجلب كافة أصناف الإضافات والنواقص
+    # 🧠 تطبيق منطق الفرز الصارم والمطابق لشرطك المحاسبي
     # -------------------------------------------------------------------------
     for idx, row in merged.iterrows():
         salla_q = row['salla_qty']
@@ -292,22 +304,38 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
             merged.at[idx, "case_reason"] = f"كمية طلب سلة المدفوعة ({int(salla_q)}) أعلى من كمية الفاتورة بالفرع ({int(abc_q)}). العجز يتطلب إضافة مخزنية حقيقية."
             continue
 
-        # د. الشرط الثاني للإضافات الحتمية: الصنف موجود في سلة [الكمية > 0] وليس له فاتورة أو صنف مطابق نهائياً على ABC
+        # د. الشرط الثاني للإضافات الحتمية: الصنف موجود في سلة [الكمية > 0] وليس له فاتورة نهائياً على ABC
         if (row['_merge'] == "left_only" or abc_total == 0) and salla_q > 0:
             merged.at[idx, "case_type"] = "orphan_salla"
             merged.at[idx, "case_reason"] = f"🛒 نقص مستندي كامل: صنف الطلب موجود ومؤكد في سلة بكمية {int(salla_q)} ولكن مستند الفاتورة مفقود بالكامل من نظام ABC لنفس الصنف ورقم الطلب."
             continue
 
-        # هـ. حالات الإرجاع الصافية المستقرة (ABC أكبر من سلة للطلب القائم)
-        if diff_calc < 0 and abc_q > 0:
+        # هـ. حالات الإرجاع الصافية المستقرة (الكمية في ABC أكبر من سلة لطلب مطابق قائم بالفعل)
+        if diff_calc < 0 and salla_q > 0 and abc_q > 0:
             merged.at[idx, "case_type"] = "return"
             merged.at[idx, "case_reason"] = f"كمية الفاتورة الموردة بالفرع ({int(abc_q)}) أكبر من كمية طلب سلة ({int(salla_q)}). الزيادة تتطلب إرجاع مخزني."
             continue
 
-        # و. فواتير مجهولة بدون مبيعات (فاتورة بدون طلب)
+        # و. [التوجيه الذكي والصارم للفواتير المجهولة بناءً على طلبك]
         if row['_merge'] == "right_only" and abc_q > 0:
-            merged.at[idx, "case_type"] = "orphan_abc"
-            merged.at[idx, "case_reason"] = f"📄 فاتورة توريد متواجدة في ABC بكمية {int(abc_q)} لا يقابلها أي طلب مبيعات قائم في سلة."
+            inv_date = pd.to_datetime(row['invoice_date'], errors='coerce')
+            order_num_str = str(order_num).strip()
+            
+            # فحص ما إذا كان رقم الطلب ككل غير متواجد في سلة نهائياً والتاريخ متأخر
+            if order_num_str not in salla_order_numbers and max_salla_date is not None and pd.notna(inv_date) and inv_date > max_salla_date:
+                # 👍 السيناريو الأول: الطلب بكامله ليس له وجود في سلة وتاريخه بعد آخر طلب -> فواتير بعد آخر طلب
+                merged.at[idx, "case_type"] = "post_cutoff_abc"
+                merged.at[idx, "case_reason"] = (
+                    f"⏰ فاتورة بعد آخر طلب: رقم الطلب ({order_num}) غير موجود نهائياً في شيت سلة، "
+                    f"وتاريخ الفاتورة ({row['invoice_date']}) جاء بعد توقيت آخر طلب مدخل ({max_salla_date.strftime('%Y-%m-%d %H:%M:%S')})."
+                )
+            else:
+                # 🔄 السيناريو الثاني: رقم الطلب موجود بالفعل في سلة (حتى لو الصنف جديد أو التاريخ متأخر) -> تذهب للإرجاعات فورا كزيادة كمية
+                merged.at[idx, "case_type"] = "orphan_abc"
+                merged.at[idx, "case_reason"] = (
+                    f"🔄 إرجاع حتمي (زيادة صنف): رقم الطلب ({order_num}) موجود بالفعل في شيت سلة "
+                    f"ولكن هذا الصنف مضاف بزيادة في فواتير ABC بكمية {int(abc_q)} ولم يطلبه العميل."
+                )
             continue
 
     result = merged[merged["case_type"] != ""].copy()
