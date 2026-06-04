@@ -544,7 +544,7 @@ def show():
         if st.button("🔄 تحديث الصفحة", use_container_width=True):
             st.rerun()
     with col2:
-        if st.button("📥 تصدير إلى Excel", use_container_width=True, type="primary"):
+        if st.button("📥 تصدير إلى Excel", use_container_width=True):
             st.session_state.show_export = True
 
     # ========== الفلاتر المتقدمة وعزل الجلسات ==========
@@ -736,6 +736,7 @@ def show():
             data=excel_data,
             file_name=f"balsam_full_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             use_container_width=True,
+            type="primary"
         )
         st.session_state.show_export = False
     
