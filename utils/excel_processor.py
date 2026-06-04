@@ -246,7 +246,7 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         merged["salla_pharmacy_name"]
     )
     
-merged["difference"] = merged["salla_qty"] - merged["abc_qty"]
+    merged["difference"] = merged["salla_qty"] - merged["abc_qty"]
     merged["case_type"] = ""
     merged["case_reason"] = ""
     merged["is_duplicate_warning"] = 0
