@@ -246,6 +246,7 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         merged["salla_pharmacy_name"]
     )
     
+    # 💡 [تم الإصلاح]: إعادة إدراج الـ 4 مسافات البادئة للسطر التالي ليعود لداخل نطاق الدالة البرمجية
     merged["difference"] = merged["salla_qty"] - merged["abc_qty"]
     merged["case_type"] = ""
     merged["case_reason"] = ""
@@ -360,7 +361,7 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
     return result[available_cols]
 
 # =========================================================================
-# 📥 الجزء الثاني: نهاية دالة رفع ومعالجة الـ Excel بالبنية النحوية المغلقة
+# 📥 الجزء الثاني: دالة رفع ومعالجة الـ Excel بالبنية النحوية المغلقة
 # =========================================================================
 
 def process_excel(uploaded_file, username):
@@ -425,7 +426,7 @@ def process_excel(uploaded_file, username):
             if cols_to_drop:
                 insert_df = insert_df.drop(columns=cols_to_drop)
                 
-            # 💡 [إصلاح جذري]: تعبئة الأعمدة الغائبة بناءً على نوع البيانات لمنع حقن النصوص الفارغة في الحقول الرقمية
+            # تعبئة الأعمدة الغائبة بناءً على نوع البيانات لمنع حقن النصوص الفارغة في الحقول الرقمية
             for col in valid_columns:
                 if col not in insert_df.columns:
                     if col in ['performed_by', 'performed_at', 'item_locked_by', 'item_locked_at', 'branch_number', 'salla_branch_number']:
@@ -433,7 +434,7 @@ def process_excel(uploaded_file, username):
                     elif col in ['is_item_locked']:
                         insert_df[col] = 0
                     elif col in ['salla_qty', 'abc_qty', 'difference', 'total_amount', 'discount', 'shipping_cost', 'tax', 'coupon_discount', 'offer_discount']:
-                        insert_df[col] = 0.0  # الحفاظ على الهوية الرقمية للحقول الرياضية
+                        insert_df[col] = 0.0
                     else:
                         insert_df[col] = ''
                         
