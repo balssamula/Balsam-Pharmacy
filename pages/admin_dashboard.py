@@ -501,7 +501,7 @@ def show():
             if st.session_state.get('comparison_result') is not None:
                 st.dataframe(st.session_state.comparison_result, use_container_width=True)
                 excel_data = export_to_excel({"مقارنة_الجلسات": st.session_state.comparison_result})
-                st.download_button("📥 تحميل تقرير المقارنة", data=excel_data, 
+                st.download_button("📥 تحميل تقرير المقارنة", data=excel_data, type="primary", 
                     file_name=f"session_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
         else:
             st.info("لا توجد جلسات للمقارنة")
@@ -544,7 +544,7 @@ def show():
         if st.button("🔄 تحديث الصفحة", use_container_width=True):
             st.rerun()
     with col2:
-        if st.button("📥 تصدير إلى Excel", use_container_width=True):
+        if st.button("📥 تصدير إلى Excel", use_container_width=True, type="primary"):
             st.session_state.show_export = True
 
     # ========== الفلاتر المتقدمة وعزل الجلسات ==========
