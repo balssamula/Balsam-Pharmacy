@@ -648,23 +648,18 @@ def show():
     
 # ========== حساب الإحصائيات الصحيحة للتبويبات بناءً على الشروط الدقيقة والمحدثة ==========
     # =========================================================================
-    # 🧠 [إصلاح جذري]: نقل حساب وتصفية كافة التبويبات للأعلى لتأمين تصدير الإكسيل من الـ NameError
+    # 🧠 [ترتيب هيكلي سليم]: تصفية كافة جداول التبويبات في أعلى الدالة لمنع الـ NameError
     # =========================================================================
     active_mask_filtered = filtered_df["active"] == 1 if "active" in filtered_df.columns else True
-    
-    # أقنعة تصفية الحالات بناءً على الشروط الأصلية لملفك
     is_cancelled_returned = filtered_df["order_status"].astype(str).str.strip().str.contains("ملغي|مسترجع|cancelled|returned|refunded", na=False, case=False)
     is_pending_payment = filtered_df["order_status"].astype(str).str.strip().str.contains("بانتظار الدفع|لم يتم الدفع|pending|unpaid", na=False, case=False)
     
-    # 1️⃣ تبويب الإضافات والطلبات المفقودة
     additions_filtered = filtered_df[filtered_df["case_type"].isin(["addition", "orphan_salla"]) & (~is_cancelled_returned) & (~is_pending_payment) & active_mask_filtered].copy()
     additions_filtered = exclude_old_items(additions_filtered)
     
-    # 2️⃣ تبويب الإرجاعات والزيادات
     returns_filtered = filtered_df[filtered_df["case_type"].isin(["return", "orphan_abc"]) & (~is_cancelled_returned) & (~is_pending_payment) & active_mask_filtered].copy()
     returns_filtered = exclude_old_items(returns_filtered)
     
-    # 3️⃣ تبويب فواتير معلقة بين الفروع (البيانات النشطة الحالية + الطلبات القديمة المتداخلة المستهدفة بالشرط)
     conflicts_filtered = filtered_df[filtered_df["case_type"] == "branch_conflict"].copy()
     conflicts_filtered = exclude_old_items(conflicts_filtered)
     
@@ -684,26 +679,20 @@ def show():
             if 'item_key' in conflicts_filtered.columns:
                 conflicts_filtered = conflicts_filtered.drop_duplicates(subset=['item_key'])
                 
-    # 4️⃣ تبويب فواتير بعد آخر طلب
     post_cutoff_filtered = filtered_df[(filtered_df["case_type"] == "post_cutoff_abc") & (~is_cancelled_returned) & active_mask_filtered].copy()
     post_cutoff_filtered = exclude_old_items(post_cutoff_filtered)
     
-    # 5️⃣ تبويب بانتظار الدفع
     payment_filtered = filtered_df[is_pending_payment & (filtered_df["case_type"] != "branch_conflict") & active_mask_filtered].copy()
     payment_filtered = exclude_old_items(payment_filtered)
     
-    # 6️⃣ تبويب ملغي ومسترجع
     cancelled_filtered = filtered_df[is_cancelled_returned & (filtered_df["case_type"] != "branch_conflict")].copy()
     cancelled_filtered = exclude_old_items(cancelled_filtered)
     
-    # الحسابات الإحصائية المتبقية لملفك التاريخي
     old_invoices_df = get_old_invoices(months=6)
     completed_df_admin = get_completed_items()
 
-    # =========================================================================
-    # 📥 زر تصدير الإكسيل الموحد للإدارة (يعمل الآن بأمان مطلق ومطهر من الأخطاء)
-    # =========================================================================
-    if st.button("📥 تصدير كل التقارير الحالية إلى ملف Excel موحد"):
+    # 📥 [إصلاح حاسم]: توفير زر تصدير واحد محمي بمعامل key حصري لمنع الـ DuplicateElementId
+    if st.button("📥 تصدير كل التقارير الحالية إلى ملف Excel موحد", key="admin_global_excel_export_btn"):
         excel_data = export_to_excel({
             "الإضافات والطلبات المفقودة": additions_filtered,
             "الإرجاعات والفواتير المعلقة": returns_filtered,
@@ -711,15 +700,15 @@ def show():
             "فواتير بعد آخر طلب": post_cutoff_filtered,
             "بانتظار الدفع": payment_filtered,
             "الملغيات والمسترجعات": cancelled_filtered,
-            "الطلبات القديمة التاريخية": old_orders_df,
+            "الطلبــات القديمة التاريخية": old_orders_df,
             "الفواتير القديمة التاريخية": old_invoices_df
         })
-        
         st.download_button(
             label="💾 اضغط هنا لتحميل ملف Excel الموحد للإدارة",
             data=excel_data,
             file_name=f"Balsam_Admin_Report_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="admin_excel_download_stream"
         )
     
     st.markdown("""
