@@ -467,8 +467,6 @@ def show():
         if st.button("🔄 تحديث الصفحة", use_container_width=True):
             st.rerun()
     with col2:
-        if st.button("📥 تصدير إلى Excel", use_container_width=True):
-            st.session_state.show_export_pharmacy = True
         # تحديث زر تصدير الإكسيل الشامل داخل صفحة الصيدلية
         if st.button("📥 تصدير جميع تقارير الفرع الحالية إلى Excel"):
             # تجهيز كود تصدير نظيف خالٍ من التداخلات
