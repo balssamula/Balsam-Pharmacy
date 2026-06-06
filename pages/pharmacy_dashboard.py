@@ -643,9 +643,9 @@ def show():
     
     # التبويبات
     tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices = st.tabs([
-        f"📥 الإضافات والنواقص ({total_additions})",
-        f"📤 الإرجاعات والزيادات ({total_returns})",
-        f"📊 فواتير معلقة - تداخل ({total_conflicts})", # التبويب المضاف لـ الصيدلي
+        f"📥 الإضافات والنواقص ({total_additions_merged})",
+        f"📤 الإرجاعات والزيادات ({total_returns_merged})",
+        f"📊 فواتير معلقة - تداخل ({total_conflicts})",
         f"⏰ فواتير بعد آخر طلب ({total_post_cutoff})",
         f"💳 بانتظار الدفع ({total_payment})",
         f"⚠️ ملغي/مسترجع ({total_cancelled})",
