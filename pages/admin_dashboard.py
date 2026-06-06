@@ -756,9 +756,28 @@ def show():
     
     total_returns_count = len(returns_filtered)
     completed_returns_count = len(returns_filtered[returns_filtered["status"] == "تم"]) if "status" in returns_filtered.columns else 0
+    
+    # =========================================================================
+    # 📊 حساب إحصائيات العناصر القديمة وتأمينها لمنع الـ NameError
+    # =========================================================================
+    # جلب إحصائيات الأعداد من قاعدة البيانات مباشرة لتوفير المتغيرات المطلوبة في التبويبات
+    try:
+        old_orders_stats_data = get_old_orders_stats()
+        old_invoices_stats_data = get_old_invoices_stats()
+        
+        # فلترة الإحصائيات التاريخية بناءً على الفرع المحدد لتطابق الأرقام مع فلاتر الإدارة
+        if selected_branch != "الكل":
+            old_orders_stats_data = [r for r in old_orders_stats_data if r[0] == selected_branch]
+            old_invoices_stats_data = [r for r in old_invoices_stats_data if r[0] == selected_branch]
+            
+        total_old_orders_stats = sum(r[1] for r in old_orders_stats_data)
+        total_old_invoices_stats = sum(r[1] for r in old_invoices_stats_data)
+    except Exception as e:
+        total_old_orders_stats = len(old_orders_df) if 'old_orders_df' in locals() else 0
+        total_old_invoices_stats = len(old_invoices_df) if 'old_invoices_df' in locals() else 0
 
     # =========================================================================
-    # 📊 بناء التبويبات (Tabs) بشكل متزن ومستقر عددياً
+    # 📊 بناء التبويبات (Tabs) بشكل متزن ومستقر عددياً ومطابق 100% لمتغيراتك
     # =========================================================================
     tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices, tab_old_stats = st.tabs([
         f"📥 الإضافات والطلبات المفقودة ({completed_additions_count}/{total_additions_count})" if total_additions_count > 0 else "📥 الإضافات والطلبات المفقودة (0)",
@@ -768,11 +787,11 @@ def show():
         f"💰 بانتظار الدفع ({total_payment})",
         f"⚠️ ملغي/مسترجع ({total_cancelled})",
         f"✅ تم الانتهاء ({total_completed})",
-        f"📅 طلبات قديمة ({total_old_orders_stats})",
-        f"🧾 فواتير قديمة ({total_old_invoices_stats})",
+        f"📅 طلبات قديمة ({total_old_orders_stats})",   # 💡 تم التأمين والحساب بنجاح
+        f"🧾 فواتير قديمة ({total_old_invoices_stats})", # 💡 تم التأمين والحساب بنجاح
         "📊 إحصائيات قديمة"
     ])
-    
+
        
     with tab_additions:
         st.markdown("""
