@@ -677,13 +677,13 @@ def show():
     total_post_cutoff = len(post_cutoff_filtered)
     completed_post_cutoff = len(post_cutoff_filtered[post_cutoff_filtered["status"] == "تم"])
     
-    # 5️⃣ تبويب بانتظار الدفع (مستبعد بالكامل من الإضافات والإرجاعات)
-    payment_filtered = filtered_df[is_pending_payment & active_mask_filtered].copy()
+    # 5️⃣ تبويب بانتظار الدفع (تم إضافة شرط استبعاد الفواتير المعلقة المتداخلة)
+    payment_filtered = filtered_df[is_pending_payment & (filtered_df["case_type"] != "branch_conflict") & active_mask_filtered].copy()
     payment_filtered = exclude_old_items(payment_filtered)
     total_payment = len(payment_filtered)
     
-    # 6️⃣ تبويب ملغي ومسترجع (يحتوي على كافة الحالات الملغية والمسترجعة للأرشفة والمتابعة)
-    cancelled_filtered = filtered_df[is_cancelled_returned].copy()
+    # 6️⃣ تبويب ملغي ومسترجع (تم إضافة شرط استبعاد الفواتير المعلقة المتداخلة)
+    cancelled_filtered = filtered_df[is_cancelled_returned & (filtered_df["case_type"] != "branch_conflict")].copy()
     cancelled_filtered = exclude_old_items(cancelled_filtered)
     total_cancelled = len(cancelled_filtered)
     
