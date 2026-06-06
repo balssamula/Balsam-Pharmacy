@@ -618,42 +618,45 @@ def show():
             use_container_width=True,
         )
         st.session_state.show_export_pharmacy = False
-    
-    # تلوين التبويبات
-    st.markdown("""
-    <style>
-    button[data-baseweb="tab"]:nth-child(1) { background-color: #4472C4; color: white; border-radius: 10px 10px 0 0; }
-    button[data-baseweb="tab"]:nth-child(2) { background-color: #ED7D31; color: white; border-radius: 10px 10px 0 0; }
-    button[data-baseweb="tab"]:nth-child(3) { background-color: #9B59B6; color: white; border-radius: 10px 10px 0 0; }
-    button[data-baseweb="tab"]:nth-child(4) { background-color: #3498DB; color: white; border-radius: 10px 10px 0 0; }
-    button[data-baseweb="tab"]:nth-child(5) { background-color: #E74C3C; color: white; border-radius: 10px 10px 0 0; }
-    button[data-baseweb="tab"]:nth-child(6) { background-color: #27AE60; color: white; border-radius: 10px 10px 0 0; }
-    button[data-baseweb="tab"]:nth-child(7) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
-    button[data-baseweb="tab"]:nth-child(8) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
-    button[data-baseweb="tab"][aria-selected="true"] { transform: translateY(-2px) !important; box-shadow: 0 4px 8px rgba(0,0,0,0.2) !important; }
-    button[data-baseweb="tab"][aria-selected="false"] { opacity: 0.85 !important; }
-    button[data-baseweb="tab"]:hover { transform: translateY(-2px) !important; opacity: 1 !important; }
-    </style>
-    """, unsafe_allow_html=True)
 
     # 💡 [تم الإصلاح]: ضبط محاذاة المسافات البادئة لتعود بداخل نطاق الدالة show القياسي (4 مسافات)
     # جلب بيانات الفواتير المعلقة بسبب التداخل للصيدلية الحالية
     conflicts_df = df[df["case_type"] == "branch_conflict"].copy()
     total_conflicts = len(conflicts_df)
     
-    # التبويبات
-    tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices = st.tabs([
-        f"📥 الإضافات والنواقص ({total_additions_merged})",
-        f"📤 الإرجاعات والزيادات ({total_returns_merged})",
-        f"📊 فواتير معلقة - تداخل ({total_conflicts})",
-        f"⏰ فواتير بعد آخر طلب ({total_post_cutoff})",
-        f"💳 بانتظار الدفع ({total_payment})",
+    # تلوين التبويبات
+    st.markdown("""
+    <style>
+    .stTabs [data-baseweb="tab-list"] button:nth-child(1) { background-color: #4472C4; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(2) { background-color: #ED7D31; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(3) { background-color: #9B59B6; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(4) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(5) { background-color: #3498DB; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(6) { background-color: #E74C3C; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(7) { background-color: #27AE60; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(8) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(9) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(10) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { transform: translateY(-2px) !important; box-shadow: 0 4px 8px rgba(0,0,0,0.2) !important; }
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="false"] { opacity: 0.85 !important; }
+    .stTabs [data-baseweb="tab-list"] button:hover { transform: translateY(-2px) !important; opacity: 1 !important; }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # ========== التبويبات المدمجة الجديدة ==========
+    tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices, tab_old_stats = st.tabs([
+        f"📥 الإضافات والطلبات المفقودة ({completed_additions_merged}/{total_additions_merged})" if total_additions_merged > 0 else "📥 الإضافات والطلبات المفقودة (0)",
+        f"📤 الإرجاعات والفواتير المعلقة ({completed_returns_merged}/{total_returns_merged})" if total_returns_merged > 0 else "📤 الإرجاعات والفواتير المعلقة (0)",
+        f"📊 فواتير معلقة بين الفروع ({completed_conflicts}/{total_conflicts})" if total_conflicts > 0 else f"📊 فواتير معلقة بين الفروع ({total_conflicts})", # التبويب المضاف لـ الإدارة
+        f"⏰ فواتير بعد آخر طلب ({completed_post_cutoff}/{total_post_cutoff})" if total_post_cutoff > 0 else f"⏰ فواتير بعد آخر طلب ({total_post_cutoff})",
+        f"💰 بانتظار الدفع ({total_payment})",
         f"⚠️ ملغي/مسترجع ({total_cancelled})",
         f"✅ تم الانتهاء ({total_completed})",
-        f"📋 طلبات قديمة ({len(old_orders_df)})",
-        f"🧾 فواتير قديمة ({len(old_invoices_df)})"
+        f"📅 طلبات قديمة ({len(old_orders_filtered)})",
+        f"🧾 فواتير قديمة ({len(old_invoices_filtered)})",
+        "📊 إحصائيات قديمة"
     ])
-    
+
     with tab_additions:
         st.markdown("""
         <div style="background: #dff1ff20; padding: 0.5rem 1rem; border-radius: 12px; margin-bottom: 0.75rem;">
