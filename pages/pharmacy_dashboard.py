@@ -518,9 +518,22 @@ def show():
         is_locked = df['is_locked'].iloc[0] == 1
     allow_actions = not is_locked
 
+    # =========================================================================
+    # 💡 جلب العناصر القديمة أولاً لإنقاصها من التبويبات والعدادات النشطة
+    # =========================================================================
+    old_invoices_df = get_old_invoices(pharmacy_name=pharmacy_name, months=6)
+    old_orders_df = get_old_orders(pharmacy_name=pharmacy_name, months=6)
+
+    # تطبيق قناع الحالات العادية (استبعاد الملغي والمسترجع مبدئياً)
     active_mask = ~df["order_status"].apply(is_cancelled_or_returned_status)
-    active_df = df[active_mask]
+    active_df = df[active_mask].copy()
     
+    # 💡 [حماية العدادات العلوية]: استبعاد المعاملات القديمة من العدادات لتطابق الأرقام الفعلية للتبويبات
+    if not old_invoices_df.empty and 'item_key' in old_invoices_df.columns:
+        active_df = active_df[~active_df['item_key'].isin(old_invoices_df['item_key'])]
+    if not old_orders_df.empty and 'item_key' in old_orders_df.columns:
+        active_df = active_df[~active_df['item_key'].isin(old_orders_df['item_key'])]
+        
     total = len(active_df)
     additions = len(active_df[active_df["case_type"] == "addition"])
     returns = len(active_df[active_df["case_type"] == "return"])
@@ -529,6 +542,7 @@ def show():
     post_cutoff = len(active_df[active_df["case_type"] == "post_cutoff_abc"])
     completed = len(df[df["status"] == "تم"])
     
+    # رسم بطاقات العدادات العلوية (المقاييس)
     col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
     with col1:
         st.metric("📊 إجمالي الحالات", total)
@@ -545,36 +559,41 @@ def show():
     with col7:
         st.metric("✅ تم إنجازها", completed)
 
-    # تجهيز البيانات للتبويبات
-# تجهيز البيانات للتبويبات بصفحة الصيدلي
+    # =========================================================================
+    # 🧠 تجهيز تصفية البيانات الفعلية داخل التبويبات (Tabs)
+    # =========================================================================
+    
+    # 1. تبويب الإضافات والطلبات المفقودة (مع استبعاد الطلبات القديمة جداً)
     branch_add_df = df[df['case_type'].isin(['addition', 'orphan_salla']) & active_mask].copy()
+    if not old_orders_df.empty and 'item_key' in old_orders_df.columns:
+        branch_add_df = branch_add_df[~branch_add_df['item_key'].isin(old_orders_df['item_key'])].copy()
+        
     total_additions_merged = len(branch_add_df)
     completed_additions_merged = len(branch_add_df[branch_add_df["status"] == "تم"])
     pending_additions_merged = total_additions_merged - completed_additions_merged
     
+    # 2. تبويب الإرجاعات والزيادات 📤 [تم تطبيق التعديل المستهدف هنا للاستبعاد الصارم]
     branch_ret_df = df[df['case_type'].isin(['return', 'orphan_abc']) & active_mask].copy()
+    if not old_invoices_df.empty and 'item_key' in old_invoices_df.columns:
+        branch_ret_df = branch_ret_df[~branch_ret_df['item_key'].isin(old_invoices_df['item_key'])].copy()
+        
     total_returns_merged = len(branch_ret_df)
     completed_returns_merged = len(branch_ret_df[branch_ret_df["status"] == "تم"])
     pending_returns_merged = total_returns_merged - completed_returns_merged
     
+    # 3. باقي التبويبات الأخرى (تستمر كما هي بدون تعديل)
     post_cutoff_df = df[(df["case_type"] == "post_cutoff_abc") & active_mask].copy()
     total_post_cutoff = len(post_cutoff_df)
     completed_post_cutoff = len(post_cutoff_df[post_cutoff_df["status"] == "تم"])
     
-    # 💡 [تحديث الفلترة]: استبعاد الفواتير المعلقة المتداخلة من تبويب بانتظار الدفع بالفرع
     payment_df = df[df["order_status"].apply(is_pending_payment_status) & (df["case_type"] != "branch_conflict") & active_mask].copy()
     total_payment = len(payment_df)
     
-    # 💡 [تحديث الفلترة]: استبعاد الفواتير المعلقة المتداخلة من تبويب ملغي ومسترجع بالفرع
     cancelled_df = df[df["order_status"].apply(is_cancelled_or_returned_status) & (df["case_type"] != "branch_conflict")].copy()
     total_cancelled = len(cancelled_df)
     
     completed_df = get_completed_items(pharmacy_name)
     total_completed = len(completed_df)
-    
-    # جلب الفواتير القديمة
-    old_invoices_df = get_old_invoices(pharmacy_name=pharmacy_name, months=6)
-    old_orders_df = get_old_orders(pharmacy_name=pharmacy_name, months=6)
     
     # إعداد أعداد التبويبات
     tab_additions_count = f"{completed_additions_merged}/{total_additions_merged}" if total_additions_merged > 0 else "0"
