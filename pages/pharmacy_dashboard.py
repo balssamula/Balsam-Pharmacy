@@ -397,6 +397,7 @@ def show():
         excel_sheets = {
             "الاضافات والطلبات المفقودة": branch_add_df,
             "الارجاعات والزيادات": branch_ret_df,
+            "فواتير معلقة بين الفروع": conflicts_df,
             "فواتير بعد اخر طلب": post_cutoff_df,
             "بانتظار الدفع": payment_df,
             "الملغيات والمسترجعات": cancelled_df,
