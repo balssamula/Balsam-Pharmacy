@@ -277,8 +277,8 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         current_pharmacy = row['abc_pharmacy_name']
         diff_calc = salla_q - abc_q
         
-        # أ. فرز حالات التداخل والنزاع بين الفروع (السيناريوهات 1 و 6)
-        if matched and abc_q > 0 and (abc_total > abc_q or current_pharmacy != ""):
+        # أ. فرز حالات التداخل والنزاع بين الفروع (النسخة المحدثة لضرب التكرار الموزع)
+        if abc_q > 0 and abc_total > abc_q:
             other_branches_df = abc_grouped[
                 (abc_grouped['order_number'] == order_num) & 
                 (abc_grouped['sku'] == item_sku) & 
@@ -286,11 +286,20 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
                 (abc_grouped['abc_pharmacy_name'] != current_pharmacy)
             ]
             if not other_branches_df.empty:
-                if abc_q == 0: continue 
                 other_branch_names = ", ".join(other_branches_df['abc_pharmacy_name'].unique())
-                merged.at[idx, "case_type"] = "addition" if diff_calc > 0 else "return" if diff_calc < 0 else "addition"
+                
+                # تعيين نوع الإجراء: إذا كان الإجمالي يتخطى سلة فالزيادة في الفروع الأخرى تعني إرجاعاً حتمياً لتسوية الفائض
+                if abc_total > salla_q:
+                    merged.at[idx, "case_type"] = "return"
+                else:
+                    merged.at[idx, "case_type"] = "addition" if diff_calc > 0 else "return" if diff_calc < 0 else "addition"
+                    
                 merged.at[idx, "is_duplicate_warning"] = 1
-                merged.at[idx, "case_reason"] = f"⚠️ تنبيه للمراجعة والتدقيق: الصنف متداخل مع فروع أخرى وهي ({other_branch_names}). يرجى التحقق من القيد الفعلي للفرع الصحيح."
+                merged.at[idx, "case_reason"] = (
+                    f"⚠️ تنبيه خطير (تكرار ضرب الفاتورة): هذا الصنف تم عمل فاتورة له في فرعك بكمية {int(abc_q)}، "
+                    f"وتم تكرار ضربه في فروع أخرى وهي ({other_branch_names}). الإجمالي المضروب بالفروع ({int(abc_total)}) "
+                    f"يتجاوز كمية طلب سلة الأصلية المدفوعة ({int(salla_q)})."
+                )
                 continue
 
         # ب. السيناريو 2 و 4: استبعاد وحجب الفروع الصفرية المتطابقة إجمالياً
