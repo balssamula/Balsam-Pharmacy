@@ -690,7 +690,15 @@ def show():
             st.markdown("---")
         
         render_case_cards_pharmacy(branch_ret_df, allow_actions, pharmacist_name, pharmacy_name)
-    
+
+    with tab_conflicts:
+        st.markdown(f"### 📊 فواتير معلقة بسبب تداخل ضرب الفواتير مع فروع أخرى ({total_conflicts})")
+        if not conflicts_df.empty:
+            for idx, row in conflicts_df.iterrows():
+                render_single_case_card(row, idx, allow_actions=True, pharmacist_name=pharmacist_name, pharmacy_name=pharmacy_name)
+        else:
+            st.success("🎉 ممتاز! لا توجد فواتير معلقة أو متداخلة مع فروع أخرى لفرعكم الحالي.")
+            
     with tab_post_cutoff:
         if not post_cutoff_df.empty:
             col1, col2 = st.columns(2)
