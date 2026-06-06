@@ -544,9 +544,25 @@ def show():
         if st.button("🔄 تحديث الصفحة", use_container_width=True):
             st.rerun()
     with col2:
-        if st.button("📥 تصدير إلى Excel", use_container_width=True):
-            st.session_state.show_export = True
-
+        if st.button("📥 تصدير كل التقارير الحالية إلى ملف Excel موحد"):
+            excel_data = export_to_excel({
+                "الإضافات والطلبات المفقودة": additions_filtered,
+                "الإرجاعات والفواتير المعلقة": returns_filtered,
+                "فواتير معلقة بين الفروع": conflicts_filtered, # ⚡ سيصدر الجدول المدمج بالطلب القديم المعلق هنا
+                "فواتير بعد آخر طلب": post_cutoff_filtered,
+                "بانتظار الدفع": payment_filtered,
+                "الملغيات والمسترجعات": cancelled_filtered,
+                "الطلبات القديمة التاريخية": old_orders_df, # 📥 إضافة تبويب الطلبات القديمة كاملاً بالأرشيف
+                "الفواتير القديمة التاريخية": old_invoices_df # 📥 إضافة تبويب الفواتير القديمة كاملاً بالأرشيف
+            })
+    
+            st.download_button(
+                label="💾 اضغط هنا لتحميل ملف Excel الموحد للإدارة",
+                data=excel_data,
+                file_name=f"Balsam_Admin_Report_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+    
     # ========== الفلاتر المتقدمة وعزل الجلسات ==========
     sessions_list = get_all_sessions()
     
@@ -847,8 +863,9 @@ def show():
             st.success("🎉 لا توجد طلبات إرجاعات أو فواتير بدون طلب حالياً.")
 
     with tab_conflicts:
-            st.markdown(f"### 📊 فواتير معلقة بسبب التداخل والتكرار بين الفروع ({total_conflicts})")
-            render_table_with_click(conflict_merged_df, "branch_conflict", allow_move=True)
+        st.markdown(f"### 📊 فواتير معلقة بسبب التداخل والتكرار بين الفروع")
+        # تم تغيير المتغير إلى conflicts_filtered لإنهاء الخطأ وعرض البيانات المدمجة
+        render_table_with_click(conflicts_filtered, "branch_conflict", allow_move=True)
         
     with tab_post_cutoff:
         render_table_with_click(post_cutoff_filtered, "post_cutoff", allow_move=True)
