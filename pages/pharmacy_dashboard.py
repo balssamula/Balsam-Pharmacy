@@ -623,7 +623,6 @@ def show():
     # جلب بيانات الفواتير المعلقة بسبب التداخل للصيدلية الحالية
     conflicts_df = df[df["case_type"] == "branch_conflict"].copy()
     total_conflicts = len(conflicts_df)
-    completed_conflicts = int((conflict_merged_df['status_clean'] == 'تم').sum())
     
     # تلوين التبويبات
     st.markdown("""
