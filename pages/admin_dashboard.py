@@ -646,20 +646,24 @@ def show():
             result_temp = result_temp[~result_temp['invoice_number'].astype(str).isin(old_invoice_numbers)]
         return result_temp
     
-# ========== حساب الإحصائيات الصحيحة للتبويبات بناءً على الشروط الدقيقة والمحدثة ==========
-    # =========================================================================
-    # 🧠 [ترتيب هيكلي سليم]: تصفية كافة جداول التبويبات في أعلى الدالة لمنع الـ NameError
-    # =========================================================================
+    # ========== حساب الإحصائيات الصحيحة للتبويبات بناءً على الشروط الدقيقة والمحدثة ==========
     active_mask_filtered = filtered_df["active"] == 1 if "active" in filtered_df.columns else True
     is_cancelled_returned = filtered_df["order_status"].astype(str).str.strip().str.contains("ملغي|مسترجع|cancelled|returned|refunded", na=False, case=False)
     is_pending_payment = filtered_df["order_status"].astype(str).str.strip().str.contains("بانتظار الدفع|لم يتم الدفع|pending|unpaid", na=False, case=False)
     
+    # 1️⃣ الإضافات والطلبات المفقودة
     additions_filtered = filtered_df[filtered_df["case_type"].isin(["addition", "orphan_salla"]) & (~is_cancelled_returned) & (~is_pending_payment) & active_mask_filtered].copy()
     additions_filtered = exclude_old_items(additions_filtered)
+    total_additions_count = len(additions_filtered)
+    completed_additions_count = len(additions_filtered[additions_filtered["status"] == "تم"]) if "status" in additions_filtered.columns else 0
     
+    # 2️⃣ الإرجاعات والزيادات
     returns_filtered = filtered_df[filtered_df["case_type"].isin(["return", "orphan_abc"]) & (~is_cancelled_returned) & (~is_pending_payment) & active_mask_filtered].copy()
     returns_filtered = exclude_old_items(returns_filtered)
+    total_returns_count = len(returns_filtered)
+    completed_returns_count = len(returns_filtered[returns_filtered["status"] == "تم"]) if "status" in returns_filtered.columns else 0
     
+    # 3️⃣ فواتير معلقة بين الفروع (الدمج الذكي النشط + الأرشيف المكرر)
     conflicts_filtered = filtered_df[filtered_df["case_type"] == "branch_conflict"].copy()
     conflicts_filtered = exclude_old_items(conflicts_filtered)
     
@@ -679,28 +683,42 @@ def show():
             if 'item_key' in conflicts_filtered.columns:
                 conflicts_filtered = conflicts_filtered.drop_duplicates(subset=['item_key'])
                 
+    total_conflicts = len(conflicts_filtered)
+    completed_conflicts = len(conflicts_filtered[conflicts_filtered["status"] == "تم"]) if "status" in conflicts_filtered.columns else 0
+                
+    # 4️⃣ فواتير بعد آخر طلب
     post_cutoff_filtered = filtered_df[(filtered_df["case_type"] == "post_cutoff_abc") & (~is_cancelled_returned) & active_mask_filtered].copy()
     post_cutoff_filtered = exclude_old_items(post_cutoff_filtered)
+    total_post_cutoff = len(post_cutoff_filtered)
+    completed_post_cutoff = len(post_cutoff_filtered[post_cutoff_filtered["status"] == "تم"]) if "status" in post_cutoff_filtered.columns else 0
     
+    # 5️⃣ بانتظار الدفع
     payment_filtered = filtered_df[is_pending_payment & (filtered_df["case_type"] != "branch_conflict") & active_mask_filtered].copy()
     payment_filtered = exclude_old_items(payment_filtered)
+    total_payment = len(payment_filtered)
     
+    # 6️⃣ ملغي ومسترجع
     cancelled_filtered = filtered_df[is_cancelled_returned & (filtered_df["case_type"] != "branch_conflict")].copy()
     cancelled_filtered = exclude_old_items(cancelled_filtered)
+    total_cancelled = len(cancelled_filtered)
     
+    # 7️⃣ المكتملة والأرشيف
     old_invoices_df = get_old_invoices(months=6)
     completed_df_admin = get_completed_items()
+    total_completed = len(completed_df_admin) if completed_df_admin is not None else 0
 
-    # 📥 [إصلاح حاسم]: توفير زر تصدير واحد محمي بمعامل key حصري لمنع الـ DuplicateElementId
+    # =========================================================================
+    # 📥 زر تصدير الإكسيل الموحد للإدارة المعرف بشكل قاطع وحصري
+    # =========================================================================
     if st.button("📥 تصدير كل التقارير الحالية إلى ملف Excel موحد", key="admin_global_excel_export_btn"):
         excel_data = export_to_excel({
-            "الإضافات والطلبات المفقودة": additions_filtered,
+            " canالإضافات والطلبات المفقودة": additions_filtered,
             "الإرجاعات والفواتير المعلقة": returns_filtered,
             "فواتير معلقة بين الفروع": conflicts_filtered,
             "فواتير بعد آخر طلب": post_cutoff_filtered,
             "بانتظار الدفع": payment_filtered,
             "الملغيات والمسترجعات": cancelled_filtered,
-            "الطلبــات القديمة التاريخية": old_orders_df,
+            "الطلبات القديمة التاريخية": old_orders_df,
             "الفواتير القديمة التاريخية": old_invoices_df
         })
         st.download_button(
@@ -710,6 +728,8 @@ def show():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="admin_excel_download_stream"
         )
+
+
     
     st.markdown("""
     <style>
@@ -737,6 +757,9 @@ def show():
     total_returns_count = len(returns_filtered)
     completed_returns_count = len(returns_filtered[returns_filtered["status"] == "تم"]) if "status" in returns_filtered.columns else 0
 
+    # =========================================================================
+    # 📊 بناء التبويبات (Tabs) بشكل متزن ومستقر عددياً
+    # =========================================================================
     tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices, tab_old_stats = st.tabs([
         f"📥 الإضافات والطلبات المفقودة ({completed_additions_count}/{total_additions_count})" if total_additions_count > 0 else "📥 الإضافات والطلبات المفقودة (0)",
         f"📤 الإرجاعات والفواتير المعلقة ({completed_returns_count}/{total_returns_count})" if total_returns_count > 0 else "📤 الإرجاعات والفواتير المعلقة (0)",
