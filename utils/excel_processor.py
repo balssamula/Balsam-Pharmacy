@@ -187,7 +187,7 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         current_pharmacy = row['abc_pharmacy_name']
         diff_calc = salla_q - abc_q
         
-        # 💡 [إصلاح جذري للثغرة]: البحث والتحقق الفوري من وجود فواتير موازية في فروع أخرى
+        # 💡 [تحديث احترافي]: التحقق الفوري من وجود فواتير موازية في فروع أخرى وعزلها كفواتير معلقة
         other_branches_df = abc_grouped[
             (abc_grouped['order_number'] == order_num) & 
             (abc_grouped['sku'] == item_sku) & 
@@ -195,21 +195,16 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
             (abc_grouped['abc_pharmacy_name'] != current_pharmacy)
         ]
         
-        # إذا وجدنا أن الصنف مضروب في فروع أخرى ولدى فرعنا الحالي فاتورة (أكبر من صفر)
         if not other_branches_df.empty and abc_q > 0:
             other_branch_names = ", ".join(other_branches_df['abc_pharmacy_name'].unique())
             
-            # تعيين التوجيه للتبويبات بناءً على الميزان الإجمالي مقارنة بسلة
-            if abc_total > salla_q:
-                merged.at[idx, "case_type"] = "return" # إجمالي الفروع أعلى من سلة -> فائض يستحق الإرجاع والتسوية
-            else:
-                merged.at[idx, "case_type"] = "addition" if diff_calc > 0 else "return" if diff_calc < 0 else "addition"
-                
+            # تغيير تصنيف الحالة إلى نوع مخصص معزول ومحمي من فلاتر الفروقات الصفرية بالواجهات
+            merged.at[idx, "case_type"] = "branch_conflict"
             merged.at[idx, "is_duplicate_warning"] = 1
             merged.at[idx, "case_reason"] = (
-                f"⚠️ تنبيه خطير (تكرار ضرب الفاتورة بين الفروع): هذا الصنف تم عمل فاتورة له في فرعك بكمية {int(abc_q)}، "
+                f"⚠️ فواتير معلقة (تداخل ضرب الفواتير بين الفروع): هذا الصنف تم عمل فاتورة له في فرعك بكمية {int(abc_q)}، "
                 f"وتم تكرار ضربه في فروع أخرى وهي ({other_branch_names}). إجمالي المضروب بكافة الفروع ({int(abc_total)}) "
-                f"{'يتجاوز' if abc_total > salla_q else 'أقل من' if abc_total < salla_q else 'يطابق'} كمية سلة الأصلية المدفوعة ({int(salla_q)})."
+                f"مقارنة بكمية سلة الأصلية المدفوعة ({int(salla_q)})."
             )
             continue
 
