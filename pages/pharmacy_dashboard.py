@@ -469,7 +469,29 @@ def show():
     with col2:
         if st.button("📥 تصدير إلى Excel", use_container_width=True):
             st.session_state.show_export_pharmacy = True
-
+        # تحديث زر تصدير الإكسيل الشامل داخل صفحة الصيدلية
+        if st.button("📥 تصدير جميع تقارير الفرع الحالية إلى Excel"):
+            # تجهيز كود تصدير نظيف خالٍ من التداخلات
+            excel_sheets = {
+                "الإضافات والطلبات المفقودة": branch_add_df, # مُنقى ومستبعد منه القديم
+                "الإرجاعات والزيادات": branch_ret_df,       # 💡 مستبعد منه الفواتير القديمة المستهدفة بالتعديل
+                "فواتير بعد آخر طلب": post_cutoff_df,
+                "بانتظار الدفع": payment_df,
+                "الملغيات والمسترجعات": cancelled_df,
+                "الفواتير القديمة (أرشيف)": old_invoices_df,  # 📥 تبويب الفواتير القديمة المستبعدة في شيت منفصل
+                "الطلبات القديمة (أرشيف)": old_orders_df     # 📥 تبويب الطلبات القديمة المستبعدة في شيت منفصل
+            }
+    
+            excel_data = export_to_excel(excel_sheets, pharmacy_name)
+    
+            st.download_button(
+                label="💾 تحميل ملف Excel الموحد للفرع",
+                data=excel_data,
+                file_name=f"Report_{pharmacy_name}_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+    
     # التحقق من وجود مكررات عامة
     duplicate_items = get_all_duplicate_items(pharmacy_name)
     if not duplicate_items.empty:
