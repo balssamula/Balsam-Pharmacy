@@ -669,17 +669,17 @@ def show():
     conflicts_filtered = filtered_df[filtered_df["case_type"] == "branch_conflict"].copy()
     conflicts_filtered = exclude_old_items(conflicts_filtered)
     
-    # 💡 [التعديل المطلوب]: جلب الطلبات القديمة التي تمتلك تنبيه تداخل فروع ودمجها في التبويب
+    # جلب الطلبات القديمة التي تمتلك تنبيه تداخل فروع ودمجها في التبويب
     old_orders_df = get_old_orders(months=6)  # جلب الطلبات القديمة من قاعدة البيانات
     
     if not old_orders_df.empty:
-        # تصفية الطلبات القديمة بناءً على الفلاتر العلوية للإدارة (الفرع المستهدف، البحث، إلخ) إذا كانت تطابق الفلترة الحالية
         old_orders_filtered_for_tab = old_orders_df.copy()
-        if selected_pharmacy != "الكل":
-            old_orders_filtered_for_tab = old_orders_filtered_for_tab[old_orders_filtered_for_tab["pharmacy_name"] == selected_pharmacy]
         
-        # الفلترة الذكية: اختيار العناصر التي لها تنبيه تداخل فروع (إما عبر case_type أو فحص عمود التكرار التلقائي)
-        # نحن نضمن هنا الحالات التي تم وسمها كـ branch_conflict أو التي يظهر فحصها وجود تداخل
+        # 💡 [تم الإصلاح]: تغيير selected_pharmacy إلى المتغير الصحيح المعرّف في صفحتك selected_branch
+        if selected_branch != "الكل":
+            old_orders_filtered_for_tab = old_orders_filtered_for_tab[old_orders_filtered_for_tab["pharmacy_name"] == selected_branch]
+        
+        # الفلترة الذكية: اختيار العناصر التي لها تنبيه تداخل فروع
         old_conflicts = old_orders_filtered_for_tab[
             (old_orders_filtered_for_tab["case_type"] == "branch_conflict") | 
             (old_orders_filtered_for_tab["order_number"].isin(conflicts_filtered["order_number"]))
@@ -688,7 +688,6 @@ def show():
         # دمج الطلبات القديمة المكررة مع الفواتير المعلقة النشطة في جدول واحد
         if not old_conflicts.empty:
             conflicts_filtered = pd.concat([conflicts_filtered, old_conflicts], ignore_index=True)
-            # إزالة التكرار في حال التداخل الشديد بناءً على المفتاح الفريد
             if 'item_key' in conflicts_filtered.columns:
                 conflicts_filtered = conflicts_filtered.drop_duplicates(subset=['item_key'])
 
