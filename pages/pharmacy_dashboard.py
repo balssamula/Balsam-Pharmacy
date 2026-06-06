@@ -381,6 +381,7 @@ def show():
     total_completed = len(completed_df)
 
     # 📊 رسم العدادات الرقمية العلوية النشطة
+    # 📊 رسم العدادات الرقمية العلوية النشطة (تم تصحيح اسم متغير الحالات المكتملة)
     total = len(active_df)
     col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
     with col1: st.metric("📊 إجمالي الحالات", total)
@@ -389,7 +390,7 @@ def show():
     with col4: st.metric("📦 طلبات بلا فاتورة", len(active_df[active_df["case_type"] == "orphan_salla"]))
     with col5: st.metric("🧾 فواتير بلا طلب", len(active_df[active_df["case_type"] == "orphan_abc"]))
     with col6: st.metric("⏰ فواتير مخرجات", total_post_cutoff)
-    with col7: st.metric("✅ تم إنجازها", completed)
+    with col7: st.metric("✅ تم إنجازها", total_completed) # 💡 هنا تم الإصلاح
 
     # 📥 تنفيذ تصدير ملف الـ Excel للفرع بدون أي مشاكل في التعريف المتأخر
     if st.session_state.get('show_export_pharmacy', False):
