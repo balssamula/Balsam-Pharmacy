@@ -729,17 +729,24 @@ def show():
     </style>
     """, unsafe_allow_html=True)
     
-    # ========== التبويبات المدمجة الجديدة ==========
+    # ========== عناوين التبويبات بصفحة الإدارة (مع توحيد ومطابقة مسميات الفلاتر الإدارية الصحيحة) ==========
+    # تم تغيير المتغيرات لتقرأ من جداول الفلترة العلوية للإدارة مباشرة منعا للـ NameError
+    total_additions_count = len(additions_filtered)
+    completed_additions_count = len(additions_filtered[additions_filtered["status"] == "تم"]) if "status" in additions_filtered.columns else 0
+    
+    total_returns_count = len(returns_filtered)
+    completed_returns_count = len(returns_filtered[returns_filtered["status"] == "تم"]) if "status" in returns_filtered.columns else 0
+
     tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices, tab_old_stats = st.tabs([
-        f"📥 الإضافات والطلبات المفقودة ({completed_additions_merged}/{total_additions_merged})" if total_additions_merged > 0 else "📥 الإضافات والطلبات المفقودة (0)",
-        f"📤 الإرجاعات والفواتير المعلقة ({completed_returns_merged}/{total_returns_merged})" if total_returns_merged > 0 else "📤 الإرجاعات والفواتير المعلقة (0)",
-        f"📊 فواتير معلقة بين الفروع ({completed_conflicts}/{total_conflicts})" if total_conflicts > 0 else f"📊 فواتير معلقة بين الفروع ({total_conflicts})", # التبويب المضاف لـ الإدارة
+        f"📥 الإضافات والطلبات المفقودة ({completed_additions_count}/{total_additions_count})" if total_additions_count > 0 else "📥 الإضافات والطلبات المفقودة (0)",
+        f"📤 الإرجاعات والفواتير المعلقة ({completed_returns_count}/{total_returns_count})" if total_returns_count > 0 else "📤 الإرجاعات والفواتير المعلقة (0)",
+        f"📊 فواتير معلقة بين الفروع ({completed_conflicts}/{total_conflicts})" if total_conflicts > 0 else f"📊 فواتير معلقة بين الفروع ({total_conflicts})", 
         f"⏰ فواتير بعد آخر طلب ({completed_post_cutoff}/{total_post_cutoff})" if total_post_cutoff > 0 else f"⏰ فواتير بعد آخر طلب ({total_post_cutoff})",
         f"💰 بانتظار الدفع ({total_payment})",
         f"⚠️ ملغي/مسترجع ({total_cancelled})",
         f"✅ تم الانتهاء ({total_completed})",
-        f"📅 طلبات قديمة ({len(old_orders_filtered)})",
-        f"🧾 فواتير قديمة ({len(old_invoices_filtered)})",
+        f"📅 طلبات قديمة ({total_old_orders_stats})",
+        f"🧾 فواتير قديمة ({total_old_invoices_stats})",
         "📊 إحصائيات قديمة"
     ])
     
