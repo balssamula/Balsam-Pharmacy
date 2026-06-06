@@ -637,8 +637,8 @@ def show():
     """, unsafe_allow_html=True)
 
 # جلب بيانات الفواتير المعلقة بسبب التداخل للصيدلية الحالية
-    conflicts_df = df[(df["case_type"] == "branch_conflict") & active_mask_filtered].copy()
-    total_conflicts = len(conflicts_df)
+conflicts_df = df[df["case_type"] == "branch_conflict"].copy()
+total_conflicts = len(conflicts_df)
     
     # التبويبات
     tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices = st.tabs([
