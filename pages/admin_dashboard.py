@@ -665,6 +665,12 @@ def show():
     total_returns_merged = len(returns_merged_df)
     completed_returns_merged = int((returns_merged_df['status_clean'] == 'تم').sum())
 
+    # 💡 التبويب الجديد: فواتير معلقة (تداخل الفروع) المعزول عن شروط الفروقات الصفرية
+    conflict_base_df = filtered_df[(filtered_df["case_type"] == "branch_conflict") & active_mask_filtered].copy()
+    conflict_merged_df = exclude_old_items(conflict_base_df)
+    total_conflicts = len(conflict_merged_df)
+    completed_conflicts = int((conflict_merged_df['status_clean'] == 'تم').sum())
+    
     # 4️⃣ تبويب فواتير بعد آخر طلب (ABC)
     post_cutoff_filtered = filtered_df[(filtered_df["case_type"] == "post_cutoff_abc") & active_mask_filtered].copy()
     post_cutoff_filtered = exclude_old_items(post_cutoff_filtered)
@@ -761,6 +767,7 @@ def show():
     tab_additions, tab_returns, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices, tab_old_stats = st.tabs([
         f"📥 الإضافات والطلبات المفقودة ({completed_additions_merged}/{total_additions_merged})" if total_additions_merged > 0 else "📥 الإضافات والطلبات المفقودة (0)",
         f"📤 الإرجاعات والفواتير المعلقة ({completed_returns_merged}/{total_returns_merged})" if total_returns_merged > 0 else "📤 الإرجاعات والفواتير المعلقة (0)",
+        f"📊 فواتير معلقة بين الفروع ({total_conflicts})", # التبويب المضاف لـ الإدارة
         f"⏰ فواتير بعد آخر طلب ({completed_post_cutoff}/{total_post_cutoff})" if total_post_cutoff > 0 else f"⏰ فواتير بعد آخر طلب ({total_post_cutoff})",
         f"💰 بانتظار الدفع ({total_payment})",
         f"⚠️ ملغي/مسترجع ({total_cancelled})",
@@ -813,7 +820,11 @@ def show():
             render_table_with_click(returns_merged_df, "returns_merged", allow_move=True)
         else:
             st.success("🎉 لا توجد طلبات إرجاعات أو فواتير بدون طلب حالياً.")
-    
+
+    with tab_conflicts:
+            st.markdown(f"### 📊 فواتير معلقة بسبب التداخل والتكرار بين الفروع ({total_conflicts})")
+            render_table_with_click(conflict_merged_df, "branch_conflict", allow_move=True)
+        
     with tab_post_cutoff:
         render_table_with_click(post_cutoff_filtered, "post_cutoff", allow_move=True)
     
