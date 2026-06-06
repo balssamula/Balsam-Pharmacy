@@ -546,6 +546,7 @@ def show():
         st.metric("✅ تم إنجازها", completed)
 
     # تجهيز البيانات للتبويبات
+# تجهيز البيانات للتبويبات بصفحة الصيدلي
     branch_add_df = df[df['case_type'].isin(['addition', 'orphan_salla']) & active_mask].copy()
     total_additions_merged = len(branch_add_df)
     completed_additions_merged = len(branch_add_df[branch_add_df["status"] == "تم"])
@@ -560,10 +561,12 @@ def show():
     total_post_cutoff = len(post_cutoff_df)
     completed_post_cutoff = len(post_cutoff_df[post_cutoff_df["status"] == "تم"])
     
-    payment_df = df[df["order_status"].apply(is_pending_payment_status) & active_mask].copy()
+    # 💡 [تحديث الفلترة]: استبعاد الفواتير المعلقة المتداخلة من تبويب بانتظار الدفع بالفرع
+    payment_df = df[df["order_status"].apply(is_pending_payment_status) & (df["case_type"] != "branch_conflict") & active_mask].copy()
     total_payment = len(payment_df)
     
-    cancelled_df = df[df["order_status"].apply(is_cancelled_or_returned_status)].copy()
+    # 💡 [تحديث الفلترة]: استبعاد الفواتير المعلقة المتداخلة من تبويب ملغي ومسترجع بالفرع
+    cancelled_df = df[df["order_status"].apply(is_cancelled_or_returned_status) & (df["case_type"] != "branch_conflict")].copy()
     total_cancelled = len(cancelled_df)
     
     completed_df = get_completed_items(pharmacy_name)
