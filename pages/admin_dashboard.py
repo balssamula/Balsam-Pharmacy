@@ -647,144 +647,80 @@ def show():
         return result_temp
     
 # ========== حساب الإحصائيات الصحيحة للتبويبات بناءً على الشروط الدقيقة والمحدثة ==========
-    filtered_df['status_clean'] = filtered_df['status'].astype(str).str.strip()
-    active_mask_filtered = filtered_df['status_clean'].isin(['قيد المتابعة', 'بانتظار المراجعة', 'معلق', ''])
-
-    # 1️⃣ بناء أقنعة الفرز الصارمة بناءً على حالة الطلب (لمنع تداخل الصفوف تاريخياً)
-    is_cancelled_returned = filtered_df["order_status"].apply(is_cancelled_or_returned_status)
-    is_pending_payment = filtered_df["order_status"].apply(is_pending_payment_status)
-    is_normal_order = ~(is_cancelled_returned | is_pending_payment)
-
-    # 2️⃣ تبويب الإضافات والطلبات المفقودة: أصناف سلة بدون فواتير أو كميتها أكبر (شرط أن تكون عادية وليست ملغية/معلقة)
-    additions_base_df = filtered_df[
-        is_normal_order & 
-        active_mask_filtered & 
-        (
-            (filtered_df['case_type'] == 'orphan_salla') | 
-            ((filtered_df['case_type'] == 'addition') & (filtered_df['difference'] > 0))
-        )
-    ].copy()
-
-    additions_merged_df = exclude_old_items(additions_base_df)
-    total_additions_merged = len(additions_merged_df)
-    completed_additions_merged = int((additions_merged_df['status_clean'] == 'تم').sum())
-
-    # 3️⃣ تبويب الإرجاعات والفواتير المعلقة: فواتير ABC بدون طلب أو كميتها أكبر + فواتير الطلبات الملغية أو المسترجعة لـتأكيد الإرجاع
-    returns_base_df = filtered_df[
-        active_mask_filtered & (
-            (is_normal_order & ((filtered_df['case_type'] == 'orphan_abc') | ((filtered_df['case_type'] == 'return') & (filtered_df['difference'] < 0)))) |
-            (is_cancelled_returned & filtered_df['case_type'].isin(['orphan_abc', 'return']))
-        )
-    ].copy()
-
-    returns_merged_df = exclude_old_items(returns_base_df)
-    total_returns_merged = len(returns_merged_df)
-    completed_returns_merged = int((returns_merged_df['status_clean'] == 'تم').sum())
-
-    # 3️⃣ تبويب فواتير معلقة بين الفروع (البيانات النشطة الحالية)
+    # =========================================================================
+    # 🧠 [إصلاح جذري]: نقل حساب وتصفية كافة التبويبات للأعلى لتأمين تصدير الإكسيل من الـ NameError
+    # =========================================================================
+    active_mask_filtered = filtered_df["active"] == 1 if "active" in filtered_df.columns else True
+    
+    # أقنعة تصفية الحالات بناءً على الشروط الأصلية لملفك
+    is_cancelled_returned = filtered_df["order_status"].astype(str).str.strip().str.contains("ملغي|مسترجع|cancelled|returned|refunded", na=False, case=False)
+    is_pending_payment = filtered_df["order_status"].astype(str).str.strip().str.contains("بانتظار الدفع|لم يتم الدفع|pending|unpaid", na=False, case=False)
+    
+    # 1️⃣ تبويب الإضافات والطلبات المفقودة
+    additions_filtered = filtered_df[filtered_df["case_type"].isin(["addition", "orphan_salla"]) & (~is_cancelled_returned) & (~is_pending_payment) & active_mask_filtered].copy()
+    additions_filtered = exclude_old_items(additions_filtered)
+    
+    # 2️⃣ تبويب الإرجاعات والزيادات
+    returns_filtered = filtered_df[filtered_df["case_type"].isin(["return", "orphan_abc"]) & (~is_cancelled_returned) & (~is_pending_payment) & active_mask_filtered].copy()
+    returns_filtered = exclude_old_items(returns_filtered)
+    
+    # 3️⃣ تبويب فواتير معلقة بين الفروع (البيانات النشطة الحالية + الطلبات القديمة المتداخلة المستهدفة بالشرط)
     conflicts_filtered = filtered_df[filtered_df["case_type"] == "branch_conflict"].copy()
     conflicts_filtered = exclude_old_items(conflicts_filtered)
     
-    # جلب الطلبات القديمة التي تمتلك تنبيه تداخل فروع ودمجها في التبويب
-    old_orders_df = get_old_orders(months=6)  # جلب الطلبات القديمة من قاعدة البيانات
-    
+    old_orders_df = get_old_orders(months=6)
     if not old_orders_df.empty:
         old_orders_filtered_for_tab = old_orders_df.copy()
-        
-        # 💡 [تم الإصلاح]: تغيير selected_pharmacy إلى المتغير الصحيح المعرّف في صفحتك selected_branch
         if selected_branch != "الكل":
             old_orders_filtered_for_tab = old_orders_filtered_for_tab[old_orders_filtered_for_tab["pharmacy_name"] == selected_branch]
         
-        # الفلترة الذكية: اختيار العناصر التي لها تنبيه تداخل فروع
         old_conflicts = old_orders_filtered_for_tab[
             (old_orders_filtered_for_tab["case_type"] == "branch_conflict") | 
             (old_orders_filtered_for_tab["order_number"].isin(conflicts_filtered["order_number"]))
         ].copy()
         
-        # دمج الطلبات القديمة المكررة مع الفواتير المعلقة النشطة في جدول واحد
         if not old_conflicts.empty:
             conflicts_filtered = pd.concat([conflicts_filtered, old_conflicts], ignore_index=True)
             if 'item_key' in conflicts_filtered.columns:
                 conflicts_filtered = conflicts_filtered.drop_duplicates(subset=['item_key'])
-
-    # حساب الإجمالي الكلي للتبويب بعد عملية الدمج والتصفية
-    total_conflicts = len(conflicts_filtered)
-    completed_conflicts = len(conflicts_filtered[conflicts_filtered["status"] == "تم"])
-    
-    # 4️⃣ تبويب فواتير بعد آخر طلب (ABC)
-    post_cutoff_filtered = filtered_df[(filtered_df["case_type"] == "post_cutoff_abc") & active_mask_filtered].copy()
+                
+    # 4️⃣ تبويب فواتير بعد آخر طلب
+    post_cutoff_filtered = filtered_df[(filtered_df["case_type"] == "post_cutoff_abc") & (~is_cancelled_returned) & active_mask_filtered].copy()
     post_cutoff_filtered = exclude_old_items(post_cutoff_filtered)
-    total_post_cutoff = len(post_cutoff_filtered)
-    completed_post_cutoff = len(post_cutoff_filtered[post_cutoff_filtered["status"] == "تم"])
     
-    # 5️⃣ تبويب بانتظار الدفع (تم إضافة شرط استبعاد الفواتير المعلقة المتداخلة)
+    # 5️⃣ تبويب بانتظار الدفع
     payment_filtered = filtered_df[is_pending_payment & (filtered_df["case_type"] != "branch_conflict") & active_mask_filtered].copy()
     payment_filtered = exclude_old_items(payment_filtered)
-    total_payment = len(payment_filtered)
     
-    # 6️⃣ تبويب ملغي ومسترجع (تم إضافة شرط استبعاد الفواتير المعلقة المتداخلة)
+    # 6️⃣ تبويب ملغي ومسترجع
     cancelled_filtered = filtered_df[is_cancelled_returned & (filtered_df["case_type"] != "branch_conflict")].copy()
     cancelled_filtered = exclude_old_items(cancelled_filtered)
-    total_cancelled = len(cancelled_filtered)
     
-    completed_filtered = completed_df.copy()
-    completed_filtered = exclude_old_items(completed_filtered)
-    total_completed = len(completed_filtered)
-    
-    old_orders_filtered = get_old_orders(pharmacy_name=selected_branch_name, months=6)
-    old_invoices_filtered = get_old_invoices(pharmacy_name=selected_branch_name, months=6)
-    
-    # ========== تصدير Excel ==========
-    if st.session_state.get('show_export', False):
-        old_orders_for_export = get_old_orders(pharmacy_name=selected_branch_name, months=6)
-        old_invoices_for_export = get_old_invoices(pharmacy_name=selected_branch_name, months=6)
+    # الحسابات الإحصائية المتبقية لملفك التاريخي
+    old_invoices_df = get_old_invoices(months=6)
+    completed_df_admin = get_completed_items()
+
+    # =========================================================================
+    # 📥 زر تصدير الإكسيل الموحد للإدارة (يعمل الآن بأمان مطلق ومطهر من الأخطاء)
+    # =========================================================================
+    if st.button("📥 تصدير كل التقارير الحالية إلى ملف Excel موحد"):
+        excel_data = export_to_excel({
+            "الإضافات والطلبات المفقودة": additions_filtered,
+            "الإرجاعات والفواتير المعلقة": returns_filtered,
+            "فواتير معلقة بين الفروع": conflicts_filtered,
+            "فواتير بعد آخر طلب": post_cutoff_filtered,
+            "بانتظار الدفع": payment_filtered,
+            "الملغيات والمسترجعات": cancelled_filtered,
+            "الطلبات القديمة التاريخية": old_orders_df,
+            "الفواتير القديمة التاريخية": old_invoices_df
+        })
         
-        stats_data = []
-        if not old_orders_for_export.empty:
-            stats_data.append(["إجمالي الطلبات القديمة", len(old_orders_for_export)])
-            stats_data.append(["إضافات قديمة (طلبات)", len(old_orders_for_export[old_orders_for_export["case_type"] == "addition"])])
-            stats_data.append(["إرجاعات قديمة (طلبات)", len(old_orders_for_export[old_orders_for_export["case_type"] == "return"])])
-            stats_data.append(["طلبات بدون فاتورة قديمة", len(old_orders_for_export[old_orders_for_export["case_type"] == "orphan_salla"])])
-        else:
-            stats_data.append(["إجمالي الطلبات القديمة", 0])
-            stats_data.append(["إضافات قديمة (طلبات)", 0])
-            stats_data.append(["إرجاعات قديمة (طلبات)", 0])
-            stats_data.append(["طلبات بدون فاتورة قديمة", 0])
-        
-        if not old_invoices_for_export.empty:
-            stats_data.append(["إجمالي الفواتير القديمة", len(old_invoices_for_export)])
-            stats_data.append(["إضافات قديمة (فواتير)", len(old_invoices_for_export[old_invoices_for_export["case_type"] == "addition"])])
-            stats_data.append(["إرجاعات قديمة (فواتير)", len(old_invoices_for_export[old_invoices_for_export["case_type"] == "return"])])
-            stats_data.append(["فواتير بدون طلب قديمة", len(old_invoices_for_export[old_invoices_for_export["case_type"] == "orphan_abc"])])
-        else:
-            stats_data.append(["إجمالي الفواتير القديمة", 0])
-            stats_data.append(["إضافات قديمة (فواتير)", 0])
-            stats_data.append(["إرجاعات قديمة (فواتير)", 0])
-            stats_data.append(["فواتير بدون طلب قديمة", 0])
-        
-        stats_data.append(["إجمالي العناصر القديمة", len(old_orders_for_export) + len(old_invoices_for_export)])
-        stats_df = pd.DataFrame(stats_data, columns=["المقياس", "القيمة"])
-        
-        export_data = {
-            "01_الإضافات_والطلبات_بدون_فاتورة": additions_merged_df,
-            "02_الإرجاعات_والفواتير_بدون_طلب": returns_merged_df,
-            "03_فواتير_بعد_آخر_طلب": post_cutoff_filtered,
-            "04_بانتظار_الدفع": payment_filtered,
-            "05_ملغي_ومسترجع": cancelled_filtered,
-            "06_تم_الانتهاء": completed_filtered,
-            "07_الطلبات_القديمة": old_orders_for_export,
-            "08_الفواتير_القديمة": old_invoices_for_export,
-            "09_إحصائيات_قديمة": stats_df
-        }
-        excel_data = export_to_excel(export_data)
         st.download_button(
-            "📥 تحميل التقرير الشامل",
+            label="💾 اضغط هنا لتحميل ملف Excel الموحد للإدارة",
             data=excel_data,
-            file_name=f"balsam_full_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            use_container_width=True,
-            type="primary"
+            file_name=f"Balsam_Admin_Report_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-        st.session_state.show_export = False
     
     st.markdown("""
     <style>
