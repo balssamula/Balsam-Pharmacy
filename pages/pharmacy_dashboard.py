@@ -579,11 +579,11 @@ def show():
     with col7:
         st.metric("✅ تم إنجازها", completed)
 
-    # =========================================================================
-    # 🧠 تجهيز تصفية البيانات الفعلية داخل التبويبات (Tabs)
+# =========================================================================
+    # 🧠 تجهيز تصفية البيانات الفعلية داخل التبويبات (Tabs) لصفحة الصيدلي
     # =========================================================================
     
-    # 1. تبويب الإضافات والطلبات المفقودة (مع استبعاد الطلبات القديمة جداً)
+    # 1. تبويب الإضافات والطلبات المفقودة
     branch_add_df = df[df['case_type'].isin(['addition', 'orphan_salla']) & active_mask].copy()
     if not old_orders_df.empty and 'item_key' in old_orders_df.columns:
         branch_add_df = branch_add_df[~branch_add_df['item_key'].isin(old_orders_df['item_key'])].copy()
@@ -592,7 +592,7 @@ def show():
     completed_additions_merged = len(branch_add_df[branch_add_df["status"] == "تم"])
     pending_additions_merged = total_additions_merged - completed_additions_merged
     
-    # 2. تبويب الإرجاعات والزيادات 📤 [تم تطبيق التعديل المستهدف هنا للاستبعاد الصارم]
+    # 2. تبويب الإرجاعات والزيادات (مستبعد منه الفواتير القديمة بنجاح)
     branch_ret_df = df[df['case_type'].isin(['return', 'orphan_abc']) & active_mask].copy()
     if not old_invoices_df.empty and 'item_key' in old_invoices_df.columns:
         branch_ret_df = branch_ret_df[~branch_ret_df['item_key'].isin(old_invoices_df['item_key'])].copy()
@@ -601,7 +601,7 @@ def show():
     completed_returns_merged = len(branch_ret_df[branch_ret_df["status"] == "تم"])
     pending_returns_merged = total_returns_merged - completed_returns_merged
     
-    # 3. باقي التبويبات الأخرى (تستمر كما هي بدون تعديل)
+    # 3. باقي التبويبات النشطة (المستبعد منها التداخلات الصارمة بناءً على طلبك)
     post_cutoff_df = df[(df["case_type"] == "post_cutoff_abc") & active_mask].copy()
     total_post_cutoff = len(post_cutoff_df)
     completed_post_cutoff = len(post_cutoff_df[post_cutoff_df["status"] == "تم"])
@@ -615,51 +615,35 @@ def show():
     completed_df = get_completed_items(pharmacy_name)
     total_completed = len(completed_df)
     
+    # =========================================================================
+    # 📥 [الموقع الجديد والآمن للزر]: تصدير جميع تقارير الفرع الحالية إلى Excel 
+    # =========================================================================
+    if st.session_state.get('show_export_pharmacy', False):
+        excel_sheets = {
+            "الاضافات والطلبات المفقودة": branch_add_df,
+            "الارجاعات والزيادات": branch_ret_df,
+            "فواتير بعد اخر طلب": post_cutoff_df,
+            "بانتظار الدفع": payment_df,
+            "الملغيات والمسترجعات": cancelled_df,
+            "الفواتير القديمة (أرشيف)": old_invoices_df,
+            "الطلبات القديمة (أرشيف)": old_orders_df
+        }
+        
+        excel_data = export_to_excel(excel_sheets, pharmacy_name)
+        
+        st.download_button(
+            label="💾 اضغط هنا لتحميل ملف Excel الموحد للفرع",
+            data=excel_data,
+            file_name=f"Report_{pharmacy_name.replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+        st.session_state.show_export_pharmacy = False
+    
     # إعداد أعداد التبويبات
     tab_additions_count = f"{completed_additions_merged}/{total_additions_merged}" if total_additions_merged > 0 else "0"
     tab_returns_count = f"{completed_returns_merged}/{total_returns_merged}" if total_returns_merged > 0 else "0"
     
-    # ========== تصدير Excel المطور (استبعاد الملغي والمسترجع والمحذوف من الإضافات) ==========
-    if st.session_state.get('show_export_pharmacy', False):
-        # 💡 [تطبيق التصفية الصارمة]: جلب الإضافات والطلبات المفقودة وتطهيرها من الحالات غير النشطة
-        additions_merged = df[df['case_type'].isin(['addition', 'orphan_salla'])].copy()
-        
-        if not additions_merged.empty and 'order_status' in additions_merged.columns:
-            # قناع استبعاد الكلمات الافتتاحية للملغي والمسترجع والمحذوف باللغتين العربية والإنجليزية
-            exclude_condition = additions_merged['order_status'].astype(str).str.contains(
-                "ملغي|مسترجع|محذوف|cancelled|returned|deleted|refunded", na=False, case=False
-            )
-            additions_merged = additions_merged[~exclude_condition].copy()
-        
-        # 💡 الإرجاعات تترك مع الفواتير الملغية والمسترجعة لتأكيد إرجاعها ماليًا بالمخزن كما صممنا سابقًا
-        returns_merged = df[df['case_type'].isin(['return', 'orphan_abc'])].copy()
-        
-        additions_merged['نوع التفصيلي'] = additions_merged['case_type'].map({
-            'addition': 'إضافة عادية', 'orphan_salla': 'طلب بدون فاتورة'
-        })
-        returns_merged['نوع التفصيلي'] = returns_merged['case_type'].map({
-            'return': 'إرجاع عادي', 'orphan_abc': 'فاتورة بدون طلب'
-        })
-        
-        export_data = {
-            "الإضافات_والطلبات_بدون_فاتورة": additions_merged,
-            "الإرجاعات_والفواتير_بدون_طلب": returns_merged,
-            "فواتير_بعد_آخر_طلب": post_cutoff_df,
-            "بانتظار_الدفع": payment_df,
-            "ملغي_ومسترجع": cancelled_df,
-            "تم_الانتهاء": completed_df,
-            "الطلبات_القديمة": old_orders_df,
-            "الفواتير_القديمة": old_invoices_df
-        }
-        excel_data = export_to_excel(export_data, pharmacy_name)
-        st.download_button(
-            "📥 تحميل التقرير",
-            data=excel_data,
-            file_name=f"balsam_pharmacy_{pharmacy_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-        st.session_state.show_export_pharmacy = False
     
     # تلوين التبويبات
     st.markdown("""
