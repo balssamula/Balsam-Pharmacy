@@ -618,11 +618,6 @@ def show():
             use_container_width=True,
         )
         st.session_state.show_export_pharmacy = False
-
-    # 💡 [تم الإصلاح]: ضبط محاذاة المسافات البادئة لتعود بداخل نطاق الدالة show القياسي (4 مسافات)
-    # جلب بيانات الفواتير المعلقة بسبب التداخل للصيدلية الحالية
-    conflicts_df = df[df["case_type"] == "branch_conflict"].copy()
-    total_conflicts = len(conflicts_df)
     
     # تلوين التبويبات
     st.markdown("""
@@ -642,20 +637,27 @@ def show():
     .stTabs [data-baseweb="tab-list"] button:hover { transform: translateY(-2px) !important; opacity: 1 !important; }
     </style>
     """, unsafe_allow_html=True)
+
+    # جلب بيانات الفواتير المعلقة بسبب التداخل للصيدلية الحالية
+    conflicts_df = df[df["case_type"] == "branch_conflict"].copy()
+    total_conflicts = len(conflicts_df)
     
-    # ========== التبويبات المدمجة الجديدة ==========
+    # 💡 [إصلاح الخطأ الرئيسي]: حساب المتغير المفقود للحالات المعلقة التي تم إنهاؤها
+    completed_conflicts = len(conflicts_df[conflicts_df["status"] == "تم"])
+    
+    # ========== التبويبات المدمجة الجديدة (مع إصلاح مسميات العناصر القديمة والمكتملة) ==========
     tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices, tab_old_stats = st.tabs([
         f"📥 الإضافات والطلبات المفقودة ({completed_additions_merged}/{total_additions_merged})" if total_additions_merged > 0 else "📥 الإضافات والطلبات المفقودة (0)",
         f"📤 الإرجاعات والفواتير المعلقة ({completed_returns_merged}/{total_returns_merged})" if total_returns_merged > 0 else "📤 الإرجاعات والفواتير المعلقة (0)",
-        f"📊 فواتير معلقة بين الفروع ({completed_conflicts}/{total_conflicts})" if total_conflicts > 0 else f"📊 فواتير معلقة بين الفروع ({total_conflicts})", # التبويب المضاف لـ الإدارة
+        f"📊 فواتير معلقة بين الفروع ({completed_conflicts}/{total_conflicts})" if total_conflicts > 0 else f"📊 فواتير معلقة بين الفروع ({total_conflicts})", 
         f"⏰ فواتير بعد آخر طلب ({completed_post_cutoff}/{total_post_cutoff})" if total_post_cutoff > 0 else f"⏰ فواتير بعد آخر طلب ({total_post_cutoff})",
         f"💰 بانتظار الدفع ({total_payment})",
         f"⚠️ ملغي/مسترجع ({total_cancelled})",
         f"✅ تم الانتهاء ({total_completed})",
-        f"📅 طلبات قديمة ({len(old_orders_filtered)})",
-        f"🧾 فواتير قديمة ({len(old_invoices_filtered)})",
+        f"📅 طلبات قديمة ({len(old_orders_df)})",  # 💡 [تم الإصلاح]: تغيير المسمى ليتوافق مع المعرف بالأعلى
+        f"🧾 فواتير قديمة ({len(old_invoices_df)})", # 💡 [تم الإصلاح]: تغيير المسمى ليتوافق مع المعرف بالأعلى
         "📊 إحصائيات قديمة"
-    ])
+    ])    
 
     with tab_additions:
         st.markdown("""
