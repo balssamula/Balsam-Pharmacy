@@ -750,7 +750,8 @@ def show():
     <style>
     .stTabs [data-baseweb="tab-list"] button:nth-child(1) { background-color: #4472C4; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(2) { background-color: #ED7D31; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(3) { background-color: #9B59B6; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(9) { background-color: #9B59B6; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(3) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(4) { background-color: #3498DB; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(5) { background-color: #E74C3C; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(6) { background-color: #27AE60; color: white; border-radius: 10px 10px 0 0; }
