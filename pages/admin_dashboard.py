@@ -750,14 +750,14 @@ def show():
     <style>
     .stTabs [data-baseweb="tab-list"] button:nth-child(1) { background-color: #4472C4; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(2) { background-color: #ED7D31; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(9) { background-color: #9B59B6; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(3) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(4) { background-color: #3498DB; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(5) { background-color: #E74C3C; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(6) { background-color: #27AE60; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(7) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(3) { background-color: #9B59B6; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(4) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(5) { background-color: #3498DB; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(6) { background-color: #E74C3C; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(7) { background-color: #27AE60; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(8) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(9) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(10) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { transform: translateY(-2px) !important; box-shadow: 0 4px 8px rgba(0,0,0,0.2) !important; }
     .stTabs [data-baseweb="tab-list"] button[aria-selected="false"] { opacity: 0.85 !important; }
     .stTabs [data-baseweb="tab-list"] button:hover { transform: translateY(-2px) !important; opacity: 1 !important; }
