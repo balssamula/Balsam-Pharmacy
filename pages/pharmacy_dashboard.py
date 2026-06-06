@@ -216,26 +216,40 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
         note_key = f"note_{idx}_{row.get('order_number', '')}_{row.get('sku', '')}"
         note_value = st.text_area("📝 ملحوظة الصيدلي:", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
         
-        btn_col1, btn_col2, _ = st.columns([1, 1.5, 3])
+        # تخصيص أزرار التحكم المرئية الذكية للـ فواتير المعلقة
+        btn_col1, btn_col2, btn_col3 = st.columns([1, 1.5, 1.5])
         with btn_col1:
-            if st.button("💾 حفظ", key=f"save_{idx}_{note_key}", use_container_width=True):
+            if st.button("💾 حفظ الملحوظة", key=f"save_{idx}_{note_key}", use_container_width=True):
                 from utils.database import save_case_note
                 save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value)
                 st.toast("📋 تم حفظ الملاحظة بنجاح!", icon="💾")
                 
-        if allow_actions and row.get("status") != "تم" and case_type in {"addition", "return", "orphan_salla", "orphan_abc"}:
-            if case_type in {"addition", "orphan_salla"}:
-                button_label = "✅ تأكيد الإضافة"
-            else:
-                button_label = "🔄 تأكيد الإرجاع"
-                
-            with btn_col2:
-                if st.button(button_label, key=f"done_{idx}_{note_key}", use_container_width=True):
-                    from utils.database import save_case_note, mark_case_done
-                    save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value)
-                    mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
-                    st.toast("🚀 تم تأكيد وتحديث الحالة بنجاح!", icon="✅")
-                    st.rerun()
+        if row.get("status") != "تم":
+            if case_type == "branch_conflict":
+                # 💡 توفير الخيارين معاً للصيدلي لحسم التداخل بناءً على وضعه الحالي للطلب
+                with btn_col2:
+                    if st.button("📥 تأكيد الإضافة (فرعي الصحيح)", key=f"conf_add_{idx}_{note_key}", use_container_width=True):
+                        from utils.database import save_case_note, mark_case_done
+                        save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, f"[فرع صحيح - تم الإضافة للمخزن] | {note_value}")
+                        mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
+                        st.toast("✅ تم اعتماد الفرع كقيد صحيح وإغلاق التسوية!", icon="📥")
+                        st.rerun()
+                with btn_col3:
+                    if st.button("🔄 تأكيد الإرجاع (فرعي الخطأ)", key=f"conf_ret_{idx}_{note_key}", use_container_width=True):
+                        from utils.database import save_case_note, mark_case_done
+                        save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, f"[فرع مخطئ - جاري عكس الفاتورة على ABC] | {note_value}")
+                        mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
+                        st.toast("🔄 تم تسجيل الخطأ وإصدار قيد الإرجاع المعاكس بنجاح!", icon="🔄")
+                        st.rerun()
+            elif case_type in {"addition", "orphan_salla", "return", "orphan_abc"}:
+                button_label = "✅ تأكيد الإضافة" if case_type in {"addition", "orphan_salla"} else "🔄 تأكيد الإرجاع"
+                with btn_col2:
+                    if st.button(button_label, key=f"done_{idx}_{note_key}", use_container_width=True):
+                        from utils.database import save_case_note, mark_case_done
+                        save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value)
+                        mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
+                        st.toast("🚀 تم تأكيد وتحديث الحالة بنجاح!", icon="✅")
+                        st.rerun()
                     
         st.markdown("---")
 
@@ -621,16 +635,21 @@ def show():
     button[data-baseweb="tab"]:hover { transform: translateY(-2px) !important; opacity: 1 !important; }
     </style>
     """, unsafe_allow_html=True)
+
+# جلب بيانات الفواتير المعلقة بسبب التداخل للصيدلية الحالية
+    conflicts_df = df[(df["case_type"] == "branch_conflict") & active_mask_filtered].copy()
+    total_conflicts = len(conflicts_df)
     
     # التبويبات
-    tab_additions, tab_returns, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices = st.tabs([
-        f"📥 الإضافات والطلبات المفقودة ({tab_additions_count})",
-        f"📤 الإرجاعات والفواتير المعلقة ({tab_returns_count})",
-        f"⏰ فواتير بعد آخر طلب ({completed_post_cutoff}/{total_post_cutoff})" if total_post_cutoff > 0 else f"⏰ فواتير بعد آخر طلب (0)",
-        f"💰 بانتظار الدفع ({total_payment})",
+    tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices = st.tabs([
+        f"📥 الإضافات والنواقص ({total_additions})",
+        f"📤 الإرجاعات والزيادات ({total_returns})",
+        f"📊 فواتير معلقة - تداخل ({total_conflicts})", # التبويب المضاف لـ الصيدلي
+        f"⏰ فواتير بعد آخر طلب ({total_post_cutoff})",
+        f"💳 بانتظار الدفع ({total_payment})",
         f"⚠️ ملغي/مسترجع ({total_cancelled})",
         f"✅ تم الانتهاء ({total_completed})",
-        f"📦 طلبات قديمة ({len(old_orders_df)})",
+        f"📋 طلبات قديمة ({len(old_orders_df)})",
         f"🧾 فواتير قديمة ({len(old_invoices_df)})"
     ])
     
