@@ -539,7 +539,7 @@ def show():
     with col7:
         st.metric("✅ تم إنجازها", len(df[df["status"] == "تم"]))
     
-    col1 = st.columns([1, 6])
+    col1, col2 = st.columns([1, 6])
     with col1:
         if st.button("🔄 تحديث الصفحة", use_container_width=True):
             st.rerun()
