@@ -703,8 +703,9 @@ def show():
             "الفواتير القديمة التاريخية": old_invoices_df
         })
         st.download_button(
-            label="💾 اضغط هنا لتحميل ملف Excel الموحد للإدارة",
+            label="💾 تحميل ملف Excel الموحد",
             data=excel_data,
+            type="primary",
             file_name=f"Balsam_Admin_Report_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="admin_excel_download_stream"
