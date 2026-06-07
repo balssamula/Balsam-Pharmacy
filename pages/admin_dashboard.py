@@ -793,118 +793,81 @@ def show():
     ])
 
        
+# =========================================================================
+    # 📺 [تم الإصلاح]: ربط تبويبات العرض بالمتغيرات الفردية المنقاة للأعلى
+    # =========================================================================
+    
     with tab_additions:
-        st.markdown("""
-        <div style="background: linear-gradient(135deg, #0f4c5c10, #1f7a8c10); padding: 0.75rem; border-radius: 12px; margin-bottom: 1rem;">
-            <p style="margin: 0; font-weight: 500; font-size:0.9rem;">
-                <strong>📥 قسم الإضافات المدمج:</strong> تم تصفية العداد والجدول بالكامل لحظر الحالات غير النشطة.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-        if not additions_merged_df.empty:
-            additions_merged_df['case_label'] = additions_merged_df['case_type'].map({
-                'addition': '➕ إضافة مخزنية عادية',
-                'orphan_salla': '🛒 سلة: طلب بدون فاتورة'
-            }).fillna(additions_merged_df['case_label'])
-        
-            render_table_with_click(additions_merged_df, "additions_merged", allow_move=True)
+        st.markdown(f"### 📥 الإضافات والطلبات المفقودة المستخرجة")
+        # تم تغيير المتغير لـ additions_filtered لإنهاء الـ NameError
+        if not additions_filtered.empty:
+            render_table_with_click(additions_filtered, "addition", allow_move=True)
         else:
-            st.success("🎉 لا توجد طلبات إضافات أو نواقص قائمة حالياً.")
-    
+            st.success("🎉 لا توجد حالات إضافة أو طلبات مفقودة قيد المتابعة حالياً.")
+
     with tab_returns:
-        st.markdown("""
-        <div style="background: linear-gradient(135deg, #dc354510, #e74c3c10); padding: 0.75rem; border-radius: 12px; margin-bottom: 1rem;">
-            <p style="margin: 0; font-weight: 500;">📤 <strong>الفواتير التي تحتاج إلى إرجاع أو معالجة نقص الطلبات</strong><br>
-            <span style="font-size: 0.85rem;">🔴 الإرجاعات العادية: كمية الفاتورة أعلى من الطلب | 🟡 الفواتير بدون طلب: فاتورة موجودة في ABC وغير موجودة في سلة</span>
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if not returns_merged_df.empty:
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                normal_returns = len(returns_merged_df[returns_merged_df['case_type'] == 'return'])
-                st.metric("🔄 الإرجاعات العادية", normal_returns)
-            with col2:
-                orphan_abc_count = len(returns_merged_df[returns_merged_df['case_type'] == 'orphan_abc'])
-                st.metric("📄 الفواتير بدون طلب", orphan_abc_count)
-            with col3:
-                st.metric("✅ المنجز", f"{completed_returns_merged}/{total_returns_merged}")
-            st.markdown("---")
-            render_table_with_click(returns_merged_df, "returns_merged", allow_move=True)
+        st.markdown(f"### 📤 الإرجاعات والزيادات المستندة للفروع")
+        # تم تغيير المتغير لـ returns_filtered لإنهاء الـ NameError
+        if not returns_filtered.empty:
+            render_table_with_click(returns_filtered, "return", allow_move=True)
         else:
-            st.success("🎉 لا توجد طلبات إرجاعات أو فواتير بدون طلب حالياً.")
+            st.success("🎉 ممتاز! لا توجد فواتير زيادة أو قيد إرجاع معلق.")
 
     with tab_conflicts:
-        st.markdown(f"### 📊 فواتير معلقة بسبب التداخل والتكرار بين الفروع")
-        # تم تغيير المتغير إلى conflicts_filtered لإنهاء الخطأ وعرض البيانات المدمجة
-        render_table_with_click(conflicts_filtered, "branch_conflict", allow_move=True)
-        
+        st.markdown(f"### 📊 فواتير معلقة بسبب التداخل والتكرار بين الفروع ({total_conflicts})")
+        # الجدول المدمج والمحدث للنزاعات النشطة والقديمة المتداخلة
+        if not conflicts_filtered.empty:
+            render_table_with_click(conflicts_filtered, "branch_conflict", allow_move=True)
+        else:
+            st.success("🎉 ممتاز! لا توجد فواتير معلقة أو متداخلة بين الفروع.")
+            
     with tab_post_cutoff:
-        render_table_with_click(post_cutoff_filtered, "post_cutoff", allow_move=True)
-    
+        st.markdown(f"### ⏰ فواتير ABC تم إنشاؤها بعد توقيت آخر طلب في سلة")
+        # تم تغيير المتغير لـ post_cutoff_filtered
+        if not post_cutoff_filtered.empty:
+            render_table_with_click(post_cutoff_filtered, "post_cutoff", allow_move=True)
+        else:
+            st.success("🎉 لا توجد فواتير مخرجات مسجلة بعد توقيت قطع الجلسة.")
+
     with tab_payment:
-        render_table_with_click(payment_filtered, "payment", allow_move=False)
-    
+        st.markdown(f"### 💰 طلبات سلة معلقة بانتظار إتمام الدفع بالفرع")
+        # تم تغيير المتغير لـ payment_filtered
+        if not payment_filtered.empty:
+            render_table_with_click(payment_filtered, "pending_payment", allow_move=True)
+        else:
+            st.success("🎉 لا توجد طلبات معلقة بانتظار الدفع.")
+
     with tab_cancelled:
-        render_table_with_click(cancelled_filtered, "cancelled", allow_move=False)
-    
+        st.markdown(f"### ⚠️ فواتير ABC التابعة لطلبات ملغية أو مسترجعة في سلة")
+        # تم تغيير المتغير لـ cancelled_filtered
+        if not cancelled_filtered.empty:
+            render_table_with_click(cancelled_filtered, "cancelled_returned", allow_move=True)
+        else:
+            st.success("🎉 نظيف! لا توجد فواتير مضروبة لطلبات ملغية.")
+
     with tab_completed:
-        render_table_with_click(completed_filtered, "completed", allow_move=False)
-    
+        st.markdown("### ✅ التسويات والطلبات التي تم الانتهاء منها وإغلاقها")
+        if completed_df_admin is not None and not completed_df_admin.empty:
+            render_completed_table(completed_df_admin, is_admin=True)
+        else:
+            st.info("📭 لم يتم اعتماد أو إكمال أي حالات في هذه الجلسة بعد.")
+
     with tab_old_orders:
-        st.markdown("""
-        <div style="background: linear-gradient(135deg, #1a1a1a, #333); padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">
-            <h3 style="color: white; margin: 0;">📅 الطلبات القديمة (أكثر من 6 أشهر)</h3>
-            <p style="color: #ccc; margin: 0.5rem 0 0 0;">⚠️ الطلبات التي مر عليها أكثر من 6 أشهر والموجودة في سلة ولكن لم تكتمل</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if selected_branch != "الكل":
-            st.info(f"🏥 عرض الطلبات القديمة للفرع: {selected_branch}")
-        
-        months_orders = st.slider("عدد الأشهر للبحث (طلبات)", min_value=3, max_value=24, value=6, step=3, key="old_orders_months")
-        old_orders_filtered_dynamic = get_old_orders(pharmacy_name=selected_branch_name, months=months_orders)
-        
-        if not old_orders_filtered_dynamic.empty:
-            st.warning(f"⚠️ يوجد {len(old_orders_filtered_dynamic)} طلب قديم (أكثر من {months_orders} أشهر)")
-            render_table_with_click(old_orders_filtered_dynamic, "old_orders", allow_move=True)
-            
-            if st.button("📥 تصدير الطلبات القديمة إلى Excel", use_container_width=True, key="export_old_orders"):
-                excel_data = export_to_excel({"الطلبات_القديمة": old_orders_filtered_dynamic})
-                st.download_button("📥 تحميل التقرير", data=excel_data, 
-                                  file_name=f"old_orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", 
-                                  use_container_width=True)
+        st.markdown("### 📋 أرشيف الطلبات القديمة التاريخية (أكثر من 6 أشهر)")
+        if not old_orders_df.empty:
+            # عرض الأرشيف التاريخي الكامل للطلبات القديمة
+            st.dataframe(old_orders_df, use_container_width=True)
         else:
-            st.success(f"🎉 لا توجد طلبات قديمة (أكثر من {months_orders} أشهر)")
-    
+            st.success("🎉 لا توجد طلبات قديمة مؤرشفة.")
+
     with tab_old_invoices:
-        st.markdown("""
-        <div style="background: linear-gradient(135deg, #1a1a1a, #333); padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">
-            <h3 style="color: white; margin: 0;">🧾 الفواتير القديمة (أكثر من 6 أشهر)</h3>
-            <p style="color: #ccc; margin: 0.5rem 0 0 0;">⚠️ الفواتير التي مر عليها أكثر من 6 أشهر والموجودة في ABC ولكن لم تكتمل</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if selected_branch != "الكل":
-            st.info(f"🏥 عرض الفواتير القديمة للفرع: {selected_branch}")
-        
-        months_invoices = st.slider("عدد الأشهر للبحث (فواتير)", min_value=3, max_value=24, value=6, step=3, key="old_invoices_months")
-        old_invoices_filtered_dynamic = get_old_invoices(pharmacy_name=selected_branch_name, months=months_invoices)
-        
-        if not old_invoices_filtered_dynamic.empty:
-            st.warning(f"⚠️ يوجد {len(old_invoices_filtered_dynamic)} فاتورة قديمة (أكثر من {months_invoices} أشهر)")
-            render_table_with_click(old_invoices_filtered_dynamic, "old_invoices", allow_move=True)
-            
-            if st.button("📥 تصدير الفواتير القديمة إلى Excel", use_container_width=True, key="export_old_invoices"):
-                excel_data = export_to_excel({"الفواتير_القديمة": old_invoices_filtered_dynamic})
-                st.download_button("📥 تحميل التقرير", data=excel_data, 
-                                  file_name=f"old_invoices_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", 
-                                  use_container_width=True)
+        st.markdown("### 🧾 أرشيف الفواتير القديمة التاريخية (أكثر من 6 أشهر)")
+        if not old_invoices_df.empty:
+            # عرض الأرشيف التاريخي الكامل للفواتير القديمة
+            st.dataframe(old_invoices_df, use_container_width=True)
         else:
-            st.success(f"🎉 لا توجد فواتير قديمة (أكثر من {months_invoices} أشهر)")
-    
+            st.success("🎉 لا توجد فواتير قديمة مؤرشفة.")
+   
     with tab_old_stats:
         st.markdown("### 📊 إحصائيات العناصر القديمة")
         st.markdown("---")
