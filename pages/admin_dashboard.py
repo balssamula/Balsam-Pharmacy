@@ -539,30 +539,11 @@ def show():
     with col7:
         st.metric("✅ تم إنجازها", len(df[df["status"] == "تم"]))
     
-    col1, col2 = st.columns([1, 6])
+    col1 = st.columns([1, 6])
     with col1:
         if st.button("🔄 تحديث الصفحة", use_container_width=True):
             st.rerun()
-    with col2:
-        if st.button("📥 تصدير كل التقارير الحالية إلى ملف Excel موحد"):
-            excel_data = export_to_excel({
-                "الإضافات والطلبات المفقودة": additions_filtered,
-                "الإرجاعات والفواتير المعلقة": returns_filtered,
-                "فواتير معلقة بين الفروع": conflicts_filtered, # ⚡ سيصدر الجدول المدمج بالطلب القديم المعلق هنا
-                "فواتير بعد آخر طلب": post_cutoff_filtered,
-                "بانتظار الدفع": payment_filtered,
-                "الملغيات والمسترجعات": cancelled_filtered,
-                "الطلبات القديمة التاريخية": old_orders_df, # 📥 إضافة تبويب الطلبات القديمة كاملاً بالأرشيف
-                "الفواتير القديمة التاريخية": old_invoices_df # 📥 إضافة تبويب الفواتير القديمة كاملاً بالأرشيف
-            })
-    
-            st.download_button(
-                label="💾 اضغط هنا لتحميل ملف Excel الموحد للإدارة",
-                data=excel_data,
-                file_name=f"Balsam_Admin_Report_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-    
+
     # ========== الفلاتر المتقدمة وعزل الجلسات ==========
     sessions_list = get_all_sessions()
     
@@ -728,7 +709,6 @@ def show():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="admin_excel_download_stream"
         )
-
 
     
     st.markdown("""
