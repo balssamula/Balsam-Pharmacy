@@ -52,7 +52,7 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
         'product_name': 'اسم المنتج',
         'salla_qty': 'كمية سلة',
         'abc_qty': 'كمية ABC',
-        'diff_value': 'الفرق',
+        'difference': 'الفرق',
         'order_status': 'حالة الطلب',
         'customer_phone': 'رقم جوال العميل',  # 📱 الحقل المضاف حديثاً
         'profile_type': 'نوع البروفايل',      # 📄 الحقل المضاف حديثاً
@@ -447,6 +447,7 @@ def show():
         st.download_button(
             label="💾 تحميل ملف Excel الموحد للفرع",
             data=excel_data,
+            
             file_name=f"Report_{pharmacy_name.replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
