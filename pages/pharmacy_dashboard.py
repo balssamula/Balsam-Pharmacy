@@ -65,7 +65,7 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
         'item_key': 'المفتاح الشامل للصنف'
     }
 
-    def export_to_excel_brief(dataframes_dict: dict) -> bytes:
+def export_to_excel_brief(dataframes_dict: dict) -> bytes:
     """تصدير ملف إكسيل مختصر بأعمدة محددة وموحدة لجميع التبويبات"""
     output = BytesIO()
     
