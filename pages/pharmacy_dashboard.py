@@ -325,12 +325,13 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             
         st.markdown("</div>", unsafe_allow_html=True)
         
-        note_key = f"note_{idx}_{row.get('order_number', '')}_{row.get('sku', '')}"
+        # ⭐ تعديل المفتاح ليصبح فريداً تماماً من خلال دمج نوع الحالة (case_type)
+        note_key = f"note_{case_type}_{idx}_{row.get('order_number', '')}_{row.get('sku', '')}"
         note_value = st.text_area("📝 :ملحوظة الصيدلي", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
         
         btn_col1, btn_col2, btn_col3 = st.columns([1, 1.5, 1.5])
         with btn_col1:
-            if st.button("💾 حفظ الملحوظة", key=f"save_{idx}_{note_key}", use_container_width=True):
+            if st.button("💾 حفظ الملحوظة", key=f"save_{note_key}", use_container_width=True):
                 save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value)
                 st.toast("📋 تم حفظ الملاحظة بنجاح!", icon="💾")
                 
@@ -351,7 +352,7 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             elif case_type in {"addition", "orphan_salla", "return", "orphan_abc"}:
                 button_label = "✅ تأكيد الإضافة" if case_type in {"addition", "orphan_salla"} else "🔄 تأكيد الإرجاع"
                 with btn_col2:
-                    if st.button(button_label, key=f"done_{idx}_{note_key}", use_container_width=True):
+                    if st.button(button_label, key=f"done_{note_key}", use_container_width=True):
                         save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value)
                         mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
                         st.toast("🚀 تم تأكيد وتحديث الحالة بنجاح!", icon="✅")
