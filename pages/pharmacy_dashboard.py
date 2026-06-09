@@ -177,13 +177,14 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             - **📋 رقم الطلب:** {row.get('order_number', 'N/A')}
             - **🏷️ SKU:** {row.get('sku', 'N/A')}
             - **📦 المنتج:** {str(row.get('product_name', 'N/A'))[:60]}
+            """)
+
             # 📱 إضافة رقم الجوال فقط إذا كانت الحالة إضافة أو طلب مفقود
             if case_type in ['addition', 'orphan_salla']:
                 phone = row.get('customer_phone', 'N/A')
                 if pd.notna(phone) and str(phone).strip() not in ["", "nan", "None"]:
-                    st.markdown(f"- **📱 جوال العميل:** `{customer_phone}`")
-            """)
-            
+                    st.markdown(f"- **📱 جوال العميل:** `{phone}`")
+                    
         with col2:
             st.markdown(f"""
             - **🛒 كمية سلة:** {salla_numeric}
@@ -196,13 +197,14 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             - **🧾 رقم الفاتورة:** {row.get('invoice_number', 'N/A')}
             - **👤 الصيدلي:** {row.get('abc_pharmacist_name', 'غير معروف')}
             - **⚙️ حالة الطلب:** {order_status}
+            """)
+
             # 📄 إضافة نوع البروفايل بناءً على رقم الفاتورة فقط إذا كانت الحالة إرجاع أو زيادة
             if case_type in ['return', 'orphan_abc']:
                 profile = row.get('profile_type', 'N/A')
                 if pd.notna(profile) and str(profile).strip() not in ["", "nan", "None"]:
-                    st.markdown(f"- **📄 نوع البروفايل:** `{profile_type}`")
-            """)
-       
+                    st.markdown(f"- **📄 نوع البروفايل:** `{profile}`")
+                    
         if duplicates:
             dup_warning_html = (
                 '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem; direction:rtl; text-align:right;">'
