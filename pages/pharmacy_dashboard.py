@@ -149,6 +149,7 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             - **📋 رقم الطلب:** {row.get('order_number', 'N/A')}
             - **🏷️ SKU:** {row.get('sku', 'N/A')}
             - **📦 المنتج:** {str(row.get('product_name', 'N/A'))[:60]}
+            - **📱 رقم جوال العميل:** {row['customer_phone']}
             """)
         with col2:
             st.markdown(f"""
@@ -162,6 +163,7 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             - **🧾 رقم الفاتورة:** {row.get('invoice_number', 'N/A')}
             - **👤 الصيدلي:** {row.get('abc_pharmacist_name', 'غير معروف')}
             - **⚙️ حالة الطلب:** {order_status}
+            - **📄 نوع البروفايل:** {row['profile_type']}
             """)
 
         if row['case_type'] == 'addition':
