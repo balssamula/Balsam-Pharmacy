@@ -449,7 +449,7 @@ def show():
         st.download_button(
             label="💾 تحميل ملف Excel الموحد للفرع",
             data=excel_data,
-            type=primary,
+            type="primary",
             file_name=f"Report_{pharmacy_name.replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
