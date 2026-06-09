@@ -165,15 +165,7 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             - **⚙️ حالة الطلب:** {order_status}
             - **📄 نوع البروفايل:** {row['profile_type']}
             """)
-
-        if row['case_type'] == 'addition':
-            if str(row.get('customer_phone', '')).strip() not in ["", "nan", "None"]:
-                st.markdown(f"📱 **رقم جوال العميل:** {row['customer_phone']}")
-
-        if row['case_type'] == 'return':
-            if str(row.get('profile_type', '')).strip() not in ["", "nan", "None"]:
-                st.markdown(f"📄 **نوع البروفايل:** {row['profile_type']}")
-        
+       
         if duplicates:
             dup_warning_html = (
                 '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem; direction:rtl; text-align:right;">'
