@@ -588,8 +588,11 @@ def show():
     with tab_returns: render_case_cards_pharmacy(branch_ret_df, allow_actions, pharmacist_name, pharmacy_name)
     with tab_conflicts:
         if not conflicts_df.empty:
-            for idx, row in conflicts_df.iterrows(): render_single_case_card(row, idx, allow_actions=True, pharmacist_name=pharmacist_name, pharmacy_name=pharmacy_name)
-        else: st.success("🎉 ممتاز! لا توجد فواتير معلقة أو متداخلة مع فروع أخرى لفرعكم الحالي.")
+            # استخدام enumerate لضمان أرقام فريدة ومستقلة لهذا التبويب
+            for i, (idx, row) in enumerate(conflicts_df.iterrows()): 
+                render_single_case_card(row, f"conf_{i}", allow_actions=True, pharmacist_name=pharmacist_name, pharmacy_name=pharmacy_name)
+        else: 
+            st.success("🎉 ممتاز! لا توجد فواتير معلقة أو متداخلة مع فروع أخرى لفرعكم الحالي.")
     with tab_post_cutoff: render_case_cards_pharmacy(post_cutoff_df, False, pharmacist_name, pharmacy_name)
     with tab_payment: render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name)
     with tab_cancelled: render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name)
