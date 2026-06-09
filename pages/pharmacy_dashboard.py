@@ -58,11 +58,11 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
         'profile_type': 'نوع البروفايل',      # 📄 الحقل المضاف حديثاً
         'abc_pharmacist_name': 'الصيدلي المسؤول',
         'pharmacist_note': 'ملاحظات الصيدلية',
-        'status': 'حالة التسوية'
-        'case_type': 'نوع الحالة'
-        'case_reason': 'سبب الحالة'
+        'status': 'حالة التسوية',
+        'case_type': 'نوع الحالة',
+        'case_reason': 'سبب الحالة',
         'city': 'المدينة'
-        '': ''
+        'item_key': 'المفتاح الشامل للصنف'
     }
 
     def export_to_excel_brief(dataframes_dict: dict) -> bytes:
