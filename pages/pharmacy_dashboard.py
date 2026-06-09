@@ -28,12 +28,13 @@ def to_safe_int(val):
         return 0
         
 def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
-    """تصدير البيانات إلى ملف Excel مع تنسيق احترافي"""
+    """تصدير البيانات إلى ملف Excel مع تنسيق واختيار الأعمدة بشكل احترافي"""
     output = BytesIO()
     
     tab_colors = {
-        "الإضافات والطلبات المفقودة": "4472C4",
-        "الإرجاعات والزيادات": "ED7D31",
+        "الاضافات والطلبات المفقودة": "4472C4",
+        "الارجاعات والزيادات": "ED7D31",
+        "فواتير معلقة بين الفروع": "9B59B6",
         "فواتير بعد اخر طلب": "9B59B6",
         "بانتظار الدفع": "3498DB",
         "الملغيات والمسترجعات": "E74C3C",
@@ -41,10 +42,37 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
         "الطلبات القديمة": "6c757d"
     }
     
+    # خريطة لترجمة وفلترة الأعمدة التي ستظهر داخل ملف الإكسيل
+    columns_mapping = {
+        'order_date': 'تاريخ الطلب',
+        'order_number': 'رقم الطلب',
+        'invoice_date': 'تاريخ الفاتورة',
+        'invoice_number': 'رقم الفاتورة',
+        'sku': 'رقم المنتج SKU',
+        'product_name': 'اسم المنتج',
+        'salla_qty': 'كمية سلة',
+        'abc_qty': 'كمية ABC',
+        'diff_value': 'الفرق',
+        'order_status': 'حالة الطلب',
+        'customer_phone': 'رقم جوال العميل',  # 📱 الحقل المضاف حديثاً
+        'profile_type': 'نوع البروفايل',      # 📄 الحقل المضاف حديثاً
+        'abc_pharmacist_name': 'الصيدلي المسؤول',
+        'pharmacist_note': 'ملاحظات الصيدلية',
+        'status': 'حالة التسوية'
+    }
+    
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         for sheet_name, df in dataframes_dict.items():
             if df is not None and not df.empty:
-                df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+                # تصفية واختيار الأعمدة الموجودة بالفعل في الـ dataframe فقط لمنع الخطأ
+                available_cols = [col for col in columns_mapping.keys() if col in df.columns]
+                df_filtered = df[available_cols].copy()
+                
+                # إعادة تسمية الأعمدة إلى اللغة العربية
+                df_filtered = df_filtered.rename(columns=columns_mapping)
+                
+                # كتابة الشيت
+                df_filtered.to_excel(writer, sheet_name=sheet_name[:31], index=False)
                 
                 worksheet = writer.sheets[sheet_name[:31]]
                 
@@ -53,23 +81,23 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
                                          fill_type="solid")
                 header_font = Font(color="FFFFFF", bold=True, size=12)
                 
-                for col in range(1, len(df.columns) + 1):
+                for col in range(1, len(df_filtered.columns) + 1):
                     cell = worksheet.cell(row=1, column=col)
                     cell.fill = header_fill
                     cell.font = header_font
                     cell.alignment = Alignment(horizontal="center", vertical="center")
                 
-                for col in range(1, len(df.columns) + 1):
+                for col in range(1, len(df_filtered.columns) + 1):
                     column_letter = get_column_letter(col)
                     max_length = 0
-                    for row in range(1, len(df) + 2):
+                    for row in range(1, len(df_filtered) + 2):
                         cell_value = worksheet.cell(row=row, column=col).value
                         if cell_value:
                             max_length = max(max_length, len(str(cell_value)))
-                    worksheet.column_dimensions[column_letter].width = min(max_length + 2, 40)
+                    worksheet.column_dimensions[column_letter].width = min(max_length + 4, 40)
                 
-                for row in range(2, len(df) + 2):
-                    for col in range(1, len(df.columns) + 1):
+                for row in range(2, len(df_filtered) + 2):
+                    for col in range(1, len(df_filtered.columns) + 1):
                         cell = worksheet.cell(row=row, column=col)
                         if row % 2 == 0:
                             cell.fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
@@ -149,13 +177,13 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             - **📋 رقم الطلب:** {row.get('order_number', 'N/A')}
             - **🏷️ SKU:** {row.get('sku', 'N/A')}
             - **📦 المنتج:** {str(row.get('product_name', 'N/A'))[:60]}
-            """)
-            
             # 📱 إضافة رقم الجوال فقط إذا كانت الحالة إضافة أو طلب مفقود
             if case_type in ['addition', 'orphan_salla']:
                 phone = row.get('customer_phone', 'N/A')
                 if pd.notna(phone) and str(phone).strip() not in ["", "nan", "None"]:
                     st.markdown(f"- **📱 جوال العميل:** `{phone}`")
+            """)
+            
         with col2:
             st.markdown(f"""
             - **🛒 كمية سلة:** {salla_numeric}
@@ -168,13 +196,12 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             - **🧾 رقم الفاتورة:** {row.get('invoice_number', 'N/A')}
             - **👤 الصيدلي:** {row.get('abc_pharmacist_name', 'غير معروف')}
             - **⚙️ حالة الطلب:** {order_status}
-            """)
-
             # 📄 إضافة نوع البروفايل بناءً على رقم الفاتورة فقط إذا كانت الحالة إرجاع أو زيادة
             if case_type in ['return', 'orphan_abc']:
                 profile = row.get('profile_type', 'N/A')
                 if pd.notna(profile) and str(profile).strip() not in ["", "nan", "None"]:
                     st.markdown(f"- **📄 نوع البروفايل:** `{profile}`")
+            """)
        
         if duplicates:
             dup_warning_html = (
