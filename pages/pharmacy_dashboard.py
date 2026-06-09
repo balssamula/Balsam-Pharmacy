@@ -59,6 +59,10 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
         'abc_pharmacist_name': 'الصيدلي المسؤول',
         'pharmacist_note': 'ملاحظات الصيدلية',
         'status': 'حالة التسوية'
+        'case_type': 'نوع الحالة'
+        'case_reason': 'سبب الحالة'
+        'city': 'المدينة'
+        '': ''
     }
 
     def export_to_excel_brief(dataframes_dict: dict) -> bytes:
@@ -83,13 +87,17 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
         'order_number': 'رقم الطلب',
         'invoice_number': 'رقم الفاتورة',
         'customer_phone': 'رقم جوال العميل',
+        'customer_name': 'إسم العميل',
         'sku': 'رقم المنتج',
         'product_name': 'اسم المنتج',
         'salla_qty': 'كمية سلة',
         'abc_qty': 'كمية abc',
         'difference': 'الفرق', # سيتم حسابه بشكل مباشر وصريح
+        'total_amount': 'إجمالي الطلب',
         'abc_pharmacist_name': 'اسم الصيدلي',
-        'profile_type': 'نوع البروفايل'
+        'profile_type': 'نوع البروفايل',
+        'case_reason': 'سبب الحالة',
+        'payment_method': 'طريقة الدفع'
     }
     
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
