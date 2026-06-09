@@ -351,8 +351,14 @@ def update_balances(abc_file, salla_file):
         cols_to_check = list(col_mapping.keys())
         old_data = df_salla.iloc[:, cols_to_check].apply(pd.to_numeric, errors='coerce').fillna(0).astype(int)
         new_data = df_updated.iloc[:, cols_to_check]
+        
+        # 1. التحقق من وجود أي اختلاف بين الشيت القديم (سلة) والشيت الجديد (ABC)
         is_different = (new_data.values != old_data.values).any(axis=1)
-        has_balance = new_data.sum(axis=1) > 0
+        
+        # 2. تعديل الشرط: إظهار المنتج إذا كان له رصيد في سلة "أو" رصيد في ABC (لمنع تجاهل الأصناف المراد تصفيرها)
+        has_balance = (new_data.sum(axis=1) > 0) | (old_data.sum(axis=1) > 0)
+        
+        # تصفية البيانات بناء على الشرطين المحدثين
         df_final = df_updated[is_different & has_balance]
         return df_final, len(df_final)
     except Exception as e: return None, str(e)
