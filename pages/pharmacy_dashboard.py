@@ -38,7 +38,7 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
         "بانتظار الدفع": "3498DB",
         "الملغيات والمسترجعات": "E74C3C",
         "الفواتير القديمة (أرشيف)": "6c757d",
-        "الطلبات القديمة (أرشيف)": "6c757d"
+        "الطلبات القديمة": "6c757d"
     }
     
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -149,8 +149,13 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             - **📋 رقم الطلب:** {row.get('order_number', 'N/A')}
             - **🏷️ SKU:** {row.get('sku', 'N/A')}
             - **📦 المنتج:** {str(row.get('product_name', 'N/A'))[:60]}
-            - **📱 رقم جوال العميل:** {row['customer_phone']}
             """)
+            
+            # 📱 إضافة رقم الجوال فقط إذا كانت الحالة إضافة أو طلب مفقود
+            if case_type in ['addition', 'orphan_salla']:
+                phone = row.get('customer_phone', 'N/A')
+                if pd.notna(phone) and str(phone).strip() not in ["", "nan", "None"]:
+                    st.markdown(f"- **📱 جوال العميل:** `{phone}`")
         with col2:
             st.markdown(f"""
             - **🛒 كمية سلة:** {salla_numeric}
@@ -163,8 +168,13 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             - **🧾 رقم الفاتورة:** {row.get('invoice_number', 'N/A')}
             - **👤 الصيدلي:** {row.get('abc_pharmacist_name', 'غير معروف')}
             - **⚙️ حالة الطلب:** {order_status}
-            - **📄 نوع البروفايل:** {row['profile_type']}
             """)
+
+            # 📄 إضافة نوع البروفايل بناءً على رقم الفاتورة فقط إذا كانت الحالة إرجاع أو زيادة
+            if case_type in ['return', 'orphan_abc']:
+                profile = row.get('profile_type', 'N/A')
+                if pd.notna(profile) and str(profile).strip() not in ["", "nan", "None"]:
+                    st.markdown(f"- **📄 نوع البروفايل:** `{profile}`")
        
         if duplicates:
             dup_warning_html = (
@@ -207,13 +217,13 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
         if allow_actions and row.get("status") != "تم":
             if case_type == "branch_conflict":
                 with btn_col2:
-                    if st.button("📥 تأكيد الإضافة (فرعي الصحيح)", key=f"conf_add_{idx}_{note_key}", use_container_width=True):
+                    if st.button("📥 تأكيد الإضافة (تم بيع الصنف من فرعي)", key=f"conf_add_{idx}_{note_key}", use_container_width=True):
                         save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, f"[فرع صحيح - تم الإضافة للمخزن] | {note_value}")
                         mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
                         st.toast("✅ تم اعتماد الفرع كقيد صحيح وإغلاق التسوية!", icon="📥")
                         st.rerun()
                 with btn_col3:
-                    if st.button("🔄 تأكيد الإرجاع (فرعي الخطأ)", key=f"conf_ret_{idx}_{note_key}", use_container_width=True):
+                    if st.button("🔄 تأكيد الإرجاع (لم يتم بيع الصنف من فرعي)", key=f"conf_ret_{idx}_{note_key}", use_container_width=True):
                         save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, f"[فرع مخطئ - جاري عكس الفاتورة على ABC] | {note_value}")
                         mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
                         st.toast("🔄 تم تسجيل الخطأ وإصدار قيد الإرجاع المعاكس بنجاح!", icon="🔄")
@@ -324,7 +334,7 @@ def show():
         if st.button("🔄 تحديث الصفحة", use_container_width=True):
             st.rerun()
     with col2:
-        if st.button("📥 حظر وتصدير التقارير إلى Excel", use_container_width=True):
+        if st.button("📥 تصدير التقارير إلى Excel", use_container_width=True):
             st.session_state.show_export_pharmacy = True
 
     df = fetch_active_items(pharmacy_name, include_hidden=False)
@@ -392,7 +402,7 @@ def show():
     with col4: st.metric("📦 طلبات بلا فاتورة", len(active_df[active_df["case_type"] == "orphan_salla"]))
     with col5: st.metric("🧾 فواتير بلا طلب", len(active_df[active_df["case_type"] == "orphan_abc"]))
     with col6: st.metric("⏰ فواتير مخرجات", total_post_cutoff)
-    with col7: st.metric("✅ تم إنجازها", total_completed) # 💡 هنا تم الإصلاح
+    with col7: st.metric("✅ تم إنجازها", total_completed)
 
     # 📥 تنفيذ تصدير ملف الـ Excel للفرع بدون أي مشاكل في التعريف المتأخر
     if st.session_state.get('show_export_pharmacy', False):
@@ -404,11 +414,11 @@ def show():
             "بانتظار الدفع": payment_df,
             "الملغيات والمسترجعات": cancelled_df,
             "الفواتير القديمة (أرشيف)": old_invoices_df,
-            "الالطلبات القديمة (أرشيف)": old_orders_df
+            "الطلبات القديمة": old_orders_df
         }
         excel_data = export_to_excel(excel_sheets, pharmacy_name)
         st.download_button(
-            label="💾 اضغط هنا لتحميل ملف Excel الموحد للفرع",
+            label="💾 تحميل ملف Excel الموحد للفرع",
             data=excel_data,
             file_name=f"Report_{pharmacy_name.replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
