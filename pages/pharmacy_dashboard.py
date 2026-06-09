@@ -55,13 +55,13 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
         'abc_qty': 'كمية ABC',
         'difference': 'الفرق',
         'order_status': 'حالة الطلب',
-        'profile_type': 'نوع البروفايل',      # 📄 الحقل المضاف حديثاً
+        'profile_type': 'نوع البروفايل',
         'abc_pharmacist_name': 'الصيدلي المسؤول',
         'pharmacist_note': 'ملاحظات الصيدلية',
         'status': 'حالة التسوية',
         'case_type': 'نوع الحالة',
         'case_reason': 'سبب الحالة',
-        'city': 'المدينة'
+        'city': 'المدينة',
         'item_key': 'المفتاح الشامل للصنف'
     }
 
