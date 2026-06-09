@@ -48,18 +48,101 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
         'order_number': 'رقم الطلب',
         'invoice_date': 'تاريخ الفاتورة',
         'invoice_number': 'رقم الفاتورة',
+        'customer_phone': 'رقم جوال العميل',  # 📱 الحقل المضاف حديثاً
         'sku': 'رقم المنتج SKU',
         'product_name': 'اسم المنتج',
         'salla_qty': 'كمية سلة',
         'abc_qty': 'كمية ABC',
         'difference': 'الفرق',
         'order_status': 'حالة الطلب',
-        'customer_phone': 'رقم جوال العميل',  # 📱 الحقل المضاف حديثاً
         'profile_type': 'نوع البروفايل',      # 📄 الحقل المضاف حديثاً
         'abc_pharmacist_name': 'الصيدلي المسؤول',
         'pharmacist_note': 'ملاحظات الصيدلية',
         'status': 'حالة التسوية'
     }
+
+    def export_to_excel_brief(dataframes_dict: dict) -> bytes:
+    """تصدير ملف إكسيل مختصر بأعمدة محددة وموحدة لجميع التبويبات"""
+    output = BytesIO()
+    
+    tab_colors = {
+        "الاضافات والطلبات المفقودة": "4472C4",
+        "الارجاعات والزيادات": "ED7D31",
+        "فواتير معلقة بين الفروع": "9B59B6",
+        "فواتير بعد اخر طلب": "9B59B6",
+        "بانتظار الدفع": "3498DB",
+        "الملغيات والمسترجعات": "E74C3C",
+        "الفواتير القديمة (أرشيف)": "6c757d",
+        "الطلبات القديمة": "6c757d"
+    }
+    
+    # تحديد الأعمدة المطلوبة بالترتيب المطلوب وترجمتها للعربية بشكل متناسق
+    target_columns = {
+        'order_date': 'تاريخ الطلب',
+        'invoice_date': 'تاريخ الفاتورة',
+        'order_number': 'رقم الطلب',
+        'invoice_number': 'رقم الفاتورة',
+        'customer_phone': 'رقم جوال العميل',
+        'sku': 'رقم المنتج',
+        'product_name': 'اسم المنتج',
+        'salla_qty': 'كمية سلة',
+        'abc_qty': 'كمية abc',
+        'difference': 'الفرق', # سيتم حسابه بشكل مباشر وصريح
+        'abc_pharmacist_name': 'اسم الصيدلي',
+        'profile_type': 'نوع البروفايل'
+    }
+    
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        for sheet_name, df in dataframes_dict.items():
+            if df is not None and not df.empty:
+                df_brief = df.copy()
+                
+                # التأكد من توفر كافة الأعمدة حتى لا ينهار الكود إذا غاب حقل من قاعدة البيانات
+                for col in target_columns.keys():
+                    if col not in df_brief.columns:
+                        df_brief[col] = "غير متوفر"
+                        
+                # تصفية الأعمدة وإعادة ترتيبها بحسب رغبتك الصريحة
+                df_brief = df_brief[list(target_columns.keys())]
+                # ترجمة العناوين للعربية
+                df_brief = df_brief.rename(columns=target_columns)
+                
+                # حفظ في الشيت
+                df_brief.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+                worksheet = writer.sheets[sheet_name[:31]]
+                
+                header_fill = PatternFill(start_color=tab_colors.get(sheet_name, "2A5298"), 
+                                         end_color=tab_colors.get(sheet_name, "2A5298"), 
+                                         fill_type="solid")
+                header_font = Font(color="FFFFFF", bold=True, size=11)
+                
+                for col in range(1, len(df_brief.columns) + 1):
+                    cell = worksheet.cell(row=1, column=col)
+                    cell.fill = header_fill
+                    cell.font = header_font
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+                
+                for col in range(1, len(df_brief.columns) + 1):
+                    column_letter = get_column_letter(col)
+                    max_length = 0
+                    for row in range(1, len(df_brief) + 2):
+                        cell_value = worksheet.cell(row=row, column=col).value
+                        if cell_value:
+                            max_length = max(max_length, len(str(cell_value)))
+                    worksheet.column_dimensions[column_letter].width = min(max_length + 3, 35)
+                
+                for row in range(2, len(df_brief) + 2):
+                    for col in range(1, len(df_brief.columns) + 1):
+                        cell = worksheet.cell(row=row, column=col)
+                        if row % 2 == 0:
+                            cell.fill = PatternFill(start_color="F9F9F9", end_color="F9F9F9", fill_type="solid")
+                        cell.alignment = Alignment(horizontal="center", vertical="center")
+            else:
+                empty_df = pd.DataFrame({"ملاحظة": ["لا توجد بيانات لتلخيصها في هذا القسم"]})
+                empty_df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+                
+    output.seek(0)
+    return output.getvalue()
     
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         for sheet_name, df in dataframes_dict.items():
@@ -358,13 +441,16 @@ def show():
     </div>
     """, unsafe_allow_html=True)
 
-    col1, col2 = st.columns([1, 1])
+    col1, col2, col3 = st.columns([1, 1.2, 1.5])
     with col1:
         if st.button("🔄 تحديث الصفحة", use_container_width=True):
             st.rerun()
     with col2:
-        if st.button("📥 تصدير التقارير إلى Excel", use_container_width=True):
+        if st.button("📥 تصدير الملف الكامل Excel", use_container_width=True):
             st.session_state.show_export_pharmacy = True
+    with col3:
+        if st.button("📋 تصدير ملف مختصر Excel", use_container_width=True):
+            st.session_state.show_export_brief_pharmacy = True
 
     df = fetch_active_items(pharmacy_name, include_hidden=False)
     
@@ -456,6 +542,29 @@ def show():
         )
         st.session_state.show_export_pharmacy = False
 
+    # 📋 تنفيذ تصدير ملف الـ Excel المختصر بالأعمدة المحددة
+    if st.session_state.get('show_export_brief_pharmacy', False):
+        excel_sheets_brief = {
+            "الاضافات والطلبات المفقودة": branch_add_df,
+            "الارجاعات والزيادات": branch_ret_df,
+            "فواتير معلقة بين الفروع": conflicts_df,
+            "فواتير بعد اخر طلب": post_cutoff_df,
+            "بانتظار الدفع": payment_df,
+            "الملغيات والمسترجعات": cancelled_df,
+            "الفواتير القديمة (أرشيف)": old_invoices_df,
+            "الطلبات القديمة": old_orders_df
+        }
+        excel_data_brief = export_to_excel_brief(excel_sheets_brief)
+        st.download_button(
+            label="📊 تحميل ملف Excel المختصر للفرع",
+            data=excel_data_brief,
+            type="primary",
+            file_name=f"Brief_Report_{pharmacy_name.replace(' ', '_')}_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+        st.session_state.show_export_brief_pharmacy = False
+        
     # تفعيل شاشات الألسنة وبناء التبويبات المرئية
     tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices = st.tabs([
         f"📥 الإضافات والطلبات المفقودة ({completed_additions_merged}/{total_additions_merged})" if total_additions_merged > 0 else "📥 الإضافات والطلبات المفقودة (0)",
