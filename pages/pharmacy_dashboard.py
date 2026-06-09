@@ -181,7 +181,7 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             if case_type in ['addition', 'orphan_salla']:
                 phone = row.get('customer_phone', 'N/A')
                 if pd.notna(phone) and str(phone).strip() not in ["", "nan", "None"]:
-                    st.markdown(f"- **📱 جوال العميل:** `{phone}`")
+                    st.markdown(f"- **📱 جوال العميل:** `{customer_phone}`")
             """)
             
         with col2:
@@ -200,7 +200,7 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             if case_type in ['return', 'orphan_abc']:
                 profile = row.get('profile_type', 'N/A')
                 if pd.notna(profile) and str(profile).strip() not in ["", "nan", "None"]:
-                    st.markdown(f"- **📄 نوع البروفايل:** `{profile}`")
+                    st.markdown(f"- **📄 نوع البروفايل:** `{profile_type}`")
             """)
        
         if duplicates:
