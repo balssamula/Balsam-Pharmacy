@@ -66,10 +66,10 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
     }
 
 def export_to_excel_brief(dataframes_dict: dict) -> bytes:
-    """تصدير ملف إكسيل مختصر يقتصر فقط على (الاضافات - الارجاعات - التداخلات)"""
+    """تصدير ملف إكسيل مختصر بأعمدة محددة مقتصراً فقط وحصرياً على التبويبات الثلاثة الأساسية"""
     output = BytesIO()
     
-    # التبويبات المسموح بها فقط في الملف المختصر
+    # حصر التبويبات الثلاثة المستهدفة بالاسم الدقيق لمنع استخراج أي شيت آخر (سواء صيدلي أو إدارة)
     allowed_tabs = ["الاضافات والطلبات المفقودة", "الارجاعات والزيادات", "فواتير معلقة بين الفروع"]
     
     tab_colors = {
@@ -84,16 +84,13 @@ def export_to_excel_brief(dataframes_dict: dict) -> bytes:
         'order_number': 'رقم الطلب',
         'invoice_number': 'رقم الفاتورة',
         'customer_phone': 'رقم جوال العميل',
-        'customer_name': 'إسم العميل',
         'sku': 'رقم المنتج',
         'product_name': 'اسم المنتج',
         'salla_qty': 'كمية سلة',
         'abc_qty': 'كمية abc',
-        'difference': 'الفرق',
-        'total_amount': 'إجمالي الطلب',
+        'diff_qty': 'الفرق',
         'abc_pharmacist_name': 'اسم الصيدلي',
-        'profile_type': 'نوع البروفايل',
-        'case_reason': 'سبب الحالة'
+        'profile_type': 'نوع البروفايل'
     }
     
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -101,79 +98,49 @@ def export_to_excel_brief(dataframes_dict: dict) -> bytes:
             df = dataframes_dict.get(sheet_name)
             if df is not None and not df.empty:
                 df_brief = df.copy()
-                # حساب الفرق
+                
                 salla_q = pd.to_numeric(df_brief.get('salla_qty', 0), errors='coerce').fillna(0).astype(int)
                 abc_q = pd.to_numeric(df_brief.get('abc_qty', 0), errors='coerce').fillna(0).astype(int)
                 df_brief['diff_qty'] = salla_q - abc_q
                 
-                # التأكد من وجود الأعمدة
                 for col in target_columns.keys():
-                    if col not in df_brief.columns: df_brief[col] = "N/A"
+                    if col not in df_brief.columns:
+                        df_brief[col] = "غير متوفر"
+                        
+                df_brief = df_brief[list(target_columns.keys())]
+                df_brief = df_brief.rename(columns=target_columns)
                 
-                df_brief = df_brief[list(target_columns.keys())].rename(columns=target_columns)
                 df_brief.to_excel(writer, sheet_name=sheet_name[:31], index=False)
-                
-                # تنسيق الشيت (الألوان والأعمدة)
                 worksheet = writer.sheets[sheet_name[:31]]
+                
                 header_fill = PatternFill(start_color=tab_colors.get(sheet_name, "2A5298"), fill_type="solid")
-                header_font = Font(color="FFFFFF", bold=True)
+                header_font = Font(color="FFFFFF", bold=True, size=11)
+                
                 for col in range(1, len(df_brief.columns) + 1):
-                    cell = worksheet.cell(row=1, column=col)
-                    cell.fill = header_fill
-                    cell.font = header_font
-                    worksheet.column_dimensions[get_column_letter(col)].width = 20
-            else:
-                # إنشاء شيت فارغ في حال عدم وجود بيانات للتبويب المطلوب
-                pd.DataFrame({"ملاحظة": ["لا توجد بيانات لهذا التبويب"]}).to_excel(writer, sheet_name=sheet_name[:31], index=False)
-                
-    output.seek(0)
-    return output.getvalue()
-    
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        for sheet_name, df in dataframes_dict.items():
-            if df is not None and not df.empty:
-                # تصفية واختيار الأعمدة الموجودة بالفعل في الـ dataframe فقط لمنع الخطأ
-                available_cols = [col for col in columns_mapping.keys() if col in df.columns]
-                df_filtered = df[available_cols].copy()
-                
-                # إعادة تسمية الأعمدة إلى اللغة العربية
-                df_filtered = df_filtered.rename(columns=columns_mapping)
-                
-                # كتابة الشيت
-                df_filtered.to_excel(writer, sheet_name=sheet_name[:31], index=False)
-                
-                worksheet = writer.sheets[sheet_name[:31]]
-                
-                header_fill = PatternFill(start_color=tab_colors.get(sheet_name, "2A5298"), 
-                                         end_color=tab_colors.get(sheet_name, "2A5298"), 
-                                         fill_type="solid")
-                header_font = Font(color="FFFFFF", bold=True, size=12)
-                
-                for col in range(1, len(df_filtered.columns) + 1):
                     cell = worksheet.cell(row=1, column=col)
                     cell.fill = header_fill
                     cell.font = header_font
                     cell.alignment = Alignment(horizontal="center", vertical="center")
                 
-                for col in range(1, len(df_filtered.columns) + 1):
+                for col in range(1, len(df_brief.columns) + 1):
                     column_letter = get_column_letter(col)
                     max_length = 0
-                    for row in range(1, len(df_filtered) + 2):
+                    for row in range(1, len(df_brief) + 2):
                         cell_value = worksheet.cell(row=row, column=col).value
                         if cell_value:
                             max_length = max(max_length, len(str(cell_value)))
-                    worksheet.column_dimensions[column_letter].width = min(max_length + 4, 40)
+                    worksheet.column_dimensions[column_letter].width = min(max_length + 3, 35)
                 
-                for row in range(2, len(df_filtered) + 2):
-                    for col in range(1, len(df_filtered.columns) + 1):
+                for row in range(2, len(df_brief) + 2):
+                    for col in range(1, len(df_brief.columns) + 1):
                         cell = worksheet.cell(row=row, column=col)
                         if row % 2 == 0:
-                            cell.fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+                            cell.fill = PatternFill(start_color="F9F9F9", end_color="F9F9F9", fill_type="solid")
                         cell.alignment = Alignment(horizontal="center", vertical="center")
             else:
-                empty_df = pd.DataFrame({"ملاحظة": ["لا توجد بيانات في هذا التبويب"]})
+                empty_df = pd.DataFrame({"ملاحظة": ["لا توجد بيانات معلقة في هذا القسم حالياً"]})
                 empty_df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
-    
+                
     output.seek(0)
     return output.getvalue()
 
@@ -572,12 +539,13 @@ def show():
         render_case_cards_pharmacy(branch_ret_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="ret")
     with tab_conflicts:
         if not conflicts_df.empty:
-            # استخدام enumerate لضمان أرقام فريدة ومستقلة لهذا التبويب
-            for i, (idx, row) in enumerate(conflicts_df.iterrows()): 
-                render_single_case_card(row, f"conf_{i}", allow_actions=True, pharmacist_name=pharmacist_name, pharmacy_name=pharmacy_name)
+            for i, (orig_idx, row) in enumerate(conflicts_df.iterrows()): 
+                render_single_case_card(row, i, allow_actions=True, pharmacist_name=pharmacist_name, pharmacy_name=pharmacy_name, tab_id="conf")
         else: 
             st.success("🎉 ممتاز! لا توجد فواتير معلقة أو متداخلة مع فروع أخرى لفرعكم الحالي.")
+    with tab_post_cutoff: 
+        render_case_cards_pharmacy(post_cutoff_df, False, pharmacist_name, pharmacy_name, tab_id="cutoff")
     with tab_payment: 
         render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name, tab_id="pay")
     with tab_cancelled: 
-        render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name, tab_id="can")
+        render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name, tab_id="cancel")
