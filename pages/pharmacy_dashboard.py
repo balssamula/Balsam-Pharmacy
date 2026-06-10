@@ -66,16 +66,18 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
     }
 
 def export_to_excel_brief(dataframes_dict: dict) -> bytes:
-    """تصدير ملف إكسيل مختصر بأعمدة محددة وموحدة لجميع التبويبات"""
+    """تصدير ملف إكسيل مختصر يقتصر فقط على (الاضافات - الارجاعات - التداخلات)"""
     output = BytesIO()
+    
+    # التبويبات المسموح بها فقط في الملف المختصر
+    allowed_tabs = ["الاضافات والطلبات المفقودة", "الارجاعات والزيادات", "فواتير معلقة بين الفروع"]
     
     tab_colors = {
         "الاضافات والطلبات المفقودة": "4472C4",
         "الارجاعات والزيادات": "ED7D31",
-        "فواتير معلقة بين الفروع": "9B59B6",
+        "فواتير معلقة بين الفروع": "9B59B6"
     }
     
-    # تحديد الأعمدة المطلوبة بالترتيب المطلوب وترجمتها للعربية بشكل متناسق
     target_columns = {
         'order_date': 'تاريخ الطلب',
         'invoice_date': 'تاريخ الفاتورة',
@@ -87,62 +89,42 @@ def export_to_excel_brief(dataframes_dict: dict) -> bytes:
         'product_name': 'اسم المنتج',
         'salla_qty': 'كمية سلة',
         'abc_qty': 'كمية abc',
-        'difference': 'الفرق', # سيتم حسابه بشكل مباشر وصريح
+        'difference': 'الفرق',
         'total_amount': 'إجمالي الطلب',
         'abc_pharmacist_name': 'اسم الصيدلي',
         'profile_type': 'نوع البروفايل',
-        'case_reason': 'سبب الحالة',
-        'payment_method': 'طريقة الدفع'
+        'case_reason': 'سبب الحالة'
     }
     
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        for sheet_name, df in dataframes_dict.items():
+        for sheet_name in allowed_tabs:
+            df = dataframes_dict.get(sheet_name)
             if df is not None and not df.empty:
                 df_brief = df.copy()
+                # حساب الفرق
+                salla_q = pd.to_numeric(df_brief.get('salla_qty', 0), errors='coerce').fillna(0).astype(int)
+                abc_q = pd.to_numeric(df_brief.get('abc_qty', 0), errors='coerce').fillna(0).astype(int)
+                df_brief['diff_qty'] = salla_q - abc_q
                 
-                # التأكد من توفر كافة الأعمدة حتى لا ينهار الكود إذا غاب حقل من قاعدة البيانات
+                # التأكد من وجود الأعمدة
                 for col in target_columns.keys():
-                    if col not in df_brief.columns:
-                        df_brief[col] = "غير متوفر"
-                        
-                # تصفية الأعمدة وإعادة ترتيبها بحسب رغبتك الصريحة
-                df_brief = df_brief[list(target_columns.keys())]
-                # ترجمة العناوين للعربية
-                df_brief = df_brief.rename(columns=target_columns)
+                    if col not in df_brief.columns: df_brief[col] = "N/A"
                 
-                # حفظ في الشيت
+                df_brief = df_brief[list(target_columns.keys())].rename(columns=target_columns)
                 df_brief.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+                
+                # تنسيق الشيت (الألوان والأعمدة)
                 worksheet = writer.sheets[sheet_name[:31]]
-                
-                header_fill = PatternFill(start_color=tab_colors.get(sheet_name, "2A5298"), 
-                                         end_color=tab_colors.get(sheet_name, "2A5298"), 
-                                         fill_type="solid")
-                header_font = Font(color="FFFFFF", bold=True, size=11)
-                
+                header_fill = PatternFill(start_color=tab_colors.get(sheet_name, "2A5298"), fill_type="solid")
+                header_font = Font(color="FFFFFF", bold=True)
                 for col in range(1, len(df_brief.columns) + 1):
                     cell = worksheet.cell(row=1, column=col)
                     cell.fill = header_fill
                     cell.font = header_font
-                    cell.alignment = Alignment(horizontal="center", vertical="center")
-                
-                for col in range(1, len(df_brief.columns) + 1):
-                    column_letter = get_column_letter(col)
-                    max_length = 0
-                    for row in range(1, len(df_brief) + 2):
-                        cell_value = worksheet.cell(row=row, column=col).value
-                        if cell_value:
-                            max_length = max(max_length, len(str(cell_value)))
-                    worksheet.column_dimensions[column_letter].width = min(max_length + 3, 35)
-                
-                for row in range(2, len(df_brief) + 2):
-                    for col in range(1, len(df_brief.columns) + 1):
-                        cell = worksheet.cell(row=row, column=col)
-                        if row % 2 == 0:
-                            cell.fill = PatternFill(start_color="F9F9F9", end_color="F9F9F9", fill_type="solid")
-                        cell.alignment = Alignment(horizontal="center", vertical="center")
+                    worksheet.column_dimensions[get_column_letter(col)].width = 20
             else:
-                empty_df = pd.DataFrame({"ملاحظة": ["لا توجد بيانات لتلخيصها في هذا القسم"]})
-                empty_df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+                # إنشاء شيت فارغ في حال عدم وجود بيانات للتبويب المطلوب
+                pd.DataFrame({"ملاحظة": ["لا توجد بيانات لهذا التبويب"]}).to_excel(writer, sheet_name=sheet_name[:31], index=False)
                 
     output.seek(0)
     return output.getvalue()
@@ -321,14 +303,16 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
         st.markdown("</div>", unsafe_allow_html=True)
         
         # ⭐ تعديل المفتاح ليصبح فريداً تماماً من خلال دمج نوع الحالة (case_type)
-        note_key = f"note_{case_type}_{idx}_{row.get('order_number', '')}_{row.get('sku', '')}"
-        note_value = st.text_area("📝 :ملحوظة الصيدلي", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
-        
+        note_key = f"note_{tab_id}_{idx}_{row.get('order_number', '0')}_{row.get('sku', '0')}"
+    
+        note_value = st.text_area("📝 ملحوظة الصيدلي:", value=row.get("pharmacist_note", "") or "", key=note_key, height=70)
+    
+        # تحديث مفاتيح الأزرار أيضاً
         btn_col1, btn_col2, btn_col3 = st.columns([1, 1.5, 1.5])
         with btn_col1:
-            if st.button("💾 حفظ الملحوظة", key=f"save_{note_key}", use_container_width=True):
-                save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value)
-                st.toast("📋 تم حفظ الملاحظة بنجاح!", icon="💾")
+            if st.button("💾 حفظ", key=f"btn_save_{note_key}", use_container_width=True):
+                save_case_note(row['order_number'], row['sku'], pharmacy_name, row.get('case_type'), note_value)
+                st.toast("تم الحفظ")
                 
         if allow_actions and row.get("status") != "تم":
             if case_type == "branch_conflict":
@@ -355,7 +339,14 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
                     
         st.markdown("---")
 
-def render_old_orders_pharmacy(old_orders_df, pharmacy_name, pharmacist_name):
+def render_case_cards_pharmacy(df, allow_actions, pharmacist_name, pharmacy_name, tab_id=""):
+    if df is not None and not df.empty:
+        # استخدام enumerate لإنتاج i يبدأ من 0 لكل تبويب بشكل مستقل
+        for i, (orig_idx, row) in enumerate(df.iterrows()):
+            render_single_case_card(row, i, allow_actions, pharmacist_name, pharmacy_name, tab_id=tab_id)
+    else:
+        st.success("🎉 التبويب الحالي مطابق بالكامل.")
+        
     if old_orders_df.empty: return
     for idx, row in old_orders_df.iterrows():
         days_old = int(row['days_old'])
@@ -579,8 +570,10 @@ def show():
         f"📅 طلبات قديمة ({len(old_orders_df)})", f"🧾 فواتير قديمة ({len(old_invoices_df)})"
     ])
     
-    with tab_additions: render_case_cards_pharmacy(branch_add_df, allow_actions, pharmacist_name, pharmacy_name)
-    with tab_returns: render_case_cards_pharmacy(branch_ret_df, allow_actions, pharmacist_name, pharmacy_name)
+    with tab_additions: 
+        render_case_cards_pharmacy(branch_add_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="add")
+    with tab_returns: 
+        render_case_cards_pharmacy(branch_ret_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="ret")
     with tab_conflicts:
         if not conflicts_df.empty:
             # استخدام enumerate لضمان أرقام فريدة ومستقلة لهذا التبويب
@@ -588,9 +581,7 @@ def show():
                 render_single_case_card(row, f"conf_{i}", allow_actions=True, pharmacist_name=pharmacist_name, pharmacy_name=pharmacy_name)
         else: 
             st.success("🎉 ممتاز! لا توجد فواتير معلقة أو متداخلة مع فروع أخرى لفرعكم الحالي.")
-    with tab_post_cutoff: render_case_cards_pharmacy(post_cutoff_df, False, pharmacist_name, pharmacy_name)
-    with tab_payment: render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name)
-    with tab_cancelled: render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name)
-    with tab_completed: render_completed_table(completed_df, is_admin=False)
-    with tab_old_orders: render_old_orders_pharmacy(old_orders_df, pharmacy_name, pharmacist_name)
-    with tab_old_invoices: render_old_invoices_pharmacy(old_invoices_df, pharmacy_name, pharmacist_name)
+    with tab_payment: 
+        render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name, tab_id="pay")
+    with tab_cancelled: 
+        render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name, tab_id="can")
