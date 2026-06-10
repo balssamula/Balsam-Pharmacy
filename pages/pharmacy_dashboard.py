@@ -177,8 +177,8 @@ def export_to_excel_brief(dataframes_dict: dict) -> bytes:
     output.seek(0)
     return output.getvalue()
 
-def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_name):
-    """عرض بطاقة حالة ديناميكية بالكامل تنقاد خلف إشارة الفرق الفعلي"""
+def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_name, tab_id=""):
+    """عرض بطاقة حالة ديناميكية بالكامل تنقاد خلف إشارة الفرق الفعلي ومحمية من تكرار المفاتيح"""
     salla_numeric = int(row.get('salla_qty', 0)) if pd.notna(row.get('salla_qty', 0)) else 0
     abc_numeric = int(row.get('abc_qty', 0)) if pd.notna(row.get('abc_qty', 0)) else 0
     diff_value = salla_numeric - abc_numeric
@@ -243,16 +243,15 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
         with col1:
             st.markdown(f"""
             - **📋 رقم الطلب:** {row.get('order_number', 'N/A')}
-            - **🏷️ SKU:** {row.get('sku', 'N/A')}
+            - **🏷️ SKU / رقم المنتج:** {row.get('sku', 'N/A')}
             - **📦 المنتج:** {str(row.get('product_name', 'N/A'))[:60]}
             """)
-
-            # 📱 إضافة رقم الجوال فقط إذا كانت الحالة إضافة أو طلب مفقود
+            
             if case_type in ['addition', 'orphan_salla']:
                 phone = row.get('customer_phone', 'N/A')
                 if pd.notna(phone) and str(phone).strip() not in ["", "nan", "None"]:
                     st.markdown(f"- **📱 جوال العميل:** `{phone}`")
-                    
+            
         with col2:
             st.markdown(f"""
             - **🛒 كمية سلة:** {salla_numeric}
@@ -260,19 +259,19 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             - **📊 الفرق:** <span style="{diff_style}">{'+' if diff_value > 0 else ''}{diff_value}</span>
             - **🎯 المطلوب:** {required_action}
             """, unsafe_allow_html=True)
+            
         with col3:
             st.markdown(f"""
             - **🧾 رقم الفاتورة:** {row.get('invoice_number', 'N/A')}
             - **👤 الصيدلي:** {row.get('abc_pharmacist_name', 'غير معروف')}
             - **⚙️ حالة الطلب:** {order_status}
             """)
-
-            # 📄 إضافة نوع البروفايل بناءً على رقم الفاتورة فقط إذا كانت الحالة إرجاع أو زيادة
+            
             if case_type in ['return', 'orphan_abc']:
                 profile = row.get('profile_type', 'N/A')
                 if pd.notna(profile) and str(profile).strip() not in ["", "nan", "None"]:
                     st.markdown(f"- **📄 نوع البروفايل:** `{profile}`")
-                    
+            
         if duplicates:
             dup_warning_html = (
                 '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem; direction:rtl; text-align:right;">'
@@ -302,28 +301,25 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             
         st.markdown("</div>", unsafe_allow_html=True)
         
-        # ⭐ تعديل المفتاح ليصبح فريداً تماماً من خلال دمج نوع الحالة (case_type)
-        note_key = f"note_{tab_id}_{idx}_{row.get('order_number', '0')}_{row.get('sku', '0')}"
-    
-        note_value = st.text_area("📝 ملحوظة الصيدلي:", value=row.get("pharmacist_note", "") or "", key=note_key, height=70)
-    
-        # تحديث مفاتيح الأزرار أيضاً
+        note_key = f"note_{tab_id}_{case_type}_{idx}_{row.get('order_number', '')}_{row.get('sku', '')}"
+        note_value = st.text_area("📝 :ملحوظة الصيدلي", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
+        
         btn_col1, btn_col2, btn_col3 = st.columns([1, 1.5, 1.5])
         with btn_col1:
-            if st.button("💾 حفظ", key=f"btn_save_{note_key}", use_container_width=True):
-                save_case_note(row['order_number'], row['sku'], pharmacy_name, row.get('case_type'), note_value)
-                st.toast("تم الحفظ")
+            if st.button("💾 حفظ الملحوظة", key=f"save_{note_key}", use_container_width=True):
+                save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value)
+                st.toast("📋 تم حفظ الملاحظة بنجاح!", icon="💾")
                 
         if allow_actions and row.get("status") != "تم":
             if case_type == "branch_conflict":
                 with btn_col2:
-                    if st.button("📥 تأكيد الإضافة (تم بيع الصنف من فرعي)", key=f"conf_add_{idx}_{note_key}", use_container_width=True):
+                    if st.button("📥 تأكيد الإضافة (تم بيع الصنف من فرعي)", key=f"conf_add_{note_key}", use_container_width=True):
                         save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, f"[فرع صحيح - تم الإضافة للمخزن] | {note_value}")
                         mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
                         st.toast("✅ تم اعتماد الفرع كقيد صحيح وإغلاق التسوية!", icon="📥")
                         st.rerun()
                 with btn_col3:
-                    if st.button("🔄 تأكيد الإرجاع (لم يتم بيع الصنف من فرعي)", key=f"conf_ret_{idx}_{note_key}", use_container_width=True):
+                    if st.button("🔄 تأكيد الإرجاع (لم يتم بيع الصنف من فرعي)", key=f"conf_ret_{note_key}", use_container_width=True):
                         save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, f"[فرع مخطئ - جاري عكس الفاتورة على ABC] | {note_value}")
                         mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
                         st.toast("🔄 تم تسجيل الخطأ وإصدار قيد الإرجاع المعاكس بنجاح!", icon="🔄")
@@ -340,12 +336,12 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
         st.markdown("---")
 
 def render_case_cards_pharmacy(df, allow_actions, pharmacist_name, pharmacy_name, tab_id=""):
+    """رسم وإدارة بطاقات العرض للتبويبات العادية مع دعم معامل الـ tab_id لمنع التكرار النحوي"""
     if df is not None and not df.empty:
-        # استخدام enumerate لإنتاج i يبدأ من 0 لكل تبويب بشكل مستقل
         for i, (orig_idx, row) in enumerate(df.iterrows()):
             render_single_case_card(row, i, allow_actions, pharmacist_name, pharmacy_name, tab_id=tab_id)
     else:
-        st.success("🎉 التبويب الحالي مطابق بالكامل.")
+        st.success("🎉 ممتاز! التبويب الحالي متطابق بالكامل ولا توجد أي فروقات مخزنية معلقة هنا.")
         
     if old_orders_df.empty: return
     for idx, row in old_orders_df.iterrows():
