@@ -25,7 +25,6 @@ def create_template_excel():
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_template.to_excel(writer, index=False, sheet_name="نموذج العروض")
         
-        # تنسيق السيرفر والنموذج بشكل سريع
         worksheet = writer.sheets["نموذج العروض"]
         header_fill = PatternFill(start_color="1F7A8C", fill_type="solid")
         header_font = Font(color="FFFFFF", bold=True, name="Segoe UI")
@@ -39,13 +38,18 @@ def create_template_excel():
     return output.getvalue()
 
 def style_excel_professionally(df, output_bytesio):
-    """إعادة فتح ملف الإكسيل وتطبيق تنسيق تجميلي واحترافي مكثف بألوان مخصصة وعمود سعر عريض"""
+    """إعادة فتح ملف الإكسيل وتطبيق تنسيق تجميلي واحترافي مكثف بألوان مخصصة، عمود سعر عريض، وتثبيت الصف الأول مع الفلترة"""
     output_styled = BytesIO()
     
-    # تحميل الملف المكتوب لتعديل ستايل الخلايا
     with pd.ExcelWriter(output_styled, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name="تقرير العروض الذكي")
         worksheet = writer.sheets["تقرير العروض الذكي"]
+        
+        # ✨ [تحديث جوهري]: تثبيت الصف الأول (العناوين) عند التمرير لأسفل
+        worksheet.freeze_panes = "A2"
+        
+        # ✨ [تحديث جوهري]: تفعيل أزرار الفلترة والتصفية لجميع الأعمدة تلقائياً
+        worksheet.auto_filter.ref = worksheet.dimensions
         
         # إعدادات الألوان والخطوط والحدود
         header_fill = PatternFill(start_color="1F7A8C", end_color="1F7A8C", fill_type="solid") # لون كحلي مميز للعنوان
@@ -55,7 +59,6 @@ def style_excel_professionally(df, output_bytesio):
         normal_font = Font(size=11, name="Segoe UI")
         
         center_align = Alignment(horizontal="center", vertical="center")
-        right_align = Alignment(horizontal="right", vertical="center")
         
         thin_border = Border(
             left=Side(style='thin', color='D3D3D3'),
@@ -94,7 +97,7 @@ def style_excel_professionally(df, output_bytesio):
         for col in worksheet.columns:
             max_len = max(len(str(cell.value or '')) for cell in col)
             col_letter = get_column_letter(col[0].column)
-            worksheet.column_dimensions[col_letter].width = max(max_len + 4, 15)
+            worksheet.column_dimensions[col_letter].width = max(max_len + 5, 18) # إضافة مساحة إضافية لزر الفلترة لئلا يغطي النص
             
     output_styled.seek(0)
     return output_styled.getvalue()
@@ -103,7 +106,6 @@ def calculate_promotions_stream(uploaded_file):
     """حساب وتفصيل العروض الترويجية بشكل آمن مع دمج أعمدة المنتج والـ SKU"""
     df = pd.read_excel(uploaded_file)
     
-    # التحقق من وجود الأعمدة المحدثة في الملف المرفوع
     required_cols = ["رقم المنتج (SKU)", "اسم المنتج", "عنوان العرض", "السعر غير شامل الضريبة", "الضريبة"]
     for col in required_cols:
         if col not in df.columns:
@@ -167,22 +169,20 @@ def calculate_promotions_stream(uploaded_file):
         discount_val_list.append(round(disc_val, 2))
         price_after_list.append(round(p_after, 2))
 
-    # دمج وترتيب الأعمدة المحسوبة داخل جدول البيانات الرئيسي
     df["عدد حبات العرض"] = total_qty_list
     df["نسبة الخصم الإجمالية %"] = discount_pct_list
     df["السعر قبل العرض شامل الضريبة"] = price_before_list
     df["قيمة الخصم شامل الضريبة"] = discount_val_list
     df["السعر بعد العرض شامل الضريبة"] = price_after_list
 
-    # إرسال الملف المكتمل لتجميله وتنسيقه باحترافية كاملة
     styled_excel_bytes = style_excel_professionally(df, None)
     return styled_excel_bytes, df
 
 def show():
-    st.markdown("<div class='hero'><h1>🏷️ حاسبة ومُنسّق العروض الترويجية المطور</h1><p>تصدير تقارير محاسبية منسقة بالكامل للأعضاء والإدارة مع تمييز دقيق لبيانات أسماء المنتجات والأسعار العريضة</p></div>", unsafe_allow_html=True)
+    st.markdown("<div class='hero'><h1>🏷️ حاسبة ومُنسّق العروض الترويجية المطور</h1><p>تصدير تقارير محاسبية منسقة بالكامل للأعضاء والإدارة مع تثبيت الصف الأول وخيارات الفلترة الشاملة</p></div>", unsafe_allow_html=True)
     
     st.markdown("### 📋 الخطوة 1: تنزيل نموذج الهيكل الجديد")
-    st.info("قم بتحميل الملف المفرغ أدناه والمطور، والذي يضم الآن أعمدة (رقم المنتج SKU واسم المنتج):")
+    st.info("قم بتحميل الملف المفرغ أدناه والمطور، والذي يضم أعمدة (رقم المنتج SKU واسم المنتج):")
     
     template_bytes = create_template_excel()
     st.download_button(
@@ -199,10 +199,10 @@ def show():
     uploaded_file = st.file_uploader("ارفع ملف العروض المكتمل بعد تعبئته بناءً على هيكل النموذج الجديد", type=["xlsx"])
     
     if uploaded_file is not None:
-        with st.spinner("⏳ جاري تفكيك العروض وتطبيق التنسيق الجمالي على جداول الأسعار العريضة..."):
+        with st.spinner("⏳ جاري تفكيك العروض وتطبيق التنسيقات الفاخرة وتثبيت الهيدر..."):
             try:
                 excel_bytes, result_df = calculate_promotions_stream(uploaded_file)
-                st.success("✨ تم الحساب وإعادة تنسيق الملف بجدول احترافي بالكامل وجعل عمود السعر عريضاً (Bold)!")
+                st.success("✨ تم الحساب وتثبيت عناوين الصف الأول بنجاح مع إدراج الفلاتر الذكية لجميع الأعمدة!")
                 
                 st.markdown("### 📊 معاينة تفاعلية سريعة للملف الجاهز للتنزيل:")
                 st.dataframe(result_df.head(10), use_container_width=True)
