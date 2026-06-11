@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import sqlite3
 from io import BytesIO
 from datetime import datetime
 from openpyxl import load_workbook
@@ -8,8 +9,8 @@ from openpyxl.utils import get_column_letter
 from utils.database import (
     fetch_active_items, get_completed_items, get_tab_completed_counts, 
     get_old_orders, get_old_invoices, get_old_invoices_stats,
-    check_duplicate_across_branches, get_all_duplicate_items,
-    save_case_note, mark_case_done
+    check_duplicate_across_branches, save_case_note, mark_case_done,
+    DB_PATH
 )
 from utils.helpers import (
     is_cancelled_or_returned_status, is_pending_payment_status, 
@@ -38,8 +39,7 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
         "فواتير بعد اخر طلب": "9B59B6",
         "بانتظار الدفع": "3498DB",
         "الملغيات والمسترجعات": "E74C3C",
-        "الفواتير القديمة (أرشيف)": "6c757d",
-        "الطلبات القديمة": "6c757d"
+        "تم الانتهاء": "2ECC71"
     }
     
     columns_mapping = {
@@ -85,7 +85,7 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
     return output.getvalue()
 
 def export_to_excel_brief(dataframes_dict: dict) -> bytes:
-    """تصدير ملف إكسيل مختصر مقتصراً فقط وحصرياً على التبويبات الثلاثة الأساسية بناءً على طلبك"""
+    """تصدير ملف إكسيل مختصر مقتصراً فقط وحصرياً على التبويبات الثلاثة الأساسية"""
     output = BytesIO()
     allowed_tabs = ["الاضافات والطلبات المفقودة", "الارجاعات والزيادات", "فواتير معلقة بين الفروع"]
     
@@ -157,29 +157,40 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
     order_status = row.get('order_status', 'غير متوفرة')
     invoice_date = row.get('invoice_date', '')
     order_date = row.get('order_date', '')
-    order_number = str(row.get('order_number', ''))
-    sku = str(row.get('sku', ''))
+    order_number = str(row.get('order_number', '')).strip()
+    sku = str(row.get('sku', '')).strip()
     
-    # 🔍 [استعلام فحص الفروع المزدوج الشامل]:
     exact_duplicates = []  
     shared_order_duplicates = []  
 
+    # 🔍 فحص دقيق ومباشر من قاعدة البيانات لضمان ظهور التنبيهين معاً
     try: 
+        # 1. التنبيه الأول الأصلي (نفس الطلب ونفس الصنف في فرع آخر)
         exact_duplicates = check_duplicate_across_branches(order_number, sku, pharmacy_name)
         
-        all_related = get_all_duplicate_items()  
-        if not all_related.empty:
-            matched = all_related[
-                (all_related['order_number'].astype(str) == order_number) & 
-                (all_related['pharmacy_name'] != pharmacy_name)
-            ]
-            for _, d_row in matched.iterrows():
-                if d_row['sku'] != sku:
-                    shared_order_duplicates.append({
-                        "pharmacy": d_row['pharmacy_name'],
-                        "sku": d_row['sku'],
-                        "status": d_row.get('status', 'معلق')
-                    })
+        # 2. التنبيه الثاني المطور (نفس رقم الطلب بالكامل في فروع أخرى حتى لو لأصناف مختلفة)
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # استعلام يبحث عن نفس رقم الطلب في أي فرع آخر وبأصناف مختلفة عن الصنف الحالي
+        cursor.execute("""
+            SELECT DISTINCT pharmacy_name, sku, status 
+            FROM active_items 
+            WHERE TRIM(order_number) = ? 
+              AND TRIM(pharmacy_name) != ? 
+              AND TRIM(sku) != ?
+              AND status != 'تم'
+        """, (order_number, pharmacy_name.strip(), sku))
+        
+        rows = cursor.fetchall()
+        for r in rows:
+            shared_order_duplicates.append({
+                "pharmacy": r["pharmacy_name"],
+                "sku": r["sku"],
+                "status": r["status"]
+            })
+        conn.close()
     except Exception as e:
         pass
     
@@ -207,9 +218,9 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             st.markdown(f"- **🧾 رقم الفاتورة:** {row.get('invoice_number', 'N/A')}\n- **👤 الصيدلي:** {row.get('abc_pharmacist_name', 'غير معروف')}\n- **⚙️ حالة الطلب:** {order_status}")
             if case_type in ['return', 'orphan_abc']:
                 profile = row.get('profile_type', 'N/A')
-                # 🛠️ [تم تعديل الغلط المطبعي هنا بتغيير phone إلى profile وسيعمل التطبيق مباشرة]
                 if pd.notna(profile) and str(profile).strip() not in ["", "nan", "None"]: st.markdown(f"- **📄 نوع البروفايل:** `{profile}`")
             
+        # 🚨 صندوق أحمر: في حال تكرار نفس الصنف ونفس الطلب
         if exact_duplicates:
             st.markdown(f"""
             <div style="background:#f8d7da; border-right:4px solid #dc3545; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.5rem;">
@@ -217,10 +228,11 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             </div>
             """, unsafe_allow_html=True)
             
+        # ⚠️ صندوق أصفر: في حال وجود فروع أخرى مرتبطة بنفس الطلب (بأصناف أخرى)
         if shared_order_duplicates:
-            dup_warning_html = '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.5rem; border-radius:10px; margin-bottom:0.5rem;"><span style="color:#856404; font-weight:bold;">⚠️ تنبيه الطلب المشترك: يوجد فرع آخر ارتبط بنفَس هذا الطلب (أصناف أخرى) للمراجعة والتأكد:</span>'
+            dup_warning_html = '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.5rem; border-radius:10px; margin-bottom:0.5rem;"><span style="color:#856404; font-weight:bold;">⚠️ تنبيه الطلب المشترك: يوجد فرع آخر أصدر فاتورة لنفس رقم هذا الطلب (أصناف أخرى):</span>'
             for dup in shared_order_duplicates: 
-                dup_warning_html += f'<div style="font-size:0.85rem; color:#66521a; margin-top:2px;">🏥 <strong>{dup.get("pharmacy", "غير معروف")}</strong> | الصنف المعالج: {dup.get("sku", "صنف آخر")}</div>'
+                dup_warning_html += f'<div style="font-size:0.85rem; color:#66521a; margin-top:2px;">🏥 <strong>{dup.get("pharmacy")}</strong> | الصنف الآخر: {dup.get("sku")}</div>'
             st.markdown(dup_warning_html + '</div>', unsafe_allow_html=True)
             
         st.markdown("</div>", unsafe_allow_html=True)
