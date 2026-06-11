@@ -320,7 +320,7 @@ def show():
         st.download_button(label="📊 تحميل ملف Excel المختصر", data=excel_data_brief, file_name=f"Brief_Report_{pharmacy_name}.xlsx", use_container_width=True)
         st.session_state.show_export_brief_pharmacy = False
         
-    tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled = st.tabs([
+    tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed = st.tabs([
         f"📥 الإضافات والطلبات ({completed_additions_merged}/{total_additions_merged})",
         f"📤 الإرجاعات والزيادات ({completed_returns_merged}/{total_returns_merged})",
         f"📊 فواتير معلقة بين الفروع ({completed_conflicts}/{total_conflicts})", 
