@@ -45,6 +45,14 @@ def show():
             font-weight: 700;
             margin: 0.2rem;
         }
+        .price-cell {
+            background: #dff7e8;
+            color: #0f7a3a;
+            font-weight: bold;
+            padding: 0.2rem 0.5rem;
+            border-radius: 8px;
+            display: inline-block;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -56,12 +64,12 @@ def show():
     """, unsafe_allow_html=True)
 
     # رفع ملف العروض
-    st.subheader("📂 رفع ملف العروض")
+    st.subheader("📂 رفع ملف Excel")
     
     uploaded_file = st.file_uploader(
-        "قم برفع ملف Excel الذي يحتوي على العروض",
+        "قم برفع ملف Excel الذي يحتوي على العروض والأسعار المخفضة",
         type=["xlsx", "xls"],
-        help="الملف يجب أن يحتوي على ورقة باسم 'عرض خاص' أو 'العروض'"
+        help="الملف يجب أن يحتوي على ورقة 'عرض خاص' وورقة 'سعر مخفض'"
     )
     
     if uploaded_file is not None:
@@ -72,61 +80,87 @@ def show():
             
             # البحث عن ورقة العروض
             offers_sheet = None
+            discounted_sheet = None
+            
             for sheet in sheet_names:
                 if "عرض خاص" in sheet or "عروض" in sheet:
                     offers_sheet = sheet
-                    break
+                if "سعر مخفض" in sheet or "مخفض" in sheet:
+                    discounted_sheet = sheet
             
             if not offers_sheet:
                 offers_sheet = sheet_names[0]
+            if not discounted_sheet and len(sheet_names) > 1:
+                discounted_sheet = sheet_names[1]
             
+            # قراءة البيانات
             df_raw = pd.read_excel(uploaded_file, sheet_name=offers_sheet)
+            df_discounted = pd.read_excel(uploaded_file, sheet_name=discounted_sheet) if discounted_sheet else pd.DataFrame()
             
-            # معالجة العروض
-            all_offers = []
+            # ✅ دالة محسنة لاستخراج أرقام المنتجات فقط (بدون سنوات التواريخ)
+            def extract_product_numbers(text):
+                """استخراج أرقام المنتجات فقط (4-6 أرقام، تتجنب السنوات 2024-2030)"""
+                if pd.isna(text):
+                    return []
+                text = str(text)
+                
+                # السنوات المستبعدة (2024-2030)
+                excluded_years = {'2024', '2025', '2026', '2027', '2028', '2029', '2030'}
+                
+                # نمط البحث: أرقام 4-6 خانات، غير مسبوقة بـ 20 (لتجنب السنوات)
+                # نبحث عن الأرقام التي تأتي بعد بداية السطر أو بعد شرطة أو مسافة
+                pattern = r'(?:^|[-/\s]+)(\d{4,6})(?:[-/\s]|$)'
+                matches = re.findall(pattern, text)
+                
+                # تصفية الأرقام التي ليست سنوات
+                numbers = [m for m in matches if m not in excluded_years and not m.startswith('20')]
+                
+                return numbers
             
-            for idx, row in df_raw.iterrows():
-                text = str(row.iloc[0]) if len(row) > 0 else ""
-                if pd.isna(text) or text == "nan":
-                    continue
+            # ✅ دالة محسنة لاستخراج اسم العرض
+            def extract_offer_name(text):
+                text = str(text) if not pd.isna(text) else ""
                 
-                # استخراج الأرقام
-                numbers_match = re.findall(r'(\d{4,6})(?:[-/\s]|$)', text)
-                numbers = numbers_match if numbers_match else []
-                
-                # استخراج اسم العرض
-                offer_name = ""
                 if "خصم" in text:
                     if "القطعة الثانية" in text:
                         match = re.search(r'(خصم \d+% على القطعة الثانية)', text)
-                        offer_name = match.group(1) if match else "خصم على القطعة الثانية"
+                        return match.group(1) if match else "خصم على القطعة الثانية"
                     elif "الحبة الثانية" in text:
                         match = re.search(r'(خصم \d+% على الحبة الثانية)', text)
-                        offer_name = match.group(1) if match else "خصم على الحبة الثانية"
+                        return match.group(1) if match else "خصم على الحبة الثانية"
                     elif "ريال" in text:
                         match = re.search(r'(خصم \d+ ريال على الحبة الثانية)', text)
-                        offer_name = match.group(1) if match else "خصم بقيمة محددة"
+                        return match.group(1) if match else "خصم بقيمة محددة"
                 elif "عرض" in text and "مجاناً" in text:
                     match = re.search(r'(عرض \d+\+\d+ مجاناً?)', text)
-                    offer_name = match.group(1) if match else "عرض مجاني"
+                    return match.group(1) if match else "عرض مجاني"
                 elif "صفقة اليوم" in text:
-                    offer_name = "صفقة اليوم"
+                    return "صفقة اليوم"
                 elif "حبة بسعر" in text or "حبات بسعر" in text:
                     match = re.search(r'(\d+حبات? بسعر [\d.]+ ريال)', text)
-                    offer_name = match.group(1) if match else "عرض كميات"
-                else:
-                    offer_name = "عرض خاص"
-                
-                # استخراج التواريخ
-                start_date = None
-                end_date = None
+                    return match.group(1) if match else "عرض كميات"
+                return "عرض خاص"
+            
+            # ✅ دالة لاستخراج التواريخ
+            def extract_dates(text):
+                text = str(text) if not pd.isna(text) else ""
                 date_match = re.findall(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2})', text)
-                if len(date_match) >= 1:
-                    start_date = date_match[0]
-                if len(date_match) >= 2:
-                    end_date = date_match[1]
+                start = date_match[0] if len(date_match) > 0 else None
+                end = date_match[1] if len(date_match) > 1 else None
+                return start, end
+            
+            # ========== 1. معالجة العروض ==========
+            all_offers = []
+            
+            for idx, row in df_raw.iterrows():
+                text = row.iloc[0] if len(row) > 0 else ""
+                if pd.isna(text) or text == "nan":
+                    continue
                 
-                # إضافة كل رقم على حدة
+                numbers = extract_product_numbers(text)
+                offer_name = extract_offer_name(text)
+                start_date, end_date = extract_dates(text)
+                
                 for num in numbers:
                     all_offers.append({
                         "رقم الصنف": num,
@@ -137,92 +171,172 @@ def show():
             
             df_offers = pd.DataFrame(all_offers)
             
-            st.success(f"✅ تم معالجة {len(df_offers)} عرض بنجاح")
+            # ========== 2. معالجة الأسعار المخفضة ==========
+            df_prices = pd.DataFrame()
+            
+            if not df_discounted.empty:
+                # تحديد الأعمدة المطلوبة
+                sku_col = None
+                price_col = None
+                end_date_col = None
+                promo_col = None
+                
+                for col in df_discounted.columns:
+                    col_str = str(col).lower()
+                    if "رمز" in col_str or "sku" in col_str or "كود" in col_str or "رقم" in col_str or "رمز المنتج" in col_str:
+                        sku_col = col
+                    if "سعر" in col_str or "price" in col_str or "مخفض" in col_str:
+                        price_col = col
+                    if "نهاية" in col_str or "تاريخ نهاية" in col_str or "expiry" in col_str:
+                        end_date_col = col
+                    if "عنوان" in col_str or "ترويجي" in col_str or "promo" in col_str:
+                        promo_col = col
+                
+                # إذا لم يتم العثور على أعمدة، استخدم الأعمدة الأولى
+                if sku_col is None and len(df_discounted.columns) > 0:
+                    sku_col = df_discounted.columns[0]
+                if price_col is None and len(df_discounted.columns) > 1:
+                    price_col = df_discounted.columns[1]
+                
+                # بناء DataFrame الأسعار المخفضة
+                df_prices = pd.DataFrame()
+                df_prices["رقم الصنف"] = df_discounted[sku_col].astype(str).str.strip()
+                
+                if price_col:
+                    df_prices["السعر المخفض"] = df_discounted[price_col]
+                else:
+                    df_prices["السعر المخفض"] = ""
+                
+                if end_date_col:
+                    df_prices["تاريخ نهاية التخفيض"] = df_discounted[end_date_col]
+                else:
+                    df_prices["تاريخ نهاية التخفيض"] = ""
+                
+                if promo_col:
+                    df_prices["العنوان الترويجي"] = df_discounted[promo_col]
+                else:
+                    df_prices["العنوان الترويجي"] = ""
+                
+                # إزالة الصفوف الفارغة
+                df_prices = df_prices[df_prices["رقم الصنف"].notna()]
+                df_prices = df_prices[df_prices["رقم الصنف"] != "nan"]
+                df_prices = df_prices[df_prices["رقم الصنف"] != ""]
+            
+            # ========== 3. دمج البيانات ==========
+            if not df_prices.empty:
+                df_merged = df_offers.merge(
+                    df_prices,
+                    on="رقم الصنف",
+                    how="left"
+                )
+            else:
+                df_merged = df_offers.copy()
+                df_merged["السعر المخفض"] = ""
+                df_merged["تاريخ نهاية التخفيض"] = ""
+                df_merged["العنوان الترويجي"] = ""
+            
+            # إضافة الأصناف التي لها سعر مخفض فقط (بدون عرض)
+            if not df_prices.empty:
+                discounted_only = df_prices[~df_prices["رقم الصنف"].isin(df_offers["رقم الصنف"])].copy()
+                discounted_only["اسم العرض"] = ""
+                discounted_only["بداية العرض"] = ""
+                discounted_only["نهاية العرض"] = ""
+                
+                # إعادة ترتيب الأعمدة
+                all_columns = ["رقم الصنف", "اسم العرض", "بداية العرض", "نهاية العرض", 
+                              "السعر المخفض", "تاريخ نهاية التخفيض", "العنوان الترويجي"]
+                discounted_only = discounted_only[[col for col in all_columns if col in discounted_only.columns]]
+                df_final = pd.concat([df_merged, discounted_only], ignore_index=True)
+            else:
+                df_final = df_merged
+            
+            # إعادة ترتيب الأعمدة النهائية
+            final_columns = ["رقم الصنف", "اسم العرض", "بداية العرض", "نهاية العرض", 
+                            "السعر المخفض", "تاريخ نهاية التخفيض", "العنوان الترويجي"]
+            df_final = df_final[[col for col in final_columns if col in df_final.columns]]
+            
+            # ✅ تنظيف البيانات
+            df_final = df_final[df_final["رقم الصنف"].notna()]
+            df_final = df_final[df_final["رقم الصنف"] != "nan"]
+            df_final = df_final[df_final["رقم الصنف"] != ""]
+            # إزالة السنوات التي تسللت (تأكد إضافي)
+            df_final = df_final[~df_final["رقم الصنف"].isin(["2024", "2025", "2026", "2027", "2028", "2029", "2030"])]
             
             # عرض الإحصائيات
-            col1, col2, col3 = st.columns(3)
+            st.success(f"✅ تم معالجة {len(df_final)} صنف بنجاح")
+            
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("📦 إجمالي العروض", len(df_offers))
+                st.metric("📦 إجمالي الأصناف", len(df_final))
             with col2:
-                st.metric("🏷️ أنواع العروض", df_offers["اسم العرض"].nunique())
+                st.metric("🏷️ أنواع العروض", df_final["اسم العرض"].nunique() if "اسم العرض" in df_final else 0)
             with col3:
-                st.metric("🔢 أصناف مشمولة", df_offers["رقم الصنف"].nunique())
+                st.metric("🏷️ منتجات مخفضة", df_final["السعر المخفض"].notna().sum() if "السعر المخفض" in df_final else 0)
+            with col4:
+                st.metric("🎯 عروض نشطة", len(df_final[df_final["اسم العرض"] != ""]) if "اسم العرض" in df_final else 0)
+            
+            # ========== عرض البيانات ==========
+            st.subheader("📋 قائمة العروض والأسعار المخفضة")
+            st.dataframe(df_final, use_container_width=True, height=400)
             
             # فلترة حسب نوع العرض
-            st.subheader("🔍 تصفية حسب نوع العرض")
-            offer_types = ["الكل"] + sorted(df_offers["اسم العرض"].dropna().unique().tolist())
-            selected_type = st.selectbox("اختر نوع العرض", offer_types)
+            if "اسم العرض" in df_final:
+                st.subheader("🔍 تصفية حسب نوع العرض")
+                offer_types = ["الكل"] + sorted(df_final["اسم العرض"].dropna().unique().tolist())
+                selected_type = st.selectbox("اختر نوع العرض", offer_types)
+                
+                if selected_type != "الكل":
+                    filtered_df = df_final[df_final["اسم العرض"] == selected_type]
+                else:
+                    filtered_df = df_final
+                
+                st.dataframe(filtered_df, use_container_width=True)
             
-            if selected_type != "الكل":
-                filtered_df = df_offers[df_offers["اسم العرض"] == selected_type]
-            else:
-                filtered_df = df_offers
+            # عرض الأصناف المكررة
+            duplicates = df_final[df_final["رقم الصنف"].duplicated(keep=False)]
+            if len(duplicates) > 0:
+                with st.expander(f"⚠️ الأصناف المكررة ({len(duplicates)} صنف له أكثر من عرض)"):
+                    st.dataframe(duplicates.sort_values("رقم الصنف"), use_container_width=True)
             
-            # عرض الجدول
-            st.subheader("📋 قائمة العروض المفصلة")
-            st.dataframe(filtered_df, use_container_width=True, height=400)
-            
-            # عرض العروض على شكل بطاقات
-            st.subheader("🎴 عرض البطاقات")
-            show_cards = st.checkbox("عرض على شكل بطاقات", value=False)
-            
-            if show_cards:
-                for _, offer in filtered_df.iterrows():
-                    with st.container():
-                        st.markdown(f"""
-                        <div class="offer-card">
-                            <div class="offer-title">🆔 {offer['رقم الصنف']}</div>
-                            <div><strong>🏷️ {offer['اسم العرض']}</strong></div>
-                            <div class="offer-dates">
-                                📅 بداية: {offer['بداية العرض'] if offer['بداية العرض'] else 'غير محدد'} 
-                                | 🔚 نهاية: {offer['نهاية العرض'] if offer['نهاية العرض'] else 'غير محدد'}
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-            
-            # تحميل الملف
+            # ========== تحميل الملف ==========
             st.subheader("💾 تحميل النتيجة")
             
             def to_excel(df):
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df.to_excel(writer, sheet_name="العروض المفصلة", index=False)
+                    df.to_excel(writer, sheet_name="النتيجة النهائية", index=False)
                     
                     # ورقة منفصلة لكل نوع عرض
-                    for offer_type in df["اسم العرض"].dropna().unique():
-                        if offer_type:
-                            type_df = df[df["اسم العرض"] == offer_type]
-                            sheet_name = offer_type[:31]
-                            type_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                    if "اسم العرض" in df:
+                        for offer_type in df["اسم العرض"].dropna().unique():
+                            if offer_type and offer_type != "":
+                                type_df = df[df["اسم العرض"] == offer_type]
+                                if len(type_df) > 0:
+                                    sheet_name = offer_type[:31]
+                                    type_df.to_excel(writer, sheet_name=sheet_name, index=False)
                 return output.getvalue()
             
-            excel_data = to_excel(filtered_df)
+            excel_data = to_excel(df_final)
             st.download_button(
-                label="📥 تحميل ملف Excel",
+                label="📥 تحميل ملف Excel النهائي",
                 data=excel_data,
-                file_name="العروض_المفصلة.xlsx",
+                file_name="العروض_والأسعار_المخفضة.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
             
-            # عرض الأصناف المكررة
-            duplicates = filtered_df[filtered_df["رقم الصنف"].duplicated(keep=False)]
-            if len(duplicates) > 0:
-                with st.expander(f"⚠️ الأصناف المكررة ({len(duplicates)} عرض)"):
-                    st.dataframe(duplicates.sort_values("رقم الصنف"), use_container_width=True)
-                    
     else:
         st.info("📂 يرجى رفع ملف Excel لعرض العروض")
         
         with st.expander("ℹ️ تعليمات"):
             st.markdown("""
             **كيفية استخدام هذه الصفحة:**
-            1. قم برفع ملف Excel الذي يحتوي على العروض
-            2. يجب أن يحتوي الملف على ورقة باسم "عرض خاص" أو "العروض"
+            1. قم برفع ملف Excel الذي يحتوي على العروض والأسعار المخفضة
+            2. يجب أن يحتوي الملف على:
+               - ورقة باسم "عرض خاص" أو "العروض"
+               - ورقة باسم "سعر مخفض" (تحتوي على: رمز المنتج، السعر المخفض، تاريخ نهاية التخفيض، العنوان الترويجي)
             3. سيتم فك العروض تلقائيًا (تقسيم الأرقام المتعددة)
-            4. يمكنك تصفية العروض حسب النوع
+            4. سيتم دمج العروض مع الأسعار المخفضة حسب رقم المنتج
             5. يمكنك تحميل النتيجة كملف Excel
             
-            **صيغة الملف المدعومة:**
-            - الأرقام المفصولة بـ `-` أو `/` أو مسافة
-            - مثال: `9974-9952-9958 / خصم 50% على القطعة الثانية`
+            **ملاحظة:** تم تحسين الكود لاستبعاد السنوات (2024-2030) من عمود رقم الصنف.
             """)
