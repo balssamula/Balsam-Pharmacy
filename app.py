@@ -180,6 +180,13 @@ with st.sidebar:
                 st.rerun()
                 
         st.markdown("---")
+        st.markdown("### 🛍️ العروض")
+
+        if st.button("🛍️ العروض الحالية الفعالة بالمتجر", use_container_width=True):
+            st.session_state.page = "promotion_viewer"
+            st.rerun()
+                
+        st.markdown("---")
         if st.button("🚪 تسجيل خروج", use_container_width=True):
             for key in ["logged_in", "username", "user_role", "pharmacist_name", "page"]:
                 st.session_state[key] = False if key == "logged_in" else "dashboard"
@@ -250,6 +257,11 @@ else:  # admin or manager
     elif page == "promotions" and st.session_state.user_role in ["admin", "manager"]:
         from pages import promotion_calculator
         promotion_calculator.show()
+        
+    # 🆕 توجيه صفحة العروض الحالية
+    elif page == "promotion_viewer" and st.session_state.user_role in ["admin", "manager"]:
+        from pages import promotion_viewer
+        promotion_viewer.show()
         
     else:
         if permissions and permissions.get("can_view_dashboard"):
