@@ -85,14 +85,13 @@ else:
     if st.session_state.user_role in ["admin", "manager"]:
         nav_options["📑 تفصيلي المنتجات"] = "product_details"
         nav_options["📊 تحليل مبيعات الشهور"] = "sales_analysis"
-        
-        # ✨ [التعديل المطلوب]: إضافة الخيار الجديد بالاسم الذي طلبته في القائمة الجانبية للأدمن والمدراء
+        # ✨ تم الإضافة هنا: خيار العروض الفعالة الجديد بالاسم المطلوب لـ admin و manager
         nav_options["🛍️ العروض الحالية الفعالة بالمتجر"] = "promotions"
         
     if permissions and permissions.get("can_manage_users"):
         nav_options["👥 إدارة المستخدمين والصلاحيات"] = "users"
         
-    # عرض القائمة الجانبية للمستخدم لاختيار الصفحة
+    # عرض القائمة الجانبية للمسؤولين والصيادلة لاختيار الصفحة
     selected_page_label = st.sidebar.radio("🗂️ الانتقال السريع:", list(nav_options.keys()))
     page = nav_options[selected_page_label]
     
@@ -102,46 +101,3 @@ else:
         st.session_state.username = None
         st.session_state.user_role = None
         st.rerun()
-
-    # ------------------ توجيه الصفحات (Routing) ------------------
-    if page == "users" and permissions and permissions.get("can_manage_users"):
-        from pages import users_management
-        users_management.show()
-    elif page == "balances" and permissions and permissions.get("can_view_balances"):
-        from pages import balances_updater
-        balances_updater.show()
-    elif page == "monitoring" and permissions and permissions.get("can_view_monitoring"):
-        from pages import monitoring
-        monitoring.show()
-    elif page == "product_details" and st.session_state.user_role in ["admin", "manager"]:
-        from pages import product_details
-        product_details.show()
-    elif page == "sales_analysis" and st.session_state.user_role in ["admin", "manager"]:
-        from pages import sales_analysis
-        sales_analysis.show()
-
-    # 🎯 استدعاء وتوجيه ملف معالجة منظومة العروض عند اختيار الخيار الجديد من القائمة الجانبية
-    elif page == "promotions" and st.session_state.user_role in ["admin", "manager"]:
-        from pages import promotion_calculator # قم بالتأكد من أن اسم الملف في مجلد pages هو promotion_calculator.py
-        promotion_calculator.show()
-        
-    else:
-        if permissions and permissions.get("can_view_dashboard"):
-            if st.session_state.user_role in ["admin", "manager"]:
-                from pages import admin_dashboard
-                admin_dashboard.show()
-            else:
-                from pages import pharmacy_dashboard
-                pharmacy_dashboard.show()
-        else:
-            st.error("⚠️ ليس لديك صلاحية الوصول إلى لوحة التحكم")
-
-st.markdown("---")
-st.markdown(
-    """
-    <div style="text-align:center;color:#607783;padding:10px;">
-        نظام بلسم العلا الذكي لمطابقة الفواتير والطلبات © 2026
-    </div>
-    """,
-    unsafe_allow_html=True
-)
