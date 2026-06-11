@@ -9,7 +9,7 @@ from openpyxl.utils import get_column_letter
 from utils.database import (
     fetch_active_items, get_completed_items, get_tab_completed_counts, 
     get_old_orders, get_old_invoices, get_old_invoices_stats,
-    check_duplicate_across_branches, save_case_note, mark_case_done,
+    save_case_note, mark_case_done,
     DB_PATH
 )
 from utils.helpers import (
@@ -165,27 +165,38 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
     exact_duplicates = []  
     shared_order_duplicates = []  
 
-    # 🔍 الفحص الشامل المباشر من قاعدة البيانات لإظهار الفروع والأصناف التبادلية
+    # 🔍 الفحص الشامل والمطوّر ليشمل الأصناف (النشطة والمكتملة "تم") في الفروع الأخرى
     try: 
-        # 1. التنبيه الأول: نفس الصنف ونفس الطلب في فرع آخر
-        exact_duplicates = check_duplicate_across_branches(order_number, sku, pharmacy_name)
-        
-        # 2. التنبيه الثاني: نفس رقم الطلب بالكامل في فروع أخرى لأصناف مختلفة
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
+        # 1. جلب الفروع الأخرى التي لديها نفس رقم الطلب ونفس الـ SKU (سواء معلق أو مكتمل "تم")
+        cursor.execute("""
+            SELECT pharmacy_name, invoice_number, status 
+            FROM reconciliation_items 
+            WHERE TRIM(order_number) = ? 
+              AND TRIM(sku) = ? 
+              AND TRIM(pharmacy_name) != ?
+        """, (order_number, sku, pharmacy_name.strip()))
+        
+        for r in cursor.fetchall():
+            exact_duplicates.append({
+                "pharmacy": r["pharmacy_name"],
+                "invoice_number": r["invoice_number"] or "بدون فاتورة",
+                "status": r["status"]
+            })
+        
+        # 2. جلب الفروع الأخرى التي تمتلك نفس رقم الطلب الإجمالي لأصناف أخرى (سواء نشط أو مكتمل)
         cursor.execute("""
             SELECT DISTINCT pharmacy_name, sku, product_name, status 
             FROM reconciliation_items 
             WHERE TRIM(order_number) = ? 
               AND TRIM(pharmacy_name) != ? 
               AND TRIM(sku) != ?
-              AND active = 1
         """, (order_number, pharmacy_name.strip(), sku))
         
-        rows = cursor.fetchall()
-        for r in rows:
+        for r in cursor.fetchall():
             shared_order_duplicates.append({
                 "pharmacy": r["pharmacy_name"],
                 "sku": r["sku"],
@@ -222,18 +233,20 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
                 profile = row.get('profile_type', 'N/A')
                 if pd.notna(profile) and str(profile).strip() not in ["", "nan", "None"]: st.markdown(f"- **📄 نوع البروفايل:** `{profile}`")
             
-        # 🚨 صندوق أحمر: تكرار نفس الصنف ونفس الطلب في فرع آخر
+        # 🚨 صندوق أحمر: تكرار نفس الصنف ونفس الطلب في فرع آخر (يظهر الحالات المضافة المعلقة والمكتملة)
         if exact_duplicates:
-            dup_exact_html = '<div style="background:#f8d7da; border-right:4px solid #dc3545; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.5rem;"><span style="color:#721c24; font-weight:bold;">🚨 تنبيه تكرار الصنف: هذا الصنف المحدّد مكرر ومسجل في الفروع التالية لنفس الطلب:</span>'
+            dup_exact_html = '<div style="background:#f8d7da; border-right:4px solid #dc3545; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.5rem;"><span style="color:#721c24; font-weight:bold;">🚨 تنبيه تكرار الصنف الشامل: هذا الصنف مسجل في الفروع التالية لنفس الطلب:</span>'
             for ed in exact_duplicates:
-                dup_exact_html += f'<div style="font-size:0.85rem; color:#491217; margin-top:2px;">🏥 <strong>{ed.get("pharmacy")}</strong> | رقم الفاتورة المكررة: {ed.get("invoice_number")} | حالة الإجراء: [{ed.get("status")}]</div>'
+                status_lbl = "✅ تمت إضافتها واعتمادها" if ed.get("status") == "تم" else "⏳ معلقة لم تُعتمد بعد"
+                dup_exact_html += f'<div style="font-size:0.85rem; color:#491217; margin-top:4px;">🏥 <strong>{ed.get("pharmacy")}</strong> | فاتورة: {ed.get("invoice_number")} | الإجراء بالفرع الآخر: <span style="font-weight:bold;">{status_lbl}</span></div>'
             st.markdown(dup_exact_html + '</div>', unsafe_allow_html=True)
             
-        # ⚠️ صندوق أصفر: تكرار رقم الطلب بالكامل في فروع أخرى لأصناف مختلفة
+        # ⚠️ صندوق أصفر: تكرار رقم الطلب بالكامل في فروع أخرى لأصناف مختلفة (يظهر المعلق والمكتمل)
         if shared_order_duplicates:
-            dup_warning_html = '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.5rem; border-radius:10px; margin-bottom:0.5rem;"><span style="color:#856404; font-weight:bold;">⚠️ تنبيه الطلب المشترك: يوجد فرع آخر أصدر فاتورة لنفس رقم هذا الطلب (أصناف أخرى):</span>'
+            dup_warning_html = '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.5rem; border-radius:10px; margin-bottom:0.5rem;"><span style="color:#856404; font-weight:bold;">⚠️ تنبيه الطلب المشترك: يوجد فروع أخرى أصدرت فواتير لنفس رقم هذا الطلب لأصناف أخرى:</span>'
             for dup in shared_order_duplicates: 
-                dup_warning_html += f'<div style="font-size:0.85rem; color:#66521a; margin-top:2px;">🏥 <strong>{dup.get("pharmacy")}</strong> | الصنف الآخر: {dup.get("sku")} ({str(dup.get("product_name"))[:40]}...) حالة التسوية: [{dup.get("status")}]</div>'
+                status_lbl = "✅ تمت تسويتها واكتمالها" if dup.get("status") == "تم" else "⏳ معلقة"
+                dup_warning_html += f'<div style="font-size:0.85rem; color:#66521a; margin-top:4px;">🏥 <strong>{dup.get("pharmacy")}</strong> | الصنف الآخر: {dup.get("sku")} ({str(dup.get("product_name"))[:35]}...) | الحالة: [{status_lbl}]</div>'
             st.markdown(dup_warning_html + '</div>', unsafe_allow_html=True)
             
         st.markdown("</div>", unsafe_allow_html=True)
@@ -347,7 +360,7 @@ def show():
             "تم الانتهاء": completed_df
         }
         excel_data = export_to_excel(excel_sheets, pharmacy_name)
-        st.download_button(label="💾 تحميل ملف Excel الموحد", data=excel_data, file_name=f"Full_Report_{pharmacy_name}.xlsx", use_container_width=True, type="primary")
+        st.download_button(label="💾 تحميل ملف Excel الموحد", data=excel_data, file_name=f"Full_Report_{pharmacy_name}.xlsx", use_container_width=True)
         st.session_state.show_export_pharmacy = False
 
     if st.session_state.get('show_export_brief_pharmacy', False):
@@ -357,7 +370,7 @@ def show():
             "فواتير معلقة بين الفروع": conflicts_df
         }
         excel_data_brief = export_to_excel_brief(excel_sheets_brief)
-        st.download_button(label="📊 تحميل ملف Excel المختصر", data=excel_data_brief, file_name=f"Brief_Report_{pharmacy_name}.xlsx", use_container_width=True, type="primary")
+        st.download_button(label="📊 تحميل ملف Excel المختصر", data=excel_data_brief, file_name=f"Brief_Report_{pharmacy_name}.xlsx", use_container_width=True)
         st.session_state.show_export_brief_pharmacy = False
         
     tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed = st.tabs([
