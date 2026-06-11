@@ -1,34 +1,3 @@
-سبب الخطأ (`UnboundLocalError: cannot access local variable 'phone'...`) هو وجود خطأ مطبعي (Typo) غير مقصود في السطر رقم 214 داخل ملف `pages/pharmacy_dashboard.py` أثناء فحص نوع البروفايل للارتجاعات.
-
-في السطر 214، كُتب الكود هكذا:
-
-```python
-if pd.notna(profile) and str(phone).strip() not in ["", "nan", "None"]:
-
-```
-
-بينما المتغير المتاح في هذا الجزء من الكود (الخاص بالإرجاعات وزيادات ABC) هو الكود المعرّف في السطر الأعلى منه مباشرة وهو **`profile`** وليس `phone` (المتغير `phone` يتم تعريفه فقط في قسم الإضافات بالأعلى، ولذلك لا يراه النظام هنا ويعتبره متغيراً محلياً غير معرّف).
-
-### 🛠️ طريقة الحل السريعة والمباشرة:
-
-1. افتح ملف **`pages/pharmacy_dashboard.py`**.
-2. اذهب إلى السطر **214** (أو ابحث عن النص `if pd.notna(profile) and str(phone)`).
-3. قم بتغيير كلمة `phone` المكتوبة بالخطأ واجعلها **`profile`** ليتطابق الشرط تماماً.
-
-**السطر بعد التعديل الصحيح يجب أن يكون كالتالي:**
-
-```python
-if pd.notna(profile) and str(profile).strip() not in ["", "nan", "None"]:
-
-```
-
----
-
-### 📝 الكود الكامل والمعدّل لملف `pages/pharmacy_dashboard.py`
-
-لتفادي الأخطاء المطبعية، يمكنك نسخ الكود التالي بالكامل واستبدال محتوى ملف `pages/pharmacy_dashboard.py` الحالي به:
-
-```python
 import streamlit as st
 import pandas as pd
 from io import BytesIO
@@ -395,5 +364,3 @@ def show():
     with tab_payment: render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name, tab_id="pay")
     with tab_cancelled: render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name, tab_id="cancel")
     with tab_completed: render_completed_table(completed_df, is_admin=False)
-
-```
