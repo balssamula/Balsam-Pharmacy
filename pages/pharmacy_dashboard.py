@@ -160,14 +160,13 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
     order_number = str(row.get('order_number', ''))
     sku = str(row.get('sku', ''))
     
-    # 🔍 [تحديث ذكي لفحص الفروع المشتركة]:
-    # سنقوم بطلب الفحص بناءً على رقم الطلب فقط، لمعرفة ما إذا كان هناك أي فرع آخر ارتبط بهذا الطلب
+    # 🔍 [تعديل جوهري للبحث عن الفروع المشتركة لنفس الطلب بالكامل]:
     duplicates = []
     try: 
-        # إذا كانت دالة check_duplicate_across_branches تدعم الفحص بالطلب فقط عند إرسال SKU فارغ أو كتابة دالة مخصصة لها:
+        # نرسل sku فارغ هنا لتقوم الدالة بالبحث عن رقم الطلب في كل الفروع الأخرى دون تجميدها بمنتج معين
         duplicates = check_duplicate_across_branches(order_number, sku="", current_pharmacy=pharmacy_name)
-        # في حال كانت الدالة القديمة مشروطة بوجود الـ SKU، سنستدعيها بالـ SKU الحالي احتياطاً لضمان عدم توقف الكود:
         if not duplicates:
+            # طريقة احتياطية في حال كانت قاعدة البيانات تشترط الـ SKU
             duplicates = check_duplicate_across_branches(order_number, sku, pharmacy_name)
     except: 
         pass
@@ -198,11 +197,11 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
                 profile = row.get('profile_type', 'N/A')
                 if pd.notna(profile) and str(profile).strip() not in ["", "nan", "None"]: st.markdown(f"- **📄 نوع البروفايل:** `{profile}`")
             
-        # ⚠️ [عرض تنبيه الفروع المشتركة لنفس الطلب]:
+        # ⚠️ [ظهور تنبيه الفروع المشتركة للطلب المشترك بوضوح]:
         if duplicates:
-            dup_warning_html = '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem;"><span style="color:#856404; font-weight:bold;">⚠️ تنبيه هام: يوجد فرع مشترك أو مكرر ارتبط بنفَس هذا الطلب للمراجعة!</span>'
+            dup_warning_html = '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem;"><span style="color:#856404; font-weight:bold;">⚠️ تنبيه هام: يوجد فرع آخر مشترك ارتبط بنفَس هذا الطلب للمراجعة!</span>'
             for dup in duplicates: 
-                dup_warning_html += f'<div style="font-size:0.85rem; color:#66521a;">🏥 <strong>{dup.get("pharmacy", "غير معروف")}</strong> | الصنف/الحالة: {dup.get("sku", sku)} - الإجراء: {dup.get("status", "معلق")}</div>'
+                dup_warning_html += f'<div style="font-size:0.85rem; color:#66521a;">🏥 <strong>{dup.get("pharmacy", "غير معروف")}</strong> | الصنف المعالج: {dup.get("sku", "صنف آخر")} - الحالة: {dup.get("status", "معلق")}</div>'
             st.markdown(dup_warning_html + '</div>', unsafe_allow_html=True)
             
         st.markdown("</div>", unsafe_allow_html=True)
@@ -238,7 +237,6 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
         st.markdown("---")
 
 def render_case_cards_pharmacy(df, allow_actions, pharmacist_name, pharmacy_name, tab_id=""):
-    """رسم وإدارة بطاقات العرض للتبويبات العادية مع معالجة تسلسل الـ index الفريد لكل لسان"""
     if df is not None and not df.empty:
         for i, (orig_idx, row) in enumerate(df.iterrows()):
             render_single_case_card(row, i, allow_actions, pharmacist_name, pharmacy_name, tab_id=tab_id)
@@ -317,7 +315,7 @@ def show():
             "تم الانتهاء": completed_df
         }
         excel_data = export_to_excel(excel_sheets, pharmacy_name)
-        st.download_button(label="💾 تحميل ملف Excel الموحد", data=excel_data, file_name=f"Full_Report_{pharmacy_name}.xlsx", use_container_width=True)
+        st.download_button(label="💾 تحميل ملف Excel الموحد", data=excel_data, file_name=f"Full_Report_{pharmacy_name}.xlsx", use_container_width=True, type="primary")
         st.session_state.show_export_pharmacy = False
 
     if st.session_state.get('show_export_brief_pharmacy', False):
@@ -327,7 +325,7 @@ def show():
             "فواتير معلقة بين الفروع": conflicts_df
         }
         excel_data_brief = export_to_excel_brief(excel_sheets_brief)
-        st.download_button(label="📊 تحميل ملف Excel المختصر", data=excel_data_brief, file_name=f"Brief_Report_{pharmacy_name}.xlsx", use_container_width=True)
+        st.download_button(label="📊 تحميل ملف Excel المختصر", data=excel_data_brief, file_name=f"Brief_Report_{pharmacy_name}.xlsx", use_container_width=True, type="primary")
         st.session_state.show_export_brief_pharmacy = False
         
     tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed = st.tabs([
@@ -347,5 +345,5 @@ def show():
     with tab_payment: render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name, tab_id="pay")
     with tab_cancelled: render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name, tab_id="cancel")
     
-    # 📝 [تم تعديل الاستدْعاء هنا لمنع خطأ TypeError]:
+    # ✅ [تم تصحيح الاستدعاء هنا وحذف tab_id لحل خطأ الـ TypeError نهائياً]:
     with tab_completed: render_completed_table(completed_df, is_admin=False)
