@@ -144,7 +144,9 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
     diff_value = salla_numeric - abc_numeric
     case_type = row.get('case_type', '')
 
-    if diff_value > 0:
+    if case_type == 'branch_conflict':
+        badge_text, badge_color, badge_text_color, diff_style, required_action = "⚠️ تداخل معلق بين الفروع", "#f8d7da", "#721c24", "color: #dc3545; font-weight: bold;", "<span style='color: #dc3545; font-weight: bold;'>مراجعة وتأكيد</span>"
+    elif diff_value > 0:
         badge_text, badge_color, badge_text_color, diff_style, required_action = "إضافة مخزنية عادية ➕", "#dff1ff", "#084298", "color: #28a745; font-weight: bold;", "<span style='color: #28a745; font-weight: bold;'>إضافة</span>"
     elif diff_value < 0:
         badge_text, badge_color, badge_text_color, diff_style, required_action = "إرجاع مخزني عادي 🔄", "#ffe0df", "#491217", "color: #dc3545; font-weight: bold;", "<span style='color: #dc3545; font-weight: bold;'>إرجاع</span>"
@@ -163,12 +165,12 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
     exact_duplicates = []  
     shared_order_duplicates = []  
 
-    # 🔍 فحص مباشر وصحيح من جدول reconciliation_items الفعلي
+    # 🔍 الفحص الشامل المباشر من قاعدة البيانات لإظهار الفروع والأصناف التبادلية
     try: 
-        # 1. التنبيه الأول (نفس الطلب ونفس الصنف في فرع آخر)
+        # 1. التنبيه الأول: نفس الصنف ونفس الطلب في فرع آخر
         exact_duplicates = check_duplicate_across_branches(order_number, sku, pharmacy_name)
         
-        # 2. التنبيه الثاني (نفس رقم الطلب بالكامل في فروع أخرى لأصناف مختلفة)
+        # 2. التنبيه الثاني: نفس رقم الطلب بالكامل في فروع أخرى لأصناف مختلفة
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -209,30 +211,29 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
         col1, col2, col3 = st.columns([2, 1, 1.5])
         with col1:
             st.markdown(f"- **📋 رقم الطلب:** {row.get('order_number', 'N/A')}\n- **🏷️ SKU / رقم المنتج:** {row.get('sku', 'N/A')}\n- **📦 المنتج:** {str(row.get('product_name', 'N/A'))[:60]}")
-            if case_type in ['addition', 'orphan_salla']:
+            if case_type in ['addition', 'orphan_salla', 'branch_conflict']:
                 phone = row.get('customer_phone', 'N/A')
                 if pd.notna(phone) and str(phone).strip() not in ["", "nan", "None"]: st.markdown(f"- **📱 جوال العميل:** `{phone}`")
         with col2:
             st.markdown(f"- **🛒 كمية سلة:** {salla_numeric}\n- **📄 كمية ABC:** {abc_numeric}\n- **📊 الفرق:** <span style='{diff_style}'>{'+' if diff_value > 0 else ''}{diff_value}</span>\n- **🎯 المطلوب:** {required_action}", unsafe_allow_html=True)
         with col3:
             st.markdown(f"- **🧾 رقم الفاتورة:** {row.get('invoice_number', 'N/A')}\n- **👤 الصيدلي:** {row.get('abc_pharmacist_name', 'غير معروف')}\n- **⚙️ حالة الطلب:** {order_status}")
-            if case_type in ['return', 'orphan_abc']:
+            if case_type in ['return', 'orphan_abc', 'branch_conflict']:
                 profile = row.get('profile_type', 'N/A')
                 if pd.notna(profile) and str(profile).strip() not in ["", "nan", "None"]: st.markdown(f"- **📄 نوع البروفايل:** `{profile}`")
             
         # 🚨 صندوق أحمر: تكرار نفس الصنف ونفس الطلب في فرع آخر
         if exact_duplicates:
-            st.markdown(f"""
-            <div style="background:#f8d7da; border-right:4px solid #dc3545; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.5rem;">
-                <span style="color:#721c24; font-weight:bold;">🚨 تنبيه تكرار الصنف: هذا الصنف المحدّد ({sku}) مكرر ومسجل في فرع آخر لنفس الطلب!</span>
-            </div>
-            """, unsafe_allow_html=True)
+            dup_exact_html = '<div style="background:#f8d7da; border-right:4px solid #dc3545; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.5rem;"><span style="color:#721c24; font-weight:bold;">🚨 تنبيه تكرار الصنف: هذا الصنف المحدّد مكرر ومسجل في الفروع التالية لنفس الطلب:</span>'
+            for ed in exact_duplicates:
+                dup_exact_html += f'<div style="font-size:0.85rem; color:#491217; margin-top:2px;">🏥 <strong>{ed.get("pharmacy")}</strong> | رقم الفاتورة المكررة: {ed.get("invoice_number")} | حالة الإجراء: [{ed.get("status")}]</div>'
+            st.markdown(dup_exact_html + '</div>', unsafe_allow_html=True)
             
         # ⚠️ صندوق أصفر: تكرار رقم الطلب بالكامل في فروع أخرى لأصناف مختلفة
         if shared_order_duplicates:
             dup_warning_html = '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.5rem; border-radius:10px; margin-bottom:0.5rem;"><span style="color:#856404; font-weight:bold;">⚠️ تنبيه الطلب المشترك: يوجد فرع آخر أصدر فاتورة لنفس رقم هذا الطلب (أصناف أخرى):</span>'
             for dup in shared_order_duplicates: 
-                dup_warning_html += f'<div style="font-size:0.85rem; color:#66521a; margin-top:4px;">🏥 <strong>{dup.get("pharmacy")}</strong> | الصنف الآخر: {dup.get("sku")} ({str(dup.get("product_name"))[:40]}...) حالة التسوية: [{dup.get("status")}]</div>'
+                dup_warning_html += f'<div style="font-size:0.85rem; color:#66521a; margin-top:2px;">🏥 <strong>{dup.get("pharmacy")}</strong> | الصنف الآخر: {dup.get("sku")} ({str(dup.get("product_name"))[:40]}...) حالة التسوية: [{dup.get("status")}]</div>'
             st.markdown(dup_warning_html + '</div>', unsafe_allow_html=True)
             
         st.markdown("</div>", unsafe_allow_html=True)
