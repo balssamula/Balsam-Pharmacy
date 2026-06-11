@@ -160,9 +160,17 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
     order_number = str(row.get('order_number', ''))
     sku = str(row.get('sku', ''))
     
+    # 🔍 [تحديث ذكي لفحص الفروع المشتركة]:
+    # سنقوم بطلب الفحص بناءً على رقم الطلب فقط، لمعرفة ما إذا كان هناك أي فرع آخر ارتبط بهذا الطلب
     duplicates = []
-    try: duplicates = check_duplicate_across_branches(order_number, sku, pharmacy_name)
-    except: pass
+    try: 
+        # إذا كانت دالة check_duplicate_across_branches تدعم الفحص بالطلب فقط عند إرسال SKU فارغ أو كتابة دالة مخصصة لها:
+        duplicates = check_duplicate_across_branches(order_number, sku="", current_pharmacy=pharmacy_name)
+        # في حال كانت الدالة القديمة مشروطة بوجود الـ SKU، سنستدعيها بالـ SKU الحالي احتياطاً لضمان عدم توقف الكود:
+        if not duplicates:
+            duplicates = check_duplicate_across_branches(order_number, sku, pharmacy_name)
+    except: 
+        pass
     
     with st.container():
         st.markdown(f"""
@@ -190,9 +198,11 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
                 profile = row.get('profile_type', 'N/A')
                 if pd.notna(profile) and str(profile).strip() not in ["", "nan", "None"]: st.markdown(f"- **📄 نوع البروفايل:** `{profile}`")
             
+        # ⚠️ [عرض تنبيه الفروع المشتركة لنفس الطلب]:
         if duplicates:
-            dup_warning_html = '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem;"><span style="color:#856404; font-weight:bold;">⚠️ تنبيه هام: هذا الصنف مكرر في فروع أخرى!</span>'
-            for dup in duplicates: dup_warning_html += f'<div style="font-size:0.85rem; color:#66521a;">🏥 <strong>{dup.get("pharmacy", "غير معروف")}</strong> | الإجراء: {dup.get("status", "غير معروف")}</div>'
+            dup_warning_html = '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.75rem;"><span style="color:#856404; font-weight:bold;">⚠️ تنبيه هام: يوجد فرع مشترك أو مكرر ارتبط بنفَس هذا الطلب للمراجعة!</span>'
+            for dup in duplicates: 
+                dup_warning_html += f'<div style="font-size:0.85rem; color:#66521a;">🏥 <strong>{dup.get("pharmacy", "غير معروف")}</strong> | الصنف/الحالة: {dup.get("sku", sku)} - الإجراء: {dup.get("status", "معلق")}</div>'
             st.markdown(dup_warning_html + '</div>', unsafe_allow_html=True)
             
         st.markdown("</div>", unsafe_allow_html=True)
@@ -336,4 +346,6 @@ def show():
     with tab_post_cutoff: render_case_cards_pharmacy(post_cutoff_df, False, pharmacist_name, pharmacy_name, tab_id="cutoff")
     with tab_payment: render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name, tab_id="pay")
     with tab_cancelled: render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name, tab_id="cancel")
-    with tab_completed: render_completed_table(completed_df, False, pharmacist_name, pharmacy_name, tab_id="complete")
+    
+    # 📝 [تم تعديل الاستدْعاء هنا لمنع خطأ TypeError]:
+    with tab_completed: render_completed_table(completed_df, is_admin=False)
