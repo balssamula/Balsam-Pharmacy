@@ -323,7 +323,8 @@ def show():
         f"📤 الإرجاعات والزيادات ({completed_returns_merged}/{total_returns_merged})",
         f"📊 تداخل فروع ({completed_conflicts}/{total_conflicts})", 
         f"⏰ فواتير بعد آخر طلب ({completed_post_cutoff}/{total_post_cutoff})",
-        f"💰 بانتظار الدفع ({total_payment})", f"⚠️ ملغي/مسترجع ({total_cancelled})"
+        f"💰 بانتظار الدفع ({total_payment})",
+        f"⚠️ ملغي/مسترجع ({total_cancelled})",
         f"✅ تم الانتهاء ({total_completed})"
     ])
     
