@@ -26,6 +26,7 @@ from utils.helpers import (
     get_tab_label, numeric_value
 )
 from utils.excel_processor import process_excel
+from utils.ui_components import render_completed_table
 
 def export_to_excel(dataframes_dict: dict) -> bytes:
     output = BytesIO()
