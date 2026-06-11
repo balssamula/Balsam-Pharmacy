@@ -163,24 +163,23 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
     exact_duplicates = []  
     shared_order_duplicates = []  
 
-    # 🔍 فحص دقيق ومباشر من قاعدة البيانات لضمان ظهور التنبيهين معاً
+    # 🔍 فحص مباشر وصحيح من جدول reconciliation_items الفعلي
     try: 
-        # 1. التنبيه الأول الأصلي (نفس الطلب ونفس الصنف في فرع آخر)
+        # 1. التنبيه الأول (نفس الطلب ونفس الصنف في فرع آخر)
         exact_duplicates = check_duplicate_across_branches(order_number, sku, pharmacy_name)
         
-        # 2. التنبيه الثاني المطور (نفس رقم الطلب بالكامل في فروع أخرى حتى لو لأصناف مختلفة)
+        # 2. التنبيه الثاني (نفس رقم الطلب بالكامل في فروع أخرى لأصناف مختلفة)
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # استعلام يبحث عن نفس رقم الطلب في أي فرع آخر وبأصناف مختلفة عن الصنف الحالي
         cursor.execute("""
-            SELECT DISTINCT pharmacy_name, sku, status 
-            FROM active_items 
+            SELECT DISTINCT pharmacy_name, sku, product_name, status 
+            FROM reconciliation_items 
             WHERE TRIM(order_number) = ? 
               AND TRIM(pharmacy_name) != ? 
               AND TRIM(sku) != ?
-              AND status != 'تم'
+              AND active = 1
         """, (order_number, pharmacy_name.strip(), sku))
         
         rows = cursor.fetchall()
@@ -188,6 +187,7 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             shared_order_duplicates.append({
                 "pharmacy": r["pharmacy_name"],
                 "sku": r["sku"],
+                "product_name": r["product_name"] or "غير محدد",
                 "status": r["status"]
             })
         conn.close()
@@ -220,7 +220,7 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
                 profile = row.get('profile_type', 'N/A')
                 if pd.notna(profile) and str(profile).strip() not in ["", "nan", "None"]: st.markdown(f"- **📄 نوع البروفايل:** `{profile}`")
             
-        # 🚨 صندوق أحمر: في حال تكرار نفس الصنف ونفس الطلب
+        # 🚨 صندوق أحمر: تكرار نفس الصنف ونفس الطلب في فرع آخر
         if exact_duplicates:
             st.markdown(f"""
             <div style="background:#f8d7da; border-right:4px solid #dc3545; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.5rem;">
@@ -228,11 +228,11 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             </div>
             """, unsafe_allow_html=True)
             
-        # ⚠️ صندوق أصفر: في حال وجود فروع أخرى مرتبطة بنفس الطلب (بأصناف أخرى)
+        # ⚠️ صندوق أصفر: تكرار رقم الطلب بالكامل في فروع أخرى لأصناف مختلفة
         if shared_order_duplicates:
             dup_warning_html = '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.5rem; border-radius:10px; margin-bottom:0.5rem;"><span style="color:#856404; font-weight:bold;">⚠️ تنبيه الطلب المشترك: يوجد فرع آخر أصدر فاتورة لنفس رقم هذا الطلب (أصناف أخرى):</span>'
             for dup in shared_order_duplicates: 
-                dup_warning_html += f'<div style="font-size:0.85rem; color:#66521a; margin-top:2px;">🏥 <strong>{dup.get("pharmacy")}</strong> | الصنف الآخر: {dup.get("sku")}</div>'
+                dup_warning_html += f'<div style="font-size:0.85rem; color:#66521a; margin-top:4px;">🏥 <strong>{dup.get("pharmacy")}</strong> | الصنف الآخر: {dup.get("sku")} ({str(dup.get("product_name"))[:40]}...) حالة التسوية: [{dup.get("status")}]</div>'
             st.markdown(dup_warning_html + '</div>', unsafe_allow_html=True)
             
         st.markdown("</div>", unsafe_allow_html=True)
