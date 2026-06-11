@@ -347,7 +347,7 @@ def show():
             "تم الانتهاء": completed_df
         }
         excel_data = export_to_excel(excel_sheets, pharmacy_name)
-        st.download_button(label="💾 تحميل ملف Excel الموحد", data=excel_data, file_name=f"Full_Report_{pharmacy_name}.xlsx", use_container_width=True)
+        st.download_button(label="💾 تحميل ملف Excel الموحد", data=excel_data, file_name=f"Full_Report_{pharmacy_name}.xlsx", use_container_width=True, type="primary")
         st.session_state.show_export_pharmacy = False
 
     if st.session_state.get('show_export_brief_pharmacy', False):
@@ -357,7 +357,7 @@ def show():
             "فواتير معلقة بين الفروع": conflicts_df
         }
         excel_data_brief = export_to_excel_brief(excel_sheets_brief)
-        st.download_button(label="📊 تحميل ملف Excel المختصر", data=excel_data_brief, file_name=f"Brief_Report_{pharmacy_name}.xlsx", use_container_width=True)
+        st.download_button(label="📊 تحميل ملف Excel المختصر", data=excel_data_brief, file_name=f"Brief_Report_{pharmacy_name}.xlsx", use_container_width=True, type="primary")
         st.session_state.show_export_brief_pharmacy = False
         
     tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed = st.tabs([
