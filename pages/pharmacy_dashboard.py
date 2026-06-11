@@ -106,6 +106,7 @@ def export_to_excel_brief(dataframes_dict: dict) -> bytes:
         'salla_qty': 'كمية سلة',
         'abc_qty': 'كمية abc',
         'diff_qty': 'الفرق',
+        'order_status': 'حالة الطلب',
         'abc_pharmacist_name': 'اسم الصيدلي',
         'profile_type': 'نوع البروفايل'
     }
@@ -302,7 +303,8 @@ def show():
             "فواتير معلقة بين الفروع": conflicts_df,
             "فواتير بعد اخر طلب": post_cutoff_df,
             "بانتظار الدفع": payment_df,
-            "الملغيات والمسترجعات": cancelled_df
+            "الملغيات والمسترجعات": cancelled_df,
+            "تم الانتهاء": completed_df
         }
         excel_data = export_to_excel(excel_sheets, pharmacy_name)
         st.download_button(label="💾 تحميل ملف Excel الموحد", data=excel_data, file_name=f"Full_Report_{pharmacy_name}.xlsx", use_container_width=True)
@@ -321,7 +323,7 @@ def show():
     tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled = st.tabs([
         f"📥 الإضافات والطلبات ({completed_additions_merged}/{total_additions_merged})",
         f"📤 الإرجاعات والزيادات ({completed_returns_merged}/{total_returns_merged})",
-        f"📊 تداخل فروع ({completed_conflicts}/{total_conflicts})", 
+        f"📊 فواتير معلقة بين الفروع ({completed_conflicts}/{total_conflicts})", 
         f"⏰ فواتير بعد آخر طلب ({completed_post_cutoff}/{total_post_cutoff})",
         f"💰 بانتظار الدفع ({total_payment})",
         f"⚠️ ملغي/مسترجع ({total_cancelled})",
@@ -334,4 +336,4 @@ def show():
     with tab_post_cutoff: render_case_cards_pharmacy(post_cutoff_df, False, pharmacist_name, pharmacy_name, tab_id="cutoff")
     with tab_payment: render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name, tab_id="pay")
     with tab_cancelled: render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name, tab_id="cancel")
-    with tab_completed: render_completed_table(pharmacy_name)
+    with tab_completed: render_completed_table(completed_df, False, pharmacist_name, pharmacy_name, tab_id="complete")
