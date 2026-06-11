@@ -939,44 +939,41 @@ def get_available_branches(current_branch: str = None) -> list:
 
 # ========== دوال الكشف عن المكررات ==========
 
-def check_duplicate_across_branches(order_number, sku="", current_pharmacy=""):
-    """
-    فحص ذكي ومطور كلياً: يبحث عن وجود نفس رقم الطلب في أي فرع آخر.
-    إذا وجد نفس رقم الطلب في فرع آخر (حتى لو بأصناف مختلفة تماماً)،
-    يقوم فوراً بجلبها وإظهار التنبيه الأصفر في الفرعين لتنبيه الصيادلة.
-    """
-    
+def check_duplicate_across_branches(order_number: str, sku: str, current_pharmacy: str) -> list:
+    """التحقق من وجود نفس SKU ورقم الطلب في فروع أخرى"""
     conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    cur = conn.cursor()
     
     try:
-        # تحويل رقم الطلب إلى نص ونزع أي مسافات زائدة لضمان دقة التطابق
-        clean_order = str(order_number).strip()
-        clean_pharmacy = str(current_pharmacy).strip()
+        # البحث عن جميع السجلات النشطة بنفس order_number و sku في فروع أخرى
+        cur.execute("""
+            SELECT DISTINCT 
+                pharmacy_name, 
+                status, 
+                case_type, 
+                order_date, 
+                invoice_date,
+                invoice_number,
+                order_number
+            FROM reconciliation_items 
+            WHERE order_number = ? 
+                AND sku = ? 
+                AND pharmacy_name != ? 
+                AND active = 1
+        """, (order_number, sku, current_pharmacy))
         
-        # استعلام يبحث عن رقم الطلب في الفروع الأخرى (بدون تقييده بصنف محدد)
-        query = """
-            SELECT pharmacy_name, sku, status, case_type 
-            FROM active_items 
-            WHERE TRIM(order_number) = ? 
-              AND TRIM(pharmacy_name) != ?
-        """
-        cursor.execute(query, (clean_order, clean_pharmacy))
-        rows = cursor.fetchall()
-        
-        results = []
-        for row in rows:
-            results.append({
-                "pharmacy": row["pharmacy_name"],
-                "sku": row["sku"],
-                "status": row["status"],
-                "case_type": row["case_type"]
-            })
-        return results
-        
+        results = cur.fetchall()
+        return [{
+            "pharmacy": r[0], 
+            "status": r[1], 
+            "case_type": r[2], 
+            "order_date": r[3], 
+            "invoice_date": r[4],
+            "invoice_number": r[5],
+            "order_number": r[6]
+        } for r in results]
     except Exception as e:
-        print(f"Error in check_duplicate_across_branches: {str(e)}")
+        print(f"Error checking duplicates: {e}")
         return []
     finally:
         conn.close()
