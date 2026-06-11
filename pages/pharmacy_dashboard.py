@@ -324,6 +324,7 @@ def show():
         f"📊 تداخل فروع ({completed_conflicts}/{total_conflicts})", 
         f"⏰ فواتير بعد آخر طلب ({completed_post_cutoff}/{total_post_cutoff})",
         f"💰 بانتظار الدفع ({total_payment})", f"⚠️ ملغي/مسترجع ({total_cancelled})"
+        f"✅ تم الانتهاء ({total_completed})"
     ])
     
     with tab_additions: render_case_cards_pharmacy(branch_add_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="add")
@@ -332,3 +333,4 @@ def show():
     with tab_post_cutoff: render_case_cards_pharmacy(post_cutoff_df, False, pharmacist_name, pharmacy_name, tab_id="cutoff")
     with tab_payment: render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name, tab_id="pay")
     with tab_cancelled: render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name, tab_id="cancel")
+    with tab_completed: render_completed_table(pharmacy_name)
