@@ -173,6 +173,11 @@ with st.sidebar:
             if st.button("📊 تحليل مبيعات الشهور", use_container_width=True):
                 st.session_state.page = "sales_analysis"
                 st.rerun()
+
+            # ✨ [تعديل 1]: إضافة زر التوجيه لحاسبة العروض الجديدة هنا في السايدبار
+            if st.button("🏷️ حاسبة العروض الترويجية", use_container_width=True):
+                st.session_state.page = "promotions"
+                st.rerun()
                 
         st.markdown("---")
         if st.button("🚪 تسجيل خروج", use_container_width=True):
@@ -240,6 +245,12 @@ else:  # admin or manager
     elif page == "sales_analysis" and st.session_state.user_role in ["admin", "manager"]:
         from pages import sales_analysis
         sales_analysis.show()
+
+    # ✨ [تعديل 2]: توجيه واستدعاء صفحة حاسبة العروض الجديدة عند اختيارها
+    elif page == "promotions" and st.session_state.user_role in ["admin", "manager"]:
+        from pages import promotion_calculator
+        promotion_calculator.show()
+        
     else:
         if permissions and permissions.get("can_view_dashboard"):
             from pages import admin_dashboard
