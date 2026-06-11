@@ -945,8 +945,6 @@ def check_duplicate_across_branches(order_number, sku="", current_pharmacy=""):
     إذا وجد نفس رقم الطلب في فرع آخر (حتى لو بأصناف مختلفة تماماً)،
     يقوم فوراً بجلبها وإظهار التنبيه الأصفر في الفرعين لتنبيه الصيادلة.
     """
-    import sqlite3
-    from utils.database import DB_PATH
     
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
