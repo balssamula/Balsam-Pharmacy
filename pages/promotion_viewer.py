@@ -105,56 +105,6 @@ def show():
             df_discounted = pd.read_excel(uploaded_file, sheet_name=discounted_sheet) if discounted_sheet else pd.DataFrame()
             df_regular_prices = pd.read_excel(uploaded_file, sheet_name=prices_sheet) if prices_sheet else pd.DataFrame()
             
-            # ========== دوال مساعدة ==========
-            def extract_all_numbers(text):
-                """استخراج جميع الأرقام (منتجات ومجموعات) من النص"""
-                if pd.isna(text):
-                    return [], []
-                text = str(text)
-                excluded_years = {'2024', '2025', '2026', '2027', '2028', '2029', '2030'}
-                
-                # استخراج المجموعات (مثل 1500*6)
-                group_pattern = r'(\d{4,6})\*(\d+)'
-                groups = re.findall(group_pattern, text)
-                
-                # استخراج الأرقام المفردة (مثل 9974)
-                single_pattern = r'(?:^|[-/\s]+)(\d{4,6})(?:[-/\s]|$)'
-                singles = re.findall(single_pattern, text)
-                singles = [s for s in singles if s not in excluded_years and not s.startswith('20')]
-                
-                # استخراج الأرقام المتعددة المفصولة بـ - (مثل 15000-16000-12000)
-                multi_pattern = r'(\d{4,6})-(\d{4,6})-(\d{4,6})'
-                multi_matches = re.findall(multi_pattern, text)
-                
-                return singles, groups, multi_matches
-            
-            def extract_offer_name(text):
-                text = str(text) if not pd.isna(text) else ""
-                if "خصم" in text and "القطعة الثانية" in text:
-                    match = re.search(r'(خصم \d+% على القطعة الثانية)', text)
-                    return match.group(1) if match else "خصم على القطعة الثانية"
-                if "خصم" in text and "الحبة الثانية" in text:
-                    match = re.search(r'(خصم \d+% على الحبة الثانية)', text)
-                    if match: return match.group(1)
-                    match = re.search(r'(خصم \d+ ريال على الحبة الثانية)', text)
-                    return match.group(1) if match else "خصم على الحبة الثانية"
-                if "عرض" in text and "مجاناً" in text:
-                    match = re.search(r'(عرض \d+\+\d+ مجاناً?)', text)
-                    return match.group(1) if match else "عرض مجاني"
-                if "صفقة اليوم" in text:
-                    return "صفقة اليوم"
-                if "حبة بسعر" in text or "حبات بسعر" in text:
-                    match = re.search(r'(\d+حبات? بسعر [\d.]+ ريال)', text)
-                    return match.group(1) if match else "عرض كميات"
-                return "عرض خاص"
-            
-            def extract_dates(text):
-                text = str(text) if not pd.isna(text) else ""
-                date_match = re.findall(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2})', text)
-                start = date_match[0] if len(date_match) > 0 else None
-                end = date_match[1] if len(date_match) > 1 else None
-                return start, end
-            
             # ========== 1. معالجة الأسعار العادية ==========
             price_map = {}  # {sku: {name, price}}
             if not df_regular_prices.empty:
@@ -208,8 +158,8 @@ def show():
                             }
             
             # ========== 3. معالجة العروض ==========
-            all_products = {}  # key: (base_sku, group_sku, group_qty) or (sku, None, None)
-            product_groups = {}  # لتجميع المنتجات المرتبطة في مجموعة
+            # هيكل التخزين: {sku: {offers: [], group_sku: None, group_qty: None, products_in_group: []}}
+            products_data = {}
             
             for idx, row in df_raw.iterrows():
                 text = row.iloc[0] if len(row) > 0 else ""
@@ -217,125 +167,150 @@ def show():
                     continue
                 
                 text = str(text)
-                singles, groups, multi_matches = extract_all_numbers(text)
+                
+                # استخراج المجموعات (مثل 1500*6)
+                group_pattern = r'(\d{4,6})\*(\d+)'
+                groups = re.findall(group_pattern, text)
+                
+                # استخراج الأرقام المتعددة المفصولة بـ - (مثل 15000-16000-12000)
+                dash_pattern = r'(\d{4,6})-(\d{4,6})-(\d{4,6})'
+                dash_matches = re.findall(dash_pattern, text)
+                
+                # استخراج الأرقام المفردة (المنتجات العادية)
+                excluded_years = {'2024', '2025', '2026', '2027', '2028', '2029', '2030'}
+                single_pattern = r'(?:^|[-/\s]+)(\d{4,6})(?:[-/\s]|$)'
+                singles = re.findall(single_pattern, text)
+                singles = [s for s in singles if s not in excluded_years and not s.startswith('20')]
+                
+                # استخراج اسم العرض والتواريخ
                 offer_name = extract_offer_name(text)
                 start_date, end_date = extract_dates(text)
                 is_daily_deal = "صفقة اليوم" in text
                 
-                # معالجة الأرقام المفردة (منتجات عادية)
-                for sku in singles:
-                    key = (sku, None, None)
-                    if key not in all_products:
-                        all_products[key] = {
-                            "base_sku": sku,
-                            "group_sku": None,
-                            "group_qty": None,
-                            "offer_name": offer_name,
-                            "start_date": start_date,
-                            "end_date": end_date,
-                            "is_daily_deal": is_daily_deal
-                        }
-                    else:
-                        # دمج العروض المتعددة لنفس المنتج
-                        if all_products[key]["offer_name"] != offer_name:
-                            all_products[key]["offer_name"] += " | " + offer_name
-                
-                # معالجة المجموعات (مثل 1500*6)
+                # ===== حالة 1: منتج مركب به * (مثل 1500*6) =====
                 for base_sku, qty in groups:
                     group_sku = f"{base_sku}*{qty}"
-                    key = (base_sku, group_sku, qty)
-                    if key not in all_products:
-                        all_products[key] = {
-                            "base_sku": base_sku,
+                    if base_sku not in products_data:
+                        products_data[base_sku] = {
+                            "offers": [],
                             "group_sku": group_sku,
-                            "group_qty": qty,
-                            "offer_name": offer_name,
-                            "start_date": start_date,
-                            "end_date": end_date,
-                            "is_daily_deal": is_daily_deal
+                            "group_qty": int(qty),
+                            "products_in_group": [base_sku]
                         }
+                    # إضافة العرض الحالي
+                    products_data[base_sku]["offers"].append({
+                        "name": offer_name,
+                        "start": start_date,
+                        "end": end_date,
+                        "is_daily_deal": is_daily_deal,
+                        "group_sku": group_sku,
+                        "group_qty": int(qty)
+                    })
                 
-                # معالجة المنتجات المتعددة في عرض واحد (مثل 15000-16000-12000)
-                for multi in multi_matches:
+                # ===== حالة 2: منتجات متعددة في عرض واحد (مثل 15000-16000-12000) =====
+                for multi in dash_matches:
                     group_key = f"{multi[0]}-{multi[1]}-{multi[2]}"
-                    if group_key not in product_groups:
-                        product_groups[group_key] = {
-                            "skus": list(multi),
-                            "offer_name": offer_name,
-                            "start_date": start_date,
-                            "end_date": end_date,
-                            "is_daily_deal": is_daily_deal
+                    for sku in multi:
+                        if sku not in products_data:
+                            products_data[sku] = {
+                                "offers": [],
+                                "group_sku": group_key,
+                                "group_qty": None,
+                                "products_in_group": list(multi)
+                            }
+                        else:
+                            # تحديث معلومات المجموعة إذا لم تكن موجودة
+                            if not products_data[sku].get("group_sku"):
+                                products_data[sku]["group_sku"] = group_key
+                                products_data[sku]["products_in_group"] = list(multi)
+                        
+                        products_data[sku]["offers"].append({
+                            "name": offer_name,
+                            "start": start_date,
+                            "end": end_date,
+                            "is_daily_deal": is_daily_deal,
+                            "group_sku": group_key,
+                            "group_qty": None
+                        })
+                
+                # ===== حالة 3: منتج عادي (رقم فردي) =====
+                for sku in singles:
+                    if sku not in products_data:
+                        products_data[sku] = {
+                            "offers": [],
+                            "group_sku": None,
+                            "group_qty": None,
+                            "products_in_group": []
                         }
+                    
+                    products_data[sku]["offers"].append({
+                        "name": offer_name,
+                        "start": start_date,
+                        "end": end_date,
+                        "is_daily_deal": is_daily_deal,
+                        "group_sku": None,
+                        "group_qty": None
+                    })
             
-            # ========== 4. بناء النتيجة النهائية ==========
+            # ========== 4. بناء النتيجة النهائية (صف واحد لكل منتج) ==========
             final_results = []
             
-            # إضافة المنتجات الفردية والمجموعات
-            for key, data in all_products.items():
-                base_sku = data["base_sku"]
-                group_sku = data["group_sku"]
-                group_qty = data["group_qty"]
-                
+            for sku, data in products_data.items():
                 # جلب بيانات السعر العادي
-                product_info = price_map.get(base_sku, {"name": "", "price": ""})
+                product_info = price_map.get(sku, {"name": "", "price": ""})
                 product_name = product_info["name"]
                 product_price = product_info["price"]
                 
                 # جلب بيانات السعر المخفض للمنتج العادي
-                disc_info = discounted_map.get(base_sku, {})
+                disc_info = discounted_map.get(sku, {})
                 disc_price = disc_info.get("discounted_price", "")
-                disc_end_date = disc_info.get("end_date", "")
                 disc_promo = disc_info.get("promo_title", "")
                 
-                # جلب بيانات السعر المخفض للمجموعة
+                # جلب بيانات السعر المخفض للمجموعة (إذا وجدت)
+                group_sku = data.get("group_sku")
+                group_qty = data.get("group_qty")
                 group_disc_info = discounted_map.get(group_sku, {}) if group_sku else {}
                 group_disc_price = group_disc_info.get("discounted_price", "")
-                group_disc_end_date = group_disc_info.get("end_date", "")
                 group_disc_promo = group_disc_info.get("promo_title", "")
                 
+                # دمج العروض المتعددة لنفس المنتج في سطر واحد
+                offers_list = data["offers"]
+                unique_offers = {}
+                for offer in offers_list:
+                    key = offer["name"]
+                    if key not in unique_offers:
+                        unique_offers[key] = offer
+                
+                offer_names = " | ".join([o["name"] for o in unique_offers.values()])
+                offer_starts = " | ".join([o["start"] for o in unique_offers.values() if o["start"]])
+                offer_ends = " | ".join([o["end"] for o in unique_offers.values() if o["end"]])
+                is_daily = "نعم" if any(o["is_daily_deal"] for o in unique_offers.values()) else ""
+                
+                # ملاحظة: إذا كان المنتج جزء من مجموعة متعددة
+                note = ""
+                if data.get("products_in_group") and len(data["products_in_group"]) > 1:
+                    note = f"عرض يشمل المنتجات: {', '.join(data['products_in_group'])}"
+                
                 final_results.append({
-                    "رقم المنتج": base_sku,
+                    "رقم المنتج": sku,
                     "رقم المنتج للمجموعة": group_sku if group_sku else "",
                     "اسم المنتج": product_name,
                     "سعر المنتج": product_price,
-                    "اسم العرض الخاص": data["offer_name"],
-                    "بداية العرض": data["start_date"],
-                    "نهاية العرض": data["end_date"],
+                    "اسم العرض الخاص": offer_names,
+                    "بداية العرض": offer_starts,
+                    "نهاية العرض": offer_ends,
                     "سعر مخفض للمنتج": disc_price,
                     "سعر مخفض للمجموعة": group_disc_price,
                     "عدد حبات المجموعة": group_qty if group_qty else "",
                     "العنوان الترويجي للمنتج": disc_promo,
                     "العنوان الترويجي للمجموعة": group_disc_promo,
-                    "صفقة اليوم": "نعم" if data["is_daily_deal"] else "",
-                    "ملاحظة": ""
+                    "صفقة اليوم": is_daily,
+                    "ملاحظة": note
                 })
-            
-            # إضافة المنتجات المتعددة في عرض واحد
-            for group_key, data in product_groups.items():
-                for sku in data["skus"]:
-                    product_info = price_map.get(sku, {"name": "", "price": ""})
-                    disc_info = discounted_map.get(sku, {})
-                    
-                    final_results.append({
-                        "رقم المنتج": sku,
-                        "رقم المنتج للمجموعة": group_key,
-                        "اسم المنتج": product_info["name"],
-                        "سعر المنتج": product_info["price"],
-                        "اسم العرض الخاص": data["offer_name"],
-                        "بداية العرض": data["start_date"],
-                        "نهاية العرض": data["end_date"],
-                        "سعر مخفض للمنتج": disc_info.get("discounted_price", ""),
-                        "سعر مخفض للمجموعة": "",
-                        "عدد حبات المجموعة": "",
-                        "العنوان الترويجي للمنتج": disc_info.get("promo_title", ""),
-                        "العنوان الترويجي للمجموعة": "",
-                        "صفقة اليوم": "نعم" if data["is_daily_deal"] else "",
-                        "ملاحظة": f"عرض يشمل المنتجات: {', '.join(data['skus'])}"
-                    })
             
             # إضافة المنتجات التي لها سعر مخفض فقط (بدون عرض)
             for sku, disc_info in discounted_map.items():
-                if not any(r["رقم المنتج"] == sku for r in final_results):
+                if sku not in products_data:
                     product_info = price_map.get(sku, {"name": "", "price": ""})
                     final_results.append({
                         "رقم المنتج": sku,
@@ -356,8 +331,11 @@ def show():
             
             df_final = pd.DataFrame(final_results)
             
-            # إزالة التكرارات (نفس المنتج قد يظهر في عدة عروض)
-            df_final = df_final.drop_duplicates(subset=["رقم المنتج", "اسم العرض الخاص"], keep="first")
+            # تنظيف البيانات
+            df_final = df_final[df_final["رقم المنتج"].notna()]
+            df_final = df_final[df_final["رقم المنتج"] != "nan"]
+            df_final = df_final[df_final["رقم المنتج"] != ""]
+            df_final = df_final[~df_final["رقم المنتج"].isin(["2024", "2025", "2026", "2027", "2028", "2029", "2030"])]
             
             # ترتيب الأعمدة
             column_order = [
@@ -376,7 +354,7 @@ def show():
             with col1:
                 st.metric("📦 إجمالي المنتجات", len(df_final))
             with col2:
-                st.metric("🏷️ مع عروض", df_final["اسم العرض الخاص"].notna().sum())
+                st.metric("🏷️ مع عروض", df_final["اسم العرض الخاص"].str.len().gt(0).sum())
             with col3:
                 st.metric("🏷️ منتجات مخفضة", df_final["سعر مخفض للمنتج"].notna().sum())
             with col4:
@@ -467,18 +445,15 @@ def show():
             
             2. سيتم معالجة:
                - **المنتجات العادية** (مثل: 9974)
-               - **المجموعات** (مثل: 1500*6 تعني 6 حبات)
+               - **المجموعات** (مثل: 1500*6)
                - **المنتجات المتعددة في عرض واحد** (مثل: 15000-16000-12000)
             
-            3. سيتم دمج البيانات:
-               - المنتج العادي مع المجموعة في صف واحد
-               - جلب السعر العادي من شيت "اسعار المنتجات"
-               - جلب السعر المخفض من شيت "سعر مخفض"
+            3. **دمج العروض:** إذا كان نفس المنتج لديه أكثر من عرض، سيتم دمجها في صف واحد
             
             **الأعمدة الناتجة:**
             - رقم المنتج
             - رقم المنتج للمجموعة
-            - اسم المنتج
+            - اسم المنتج (من شيت اسعار المنتجات)
             - سعر المنتج
             - اسم العرض الخاص
             - بداية العرض
@@ -491,3 +466,31 @@ def show():
             - صفقة اليوم
             - ملاحظة
             """)
+
+# ========== دوال مساعدة ==========
+def extract_offer_name(text):
+    text = str(text) if not pd.isna(text) else ""
+    if "خصم" in text and "القطعة الثانية" in text:
+        match = re.search(r'(خصم \d+% على القطعة الثانية)', text)
+        return match.group(1) if match else "خصم على القطعة الثانية"
+    if "خصم" in text and "الحبة الثانية" in text:
+        match = re.search(r'(خصم \d+% على الحبة الثانية)', text)
+        if match: return match.group(1)
+        match = re.search(r'(خصم \d+ ريال على الحبة الثانية)', text)
+        return match.group(1) if match else "خصم على الحبة الثانية"
+    if "عرض" in text and "مجاناً" in text:
+        match = re.search(r'(عرض \d+\+\d+ مجاناً?)', text)
+        return match.group(1) if match else "عرض مجاني"
+    if "صفقة اليوم" in text:
+        return "صفقة اليوم"
+    if "حبة بسعر" in text or "حبات بسعر" in text:
+        match = re.search(r'(\d+حبات? بسعر [\d.]+ ريال)', text)
+        return match.group(1) if match else "عرض كميات"
+    return "عرض خاص"
+
+def extract_dates(text):
+    text = str(text) if not pd.isna(text) else ""
+    date_match = re.findall(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2})', text)
+    start = date_match[0] if len(date_match) > 0 else None
+    end = date_match[1] if len(date_match) > 1 else None
+    return start, end
