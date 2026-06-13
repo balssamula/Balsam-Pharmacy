@@ -281,7 +281,7 @@ def show():
                         }
             
             # ========== 3. معالجة العروض (شيت عرض خاص) ==========
-            products_data = {}  # {sku: {offers: [], group_sku: None, group_qty: None}}
+            products_data = {}  # {base_sku: {offers: [], group_sku: None, group_qty: None, is_composite: False}}
             
             for idx, row in df_raw.iterrows():
                 text = row.iloc[0] if len(row) > 0 else ""
@@ -304,14 +304,15 @@ def show():
                 dash_pattern = r'(\d{4,6})-(\d{4,6})-(\d{4,6})'
                 dash_matches = re.findall(dash_pattern, text)
                 
-                # معالجة المجموعات
+                # معالجة المجموعات (مثل 1500*6)
                 for base_sku, qty in groups:
                     group_sku = f"{base_sku}*{qty}"
                     if base_sku not in products_data:
                         products_data[base_sku] = {
                             "offers": [],
                             "group_sku": group_sku,
-                            "group_qty": int(qty)
+                            "group_qty": int(qty),
+                            "is_composite": True
                         }
                     products_data[base_sku]["offers"].append({
                         "name": offer_name,
@@ -320,7 +321,7 @@ def show():
                         "is_daily_deal": is_daily_deal
                     })
                 
-                # معالجة المنتجات المتعددة في عرض واحد
+                # معالجة المنتجات المتعددة في عرض واحد (مثل 15000-16000-12000)
                 for multi in dash_matches:
                     group_sku = "-".join(multi)
                     for sku in multi:
@@ -328,7 +329,8 @@ def show():
                             products_data[sku] = {
                                 "offers": [],
                                 "group_sku": group_sku,
-                                "group_qty": None
+                                "group_qty": None,
+                                "is_composite": True
                             }
                         products_data[sku]["offers"].append({
                             "name": offer_name,
@@ -337,13 +339,14 @@ def show():
                             "is_daily_deal": is_daily_deal
                         })
                 
-                # معالجة الأرقام الفردية
+                # معالجة الأرقام الفردية (منتجات عادية)
                 for sku in numbers:
                     if sku not in products_data:
                         products_data[sku] = {
                             "offers": [],
                             "group_sku": None,
-                            "group_qty": None
+                            "group_qty": None,
+                            "is_composite": False
                         }
                     products_data[sku]["offers"].append({
                         "name": offer_name,
@@ -352,27 +355,58 @@ def show():
                         "is_daily_deal": is_daily_deal
                     })
             
-            # ========== 4. دمج العروض لكل منتج في صف واحد ==========
-            final_results = []
+            # ========== 4. دمج بيانات المجموعة مع المنتج العادي في صف واحد ==========
+            # سنقوم بإنشاء قاموس جديد حيث المفتاح هو المنتج العادي (base_sku)
+            merged_data = {}
             
             for sku, data in products_data.items():
+                # إذا كان sku يحتوي على * أو -، فهو منتج مركب (مجموعة)، نتعامل معه بشكل منفصل
+                if '*' in sku or '-' in sku:
+                    # نبحث عن المنتج العادي المقابل (قاعدة)
+                    base_match = re.match(r'^(\d+)', sku)
+                    if base_match:
+                        base_sku = base_match.group(1)
+                        if base_sku not in merged_data:
+                            # ننشئ سجل جديد للمنتج العادي ونضيف معلومات المجموعة
+                            merged_data[base_sku] = {
+                                "offers": [],
+                                "group_sku": sku,
+                                "group_qty": data["group_qty"],
+                                "is_composite": True
+                            }
+                        # نضيف عروض المجموعة إلى المنتج العادي
+                        merged_data[base_sku]["offers"].extend(data["offers"])
+                else:
+                    # منتج عادي
+                    if sku not in merged_data:
+                        merged_data[sku] = {
+                            "offers": [],
+                            "group_sku": None,
+                            "group_qty": None,
+                            "is_composite": False
+                        }
+                    merged_data[sku]["offers"].extend(data["offers"])
+            
+            # ========== 5. بناء النتيجة النهائية ==========
+            final_results = []
+            
+            for base_sku, data in merged_data.items():
                 # جلب معلومات السعر العادي
-                product_info = price_map.get(sku, {"name": "", "price": ""})
+                product_info = price_map.get(base_sku, {"name": "", "price": ""})
                 product_name = product_info["name"]
                 product_price = product_info["price"]
                 
-                # جلب معلومات المجموعة
+                # جلب معلومات المجموعة (إن وجدت)
                 group_sku = data.get("group_sku")
                 group_qty = data.get("group_qty")
                 
-                # جلب اسم المنتج للمجموعة (من price_map أو من المنتج الأساسي)
+                # اسم وسعر المنتج للمجموعة
                 group_product_name = ""
                 group_product_price = ""
                 if group_sku:
                     group_info = price_map.get(group_sku, {})
                     group_product_name = group_info.get("name", "")
                     group_product_price = group_info.get("price", "")
-                    # إذا لم يتم العثور على اسم المجموعة، حاول البحث باستخدام الرقم الأساسي
                     if not group_product_name and group_sku:
                         base_match = re.match(r'^(\d+)', group_sku)
                         if base_match:
@@ -381,7 +415,7 @@ def show():
                             group_product_price = base_info.get("price", "")
                 
                 # جلب بيانات السعر المخفض للمنتج الفردي
-                disc_info = discounted_map.get(sku, {})
+                disc_info = discounted_map.get(base_sku, {})
                 disc_price = disc_info.get("discounted_price", "")
                 disc_promo = disc_info.get("promo_title", "")
                 
@@ -404,7 +438,7 @@ def show():
                 is_daily = "نعم" if any(o["is_daily_deal"] for o in unique_offers.values()) else ""
                 
                 final_results.append({
-                    "رقم المنتج": sku,
+                    "رقم المنتج": base_sku,
                     "رقم المنتج للمجموعة": group_sku if group_sku else "",
                     "اسم المنتج": product_name,
                     "سعر المنتج": product_price,
@@ -421,46 +455,28 @@ def show():
                     "صفقة اليوم": is_daily
                 })
             
-            # إضافة المنتجات التي لها سعر مخفض فقط (بدون عرض)
+            # إضافة المنتجات التي لها سعر مخفض فقط (بدون عرض في شيت العروض)
             for sku, disc_info in discounted_map.items():
-                if sku not in products_data:
-                    # تحقق إذا كان هذا SKU هو رقم مركب
-                    base_sku, group_sku, group_qty, _, is_composite = parse_composite_sku(sku)
-                    
-                    # جلب معلومات السعر العادي
-                    product_info = price_map.get(base_sku, {"name": "", "price": ""})
-                    product_name = product_info["name"]
-                    product_price = product_info["price"]
-                    
-                    # جلب اسم المنتج للمجموعة
-                    group_product_name = ""
-                    group_product_price = ""
-                    if group_sku:
-                        group_info = price_map.get(group_sku, {})
-                        group_product_name = group_info.get("name", "")
-                        group_product_price = group_info.get("price", "")
-                        if not group_product_name and group_sku:
-                            base_match = re.match(r'^(\d+)', group_sku)
-                            if base_match:
-                                base_info = price_map.get(base_match.group(1), {})
-                                group_product_name = base_info.get("name", "")
-                                group_product_price = base_info.get("price", "")
-                    
+                # تجاهل المنتجات المركبة (سنضيفها مع المنتج العادي)
+                if '*' in sku or '-' in sku:
+                    continue
+                if sku not in merged_data:
+                    product_info = price_map.get(sku, {"name": "", "price": ""})
                     final_results.append({
-                        "رقم المنتج": base_sku,
-                        "رقم المنتج للمجموعة": group_sku if group_sku else "",
-                        "اسم المنتج": product_name,
-                        "سعر المنتج": product_price,
-                        "اسم المنتج للمجموعة": group_product_name,
-                        "سعر المنتج للمجموعة": group_product_price,
+                        "رقم المنتج": sku,
+                        "رقم المنتج للمجموعة": "",
+                        "اسم المنتج": product_info["name"],
+                        "سعر المنتج": product_info["price"],
+                        "اسم المنتج للمجموعة": "",
+                        "سعر المنتج للمجموعة": "",
                         "اسم العرض الخاص": "",
                         "بداية العرض": "",
                         "نهاية العرض": "",
-                        "سعر مخفض للمنتج": disc_info.get("discounted_price", "") if not is_composite else "",
-                        "سعر مخفض للمجموعة": disc_info.get("discounted_price", "") if is_composite else "",
-                        "عدد حبات المجموعة": group_qty if group_qty else "",
-                        "العنوان الترويجي للمنتج": disc_info.get("promo_title", "") if not is_composite else "",
-                        "العنوان الترويجي للمجموعة": disc_info.get("promo_title", "") if is_composite else "",
+                        "سعر مخفض للمنتج": disc_info.get("discounted_price", ""),
+                        "سعر مخفض للمجموعة": "",
+                        "عدد حبات المجموعة": "",
+                        "العنوان الترويجي للمنتج": disc_info.get("promo_title", ""),
+                        "العنوان الترويجي للمجموعة": "",
                         "صفقة اليوم": ""
                     })
             
@@ -472,7 +488,7 @@ def show():
             df_final = df_final[df_final["رقم المنتج"] != ""]
             df_final = df_final[~df_final["رقم المنتج"].isin(["2024", "2025", "2026", "2027", "2028", "2029", "2030"])]
             
-            # إزالة التكرارات الكاملة (نفس رقم المنتج ونفس رقم المجموعة)
+            # إزالة أي تكرارات متبقية (نفس رقم المنتج ونفس رقم المجموعة)
             df_final = df_final.drop_duplicates(subset=["رقم المنتج", "رقم المنتج للمجموعة"], keep="first")
             
             # ترتيب الأعمدة
@@ -503,7 +519,7 @@ def show():
             
             # ========== تصفية برقم المنتج ==========
             st.subheader("🔍 تصفية برقم المنتج")
-            search_term = st.text_input("أدخل رقم المنتج (فردي أو مجموعة):", placeholder="مثال: 9974 أو 1500*6")
+            search_term = st.text_input("أدخل رقم المنتج (فردي أو مجموعة):", placeholder="مثال: 9974 أو 16265*6")
             
             if search_term:
                 search_term = search_term.strip()
