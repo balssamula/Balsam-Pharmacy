@@ -30,7 +30,6 @@ def apply_excel_style(writer, sheet_name, df):
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border = border
-        # ضبط عرض العمود
         worksheet.column_dimensions[get_column_letter(col_idx)].width = max(20, len(str(col_name)) + 5)
     
     # تنسيق الصفوف
@@ -39,12 +38,9 @@ def apply_excel_style(writer, sheet_name, df):
             cell = worksheet.cell(row=row_idx, column=col_idx)
             cell.border = border
             cell.alignment = Alignment(horizontal="center", vertical="center")
-            
-            # تلوين الصفوف الزوجية
             if (row_idx - 2) % 2 == 1:
                 cell.fill = alt_row_fill
     
-    # تثبيت الصف الأول
     worksheet.freeze_panes = 'A2'
 
 def show():
@@ -92,41 +88,41 @@ def show():
     </div>
     """, unsafe_allow_html=True)
 
-    # رفع ملف العروض
     st.subheader("📂 رفع ملف Excel")
     
     uploaded_file = st.file_uploader(
-        "قم برفع ملف Excel الذي يحتوي على العروض والأسعار المخفضة",
+        "قم برفع ملف Excel الذي يحتوي على العروض والأسعار المخفضة وأسعار المنتجات",
         type=["xlsx", "xls"],
-        help="الملف يجب أن يحتوي على ورقة 'عرض خاص' وورقة 'سعر مخفض'"
+        help="الملف يجب أن يحتوي على أوراق: 'عرض خاص'، 'سعر مخفض'، 'اسعار المنتجات'"
     )
     
     if uploaded_file is not None:
         with st.spinner("جاري معالجة العروض..."):
-            # قراءة الملف
             excel_data = pd.ExcelFile(uploaded_file)
             sheet_names = excel_data.sheet_names
             
-            # البحث عن ورقة العروض
+            # البحث عن الأوراق المطلوبة
             offers_sheet = None
             discounted_sheet = None
+            prices_sheet = None
             
             for sheet in sheet_names:
                 if "عرض خاص" in sheet or "عروض" in sheet:
                     offers_sheet = sheet
                 if "سعر مخفض" in sheet or "مخفض" in sheet:
                     discounted_sheet = sheet
+                if "اسعار المنتجات" in sheet or "سعر المنتج" in sheet:
+                    prices_sheet = sheet
             
             if not offers_sheet:
                 offers_sheet = sheet_names[0]
-            if not discounted_sheet and len(sheet_names) > 1:
-                discounted_sheet = sheet_names[1]
             
             # قراءة البيانات
             df_raw = pd.read_excel(uploaded_file, sheet_name=offers_sheet)
             df_discounted = pd.read_excel(uploaded_file, sheet_name=discounted_sheet) if discounted_sheet else pd.DataFrame()
+            df_regular_prices = pd.read_excel(uploaded_file, sheet_name=prices_sheet) if prices_sheet else pd.DataFrame()
             
-            # دالة لاستخراج أرقام المنتجات فقط (بدون سنوات التواريخ)
+            # دالة استخراج أرقام المنتجات
             def extract_product_numbers(text):
                 if pd.isna(text):
                     return []
@@ -137,7 +133,7 @@ def show():
                 numbers = [m for m in matches if m not in excluded_years and not m.startswith('20')]
                 return numbers
             
-            # دالة لاستخراج اسم العرض
+            # دالة استخراج اسم العرض
             def extract_offer_name(text):
                 text = str(text) if not pd.isna(text) else ""
                 
@@ -161,7 +157,7 @@ def show():
                     return match.group(1) if match else "عرض كميات"
                 return "عرض خاص"
             
-            # دالة لاستخراج التواريخ
+            # دالة استخراج التواريخ
             def extract_dates(text):
                 text = str(text) if not pd.isna(text) else ""
                 date_match = re.findall(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2})', text)
@@ -226,14 +222,48 @@ def show():
                 df_prices = df_prices[df_prices["رقم الصنف"] != "nan"]
                 df_prices = df_prices[df_prices["رقم الصنف"] != ""]
             
+            # ========== 2.5 معالجة الأسعار العادية ==========
+            df_regular = pd.DataFrame()
+            
+            if not df_regular_prices.empty:
+                reg_sku_col = None
+                reg_price_col = None
+                reg_name_col = None
+                
+                for col in df_regular_prices.columns:
+                    col_str = str(col).lower()
+                    if "رمز" in col_str or "sku" in col_str or "كود" in col_str or "رقم" in col_str:
+                        reg_sku_col = col
+                    if "سعر" in col_str or "price" in col_str:
+                        reg_price_col = col
+                    if "اسم" in col_str or "name" in col_str:
+                        reg_name_col = col
+                
+                if reg_sku_col:
+                    df_regular = pd.DataFrame()
+                    df_regular["رقم الصنف"] = df_regular_prices[reg_sku_col].astype(str).str.strip()
+                    df_regular["اسم المنتج"] = df_regular_prices[reg_name_col] if reg_name_col else ""
+                    df_regular["السعر العادي"] = df_regular_prices[reg_price_col] if reg_price_col else ""
+                    
+                    df_regular = df_regular[df_regular["رقم الصنف"].notna()]
+                    df_regular = df_regular[df_regular["رقم الصنف"] != "nan"]
+                    df_regular = df_regular[df_regular["رقم الصنف"] != ""]
+            
             # ========== 3. دمج البيانات ==========
+            df_merged = df_offers.copy()
+            
             if not df_prices.empty:
-                df_merged = df_offers.merge(df_prices, on="رقم الصنف", how="left")
+                df_merged = df_merged.merge(df_prices, on="رقم الصنف", how="left")
             else:
-                df_merged = df_offers.copy()
                 df_merged["السعر المخفض"] = ""
                 df_merged["تاريخ نهاية التخفيض"] = ""
                 df_merged["العنوان الترويجي"] = ""
+            
+            if not df_regular.empty:
+                df_merged = df_merged.merge(df_regular, on="رقم الصنف", how="left")
+            else:
+                df_merged["اسم المنتج"] = ""
+                df_merged["السعر العادي"] = ""
             
             # إضافة الأصناف التي لها سعر مخفض فقط
             if not df_prices.empty:
@@ -241,13 +271,20 @@ def show():
                 discounted_only["اسم العرض"] = ""
                 discounted_only["بداية العرض"] = ""
                 discounted_only["نهاية العرض"] = ""
+                
+                if not df_regular.empty:
+                    discounted_only = discounted_only.merge(df_regular, on="رقم الصنف", how="left")
+                else:
+                    discounted_only["اسم المنتج"] = ""
+                    discounted_only["السعر العادي"] = ""
+                
                 df_final = pd.concat([df_merged, discounted_only], ignore_index=True)
             else:
                 df_final = df_merged
             
             # إعادة ترتيب الأعمدة
-            final_columns = ["رقم الصنف", "اسم العرض", "بداية العرض", "نهاية العرض", 
-                            "السعر المخفض", "تاريخ نهاية التخفيض", "العنوان الترويجي"]
+            final_columns = ["رقم الصنف", "اسم المنتج", "اسم العرض", "بداية العرض", "نهاية العرض", 
+                            "السعر العادي", "السعر المخفض", "تاريخ نهاية التخفيض", "العنوان الترويجي"]
             df_final = df_final[[col for col in final_columns if col in df_final.columns]]
             
             # تنظيف البيانات
@@ -270,7 +307,7 @@ def show():
                 st.metric("🎯 عروض نشطة", len(df_final[df_final["اسم العرض"] != ""]) if "اسم العرض" in df_final else 0)
             
             # عرض جدول البيانات
-            st.subheader("📋 قائمة العروض والأسعار المخفضة")
+            st.subheader("📋 قائمة العروض والأسعار")
             st.dataframe(df_final, use_container_width=True, height=400)
             
             # ========== خيارات التحميل ==========
@@ -279,7 +316,7 @@ def show():
             
             col1, col2 = st.columns(2)
             
-            # ===== 1. ملف مفصل (مع شيتات منفصلة لكل عرض) =====
+            # ===== 1. ملف مفصل =====
             with col1:
                 st.markdown("### 📑 ملف مفصل")
                 st.caption("يحتوي على شيت منفصل لكل نوع عرض + شيت رئيسي")
@@ -287,11 +324,9 @@ def show():
                 def create_detailed_excel(df):
                     output = BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        # الشيت الرئيسي
                         df.to_excel(writer, sheet_name="النتيجة النهائية", index=False)
                         apply_excel_style(writer, "النتيجة النهائية", df)
                         
-                        # شيت منفصل لكل نوع عرض
                         if "اسم العرض" in df:
                             for offer_type in df["اسم العرض"].dropna().unique():
                                 if offer_type and offer_type != "":
@@ -311,7 +346,7 @@ def show():
                     use_container_width=True
                 )
             
-            # ===== 2. ملف مبسط (جدول واحد فقط مع تنسيق) =====
+            # ===== 2. ملف مبسط =====
             with col2:
                 st.markdown("### 📄 ملف مبسط")
                 st.caption("جدول واحد فقط مع تنسيق احترافي للألوان")
@@ -319,15 +354,15 @@ def show():
                 def create_simple_excel(df):
                     output = BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        df.to_excel(writer, sheet_name="العروض والأسعار المخفضة", index=False)
-                        apply_excel_style(writer, "العروض والأسعار المخفضة", df)
+                        df.to_excel(writer, sheet_name="العروض والأسعار", index=False)
+                        apply_excel_style(writer, "العروض والأسعار", df)
                     return output.getvalue()
                 
                 simple_excel = create_simple_excel(df_final)
                 st.download_button(
                     label="📥 تحميل ملف مبسط (جدول واحد)",
                     data=simple_excel,
-                    file_name="العروض_والأسعار_المخفضة.xlsx",
+                    file_name="العروض_والأسعار.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
@@ -359,16 +394,15 @@ def show():
         with st.expander("ℹ️ تعليمات"):
             st.markdown("""
             **كيفية استخدام هذه الصفحة:**
-            1. قم برفع ملف Excel الذي يحتوي على العروض والأسعار المخفضة
+            1. قم برفع ملف Excel الذي يحتوي على العروض والأسعار المخفضة وأسعار المنتجات
             2. يجب أن يحتوي الملف على:
                - ورقة باسم "عرض خاص" أو "العروض"
                - ورقة باسم "سعر مخفض" (تحتوي على: رمز المنتج، السعر المخفض، تاريخ نهاية التخفيض، العنوان الترويجي)
+               - ورقة باسم "اسعار المنتجات" (تحتوي على: رمز المنتج، اسم المنتج، السعر العادي)
             3. سيتم فك العروض تلقائيًا (تقسيم الأرقام المتعددة)
-            4. سيتم دمج العروض مع الأسعار المخفضة حسب رقم المنتج
+            4. سيتم دمج العروض مع الأسعار المخفضة والأسعار العادية حسب رقم المنتج
             
             **خيارات التحميل:**
             - **ملف مفصل:** يحتوي على شيت منفصل لكل نوع عرض + شيت رئيسي
             - **ملف مبسط:** جدول واحد فقط مع تنسيق احترافي للألوان
-            
-            **ملاحظة:** تم تحسين الكود لاستبعاد السنوات (2024-2030) من عمود رقم الصنف.
             """)
