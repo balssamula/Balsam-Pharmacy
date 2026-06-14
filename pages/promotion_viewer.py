@@ -393,7 +393,7 @@ def show():
         
         # ⚡ [كشاف الاستعلام والبحث المتجهي فائق السرعة]:
         st.subheader("🔍 استعلام وبحث سريع في قاعدة التسويات")
-        search_term = st.text_input("أدخل رقم صنف، رقم مجموعة، أو سلسلة العرض الخاص للبحث اللحظي:", placeholder="مثال: 9969")
+        search_term = st.text_input("أدخل رقم صنف، رقم مجموعة، أو سلسلة العرض الخاص للبحث اللحظي:", placeholder="مثال: 1500 أو 1500*6 أو 1000-2000-3000")
         if search_term:
             search_term = search_term.strip()
             # تعطيل محركات الـ Regex واستخدام البحث القطاعي المتوازي لسرعة فائقة
@@ -416,4 +416,4 @@ def show():
         with col_dl1:
             st.download_button(label="📥 استخراج الملف الشامل (توزيع شيتات العروض تلقائياً)", data=detailed_bytes, file_name="تقرير_العروض_المفصل_النهائي.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with col_dl2:
-            st.download_button(label="📥 استخراج الملف الموحد (جدول المطابقة المركزي المحمي)", data=simple_bytes, file_name="العروض_والمنتجات_الموحد_المثالي.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            st.download_button(label="📥 استخراج الملف الموحد (جدول المطابقة المركزي المحمي)", data=simple_bytes, file_name="العروض الخاصة_والتخفيضات_الموحد.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
