@@ -1,4 +1,8 @@
 import streamlit as st
+import pandas as pd
+import numpy as np
+import openpyxl
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from io import BytesIO
 from datetime import datetime
 from utils.excel_processor import update_balances
@@ -32,16 +36,12 @@ def show():
                     st.success(f"✅ تم التحديث بنجاح! عدد الأصناف المحدثة والمعدلة: {result:,}")
                     st.dataframe(result_df.head(20), use_container_width=True)
                     
-                    # 🧠 [محرك التصدير الهيكلي المطور لقنوات سلة ثنائية الصفوف]
-                    import openpyxl
-                    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-                    import numpy as np
-                    
+                    # 🧠 بناء المصنف سحابياً ببنية الصفين المتطابقة مع منصة سلة
                     wb = openpyxl.Workbook()
                     ws = wb.active
                     ws.title = "Salla Product Quantities Sheet"
                     
-                    # إعدادات الخطوط والألوان الاحترافية المتناسقة مع هوية بلسم العلا
+                    # إعدادات التنسيقات والخطوط الاحترافية
                     font_title = Font(name="Tajawal", size=11, bold=True, color="FFFFFF")
                     font_headers = Font(name="Tajawal", size=10, bold=True, color="FFFFFF")
                     font_data = Font(name="Tajawal", size=10)
@@ -56,7 +56,7 @@ def show():
                         top=Side(style='thin', color='CBD5E1'), bottom=Side(style='thin', color='CBD5E1')
                     )
                     
-                    # 🏢 [الصف الأول]: دمج العناوين الكبرى وهندسة الخلفيات للحدود
+                    # 🏢 [الصف الأول]: دمج الترويسات الكبرى
                     ws.merge_cells("A1:E1")
                     ws["A1"] = "بيانات المنتج"
                     ws.merge_cells("F1:AO1")
@@ -76,7 +76,7 @@ def show():
                         cell.alignment = align_center
                         cell.border = border_thin
                         
-                    # 📋 [الصف الثاني]: حقن قائمة الترويسات الـ 41 التفصيلية للفروع بالترتيب القياسي
+                    # 📋 [الصف الثاني]: حقن فروع صيدليات بلسم العلا الـ 17 والمؤشرات بالترتيب
                     headers_row2 = [
                         "No.", "النوع", "أسم المنتج", "رمز المنتج sku", "غير محدود الكمية", 
                         "الكمية في فرع تبوك القادسية وباقي المدن", "العرض في فرع تبوك القادسية وباقي المدن", 
@@ -106,30 +106,26 @@ def show():
                         cell.alignment = align_center
                         cell.border = border_thin
                         
-                    # 📊 [الصف الثالث فصاعداً]: صب السطور والمبيعات الحقيقية الناتجة من التحديث
+                    # 📊 [الصف الثالث فصاعداً]: صب البيانات حياً مع استدعاء الفحص المحمي من NaN
                     for r_idx, row_values in enumerate(result_df.values, start=3):
                         for c_idx, val in enumerate(row_values, start=1):
-                            # تطهير وتحويل الأنماط لتقبلها openpyxl بسلامة تامة
                             if isinstance(val, (np.integer, np.floating)):
                                 val = val.item()
-                            elif pd.isna(val):
+                            elif pd.isna(val): # 👈 تم تأمين الاستدعاء بوجود المكتبة في الأعلى
                                 val = ""
                             cell = ws.cell(row=r_idx, column=c_idx, value=val)
                             cell.font = font_data
                             cell.alignment = align_center
                             cell.border = border_thin
                             
-                    # ضبط أطوال وارتفاعات الصفوف لقراءة بصرية ممتازة
                     ws.row_dimensions[1].height = 28
                     ws.row_dimensions[2].height = 24
                     
-                    # ضبط تلقائي خفيف لعرض الأعمدة بما يتوافق مع النصوص
                     for col_cols in ws.columns:
                         max_len = max(len(str(cell.value or '')) for cell in col_cols)
                         col_letter = openpyxl.utils.get_column_letter(col_cols[0].column)
                         ws.column_dimensions[col_letter].width = min(max(max_len + 3, 11), 32)
                     
-                    # حفظ المستند في الذاكرة المؤقتة للضخ
                     output = BytesIO()
                     wb.save(output)
                     output.seek(0)
