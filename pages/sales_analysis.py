@@ -1,44 +1,53 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 
 def show():
-    st.markdown(
-        """
-        <div class="hero">
-            <h1>📊 تحليل مبيعات الشهور والتنبؤ</h1>
-            <p>منصة متقدمة لرفع ملفات المبيعات واستخراج الرؤى الاستراتيجية وبناء النماذج الذكية.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.info("💡 بانتظار رفع ملفات المبيعات. النظام مهيأ لمعالجة البيانات واستخراج النتائج التحليلية القوية بمجرد توفرها.")
-
-    # واجهة رفع الملفات (تدعم Excel و CSV)
-    uploaded_files = st.file_uploader(
-        "ارفع ملفات البيانات للتحليل (Excel أو CSV)", 
-        type=['csv', 'xlsx'], 
-        accept_multiple_files=True
-    )
-
-    if uploaded_files:
-        for file in uploaded_files:
-            try:
-                # قراءة الملف ديناميكياً لتجهيز إطار البيانات (DataFrame)
-                if file.name.endswith('.csv'):
-                    df = pd.read_csv(file)
-                else:
-                    df = pd.read_excel(file)
-                    
-                st.success(f"✅ تم سحب البيانات من الملف: **{file.name}** بنجاح! ({len(df)} صف جاهز للمعالجة)")
-                
-                # يمكنك إضافة كود مبدئي لاستعراض لمحة من البيانات
-                with st.expander(f"👁️ نظرة سريعة على بيانات {file.name}"):
-                    st.dataframe(df.head(), use_container_width=True)
-                    
-            except Exception as e:
-                st.error(f"❌ حدث خطأ أثناء معالجة الملف {file.name}: {e}")
+    st.title("📊 لوحة قياس الأداء الشامل - بلسم العلا")
+    
+    # قسم رفع الملفات
+    with st.expander("📥 إعداد البيانات (رفع الملفات الشهرية)"):
+        col1, col2, col3 = st.columns(3)
+        with col1: sales_file = st.file_uploader("ملف المبيعات", type="csv")
+        with col2: shipping_file = st.file_uploader("ملف شركات الشحن", type="csv")
+        with col3: gateway_file = st.file_uploader("ملف بوابات الدفع", type="csv")
         
-        st.markdown("---")
-        st.markdown("### 📈 مساحة العرض الاستكشافية (EDA)")
-        st.warning("البيانات الآن في الذاكرة. سيتم تخصيص هذه المساحة لعرض التوزيعات الاحتمالية، الرسوم البيانية، ونتائج خوارزميات التنبؤ فور ربطها.")
+        # مدخل المصاريف اليدوية
+        manual_expense = st.number_input("إضافة مصروفات أخرى (دعاية/إيجار/أخرى)", min_value=0.0)
+        
+    if sales_file:
+        # معالجة البيانات
+        df = pd.read_csv(sales_file)
+        df = explode_skus(df) # تفكيك المنتجات
+        
+        # KPIs الأداء
+        col1, col2, col3, col4 = st.columns(4)
+        total_sales = df['order_amount'].sum()
+        net_profit = df['net_profit'].sum()
+        margin = (net_profit / total_sales) * 100
+        
+        col1.metric("إجمالي المبيعات", f"{total_sales:,.2f} ر.س")
+        col2.metric("صافي الربح", f"{net_profit:,.2f} ر.س")
+        col3.metric("هامش الربح", f"{margin:.1f}%")
+        col4.metric("عدد العملاء", f"{df['customer_name'].nunique():,}")
+
+        # التبويبات التحليلية
+        tab1, tab2, tab3, tab4 = st.tabs(["📈 التحليل المالي", "📦 تحليل المنتجات", "👥 حالة العملاء", "🚚 المصروفات"])
+        
+        with tab1:
+            st.subheader("مقارنة الأداء (الشهر الحالي vs السابق)")
+            # كود المقارنة والمخططات
+            
+        with tab2:
+            st.subheader("المنتجات الأكثر ربحية vs المنتجات النازفة")
+            # تحليل الربحية
+            profitable_products = df.groupby('product_name')['net_profit'].sum().sort_values(ascending=False)
+            st.bar_chart(profitable_products.head(10))
+            
+        with tab3:
+            st.subheader("تحليل العملاء (RFM)")
+            # تحليل سلوك العملاء والعملاء في خطر
+            
+        with tab4:
+            st.subheader("تحليل مصروفات التشغيل (الشحن وبوابات الدفع)")
+            # عرض تكاليف الشحن وعمولات بوابات الدفع
