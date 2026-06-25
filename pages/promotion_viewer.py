@@ -291,13 +291,27 @@ def show():
         group_discount_map = {}
         sku_master = {} 
         
+        # 🧠 [الحل الهندسي الحصين]: استخدام دالة .index() المباشرة لمنع أخطاء الـ Boundary Limits
         if not df_discounted.empty:
             st.subheader("🔧 إعدادات شيت الأسعار المخفضة")
             c1, c2, c3, c4 = st.columns(4)
-            with c1: disc_sku_col = st.selectbox("عمود معرف المنتج (SKU)", options=list(df_discounted.columns), index=disc_sku_idx)
-            with c2: disc_price_col = st.selectbox("عمود السعر المخفض الحقيقي", options=list(df_discounted.columns), index=disc_price_idx)
-            with c3: disc_end_col = st.selectbox("عمود نهاية التخفيض", options=["لا يوجد"] + list(df_discounted.columns), index=disc_end_idx + 1 if disc_end_idx + 1 < len(df_discounted.columns) else 0)
-            with c4: disc_promo_col = st.selectbox("عمود الترويجات للخصم", options=["لا يوجد"] + list(df_discounted.columns), index=disc_promo_idx + 1 if disc_promo_idx + 1 < len(df_discounted.columns) else 0)
+            
+            # بناء الخيارات المتاحة
+            discounted_options = ["لا يوجد"] + list(df_discounted.columns)
+            
+            # تحديد المواقع الفعلية داخل القائمة بدون شروط مطولة
+            default_sku_col = df_discounted.columns[disc_sku_idx] if disc_sku_idx < len(df_discounted.columns) else df_discounted.columns[0]
+            default_price_col = df_discounted.columns[disc_price_idx] if disc_price_idx < len(df_discounted.columns) else df_discounted.columns[0]
+            
+            default_end_col = df_discounted.columns[disc_end_idx] if disc_end_idx < len(df_discounted.columns) else "لا يوجد"
+            default_promo_col = df_discounted.columns[disc_promo_idx] if disc_promo_idx < len(df_discounted.columns) else "لا يوجد"
+            
+            with c1: disc_sku_col = st.selectbox("عمود معرف المنتج (SKU)", options=list(df_discounted.columns), index=list(df_discounted.columns).index(default_sku_col))
+            with c2: disc_price_col = st.selectbox("عمود السعر المخفض الحقيقي", options=list(df_discounted.columns), index=list(df_discounted.columns).index(default_price_col))
+            
+            # جلب الترتيب الصحيح من القائمة المضاف إليها "لا يوجد"
+            with c3: disc_end_col = st.selectbox("عمود نهاية التخفيض", options=discounted_options, index=discounted_options.index(default_end_col))
+            with c4: disc_promo_col = st.selectbox("عمود الترويجات للخصم", options=discounted_options, index=discounted_options.index(default_promo_col))
             
             for _, row in df_discounted.iterrows():
                 sku_raw = str(row[disc_sku_col]).strip()
