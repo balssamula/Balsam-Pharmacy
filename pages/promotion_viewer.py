@@ -1,10 +1,11 @@
 # pages/promotion_viewer.py
 import streamlit as st
 import pandas as pd
-import re
-from io import BytesIO
+import numpy as np
+import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+from io import BytesIO
+import re
 
 def apply_excel_style(writer, sheet_name, df):
     """تطبيق التنسيقات الاحترافية على ملف Excel بكفاءة عالية"""
@@ -38,11 +39,68 @@ def apply_excel_style(writer, sheet_name, df):
     
     worksheet.freeze_panes = 'A2'
 
+@st.cache_data
+def generate_empty_template():
+    """
+    🧠 [محرك توليد نموذج العروض الحصين]:
+    بناء مستند إكسيل سحابي يطابق البنية والترويسات الثلاثة للملفات الأصلية بالملي
+    """
+    output = BytesIO()
+    wb = openpyxl.Workbook()
+    
+    # تنسيقات الهوية البصرية لبلسم العلا
+    header_fill = PatternFill(start_color="1F7A8C", end_color="1F7A8C", fill_type="solid")
+    font_headers = Font(name="Tajawal", size=11, bold=True, color="FFFFFF")
+    align_center = Alignment(horizontal="center", vertical="center")
+    border_thin = Border(
+        left=Side(style='thin', color='CBD5E1'), right=Side(style='thin', color='CBD5E1'),
+        top=Side(style='thin', color='CBD5E1'), bottom=Side(style='thin', color='CBD5E1')
+    )
+    
+    # 1️⃣ شيت: عرض خاص
+    ws1 = wb.active
+    ws1.title = "عرض خاص"
+    ws1.views.sheetView[0].rightToLeft = True
+    cell_1 = ws1.cell(row=1, column=1, value="  العروض الخاصة  ")
+    cell_1.fill = header_fill
+    cell_1.font = font_headers
+    cell_1.alignment = align_center
+    cell_1.border = border_thin
+    ws1.column_dimensions['A'].width = 60
+    ws1.row_dimensions[1].height = 24
+    
+    # 2️⃣ شيت: سعر مخفض
+    ws2 = wb.create_sheet(title="سعر مخفض")
+    ws2.views.sheetView[0].rightToLeft = True
+    headers_discounted = ["رمز المنتج sku", "أسم المنتج", "السعر المخفض", "تاريخ نهاية التخفيض", "العنوان الترويجي"]
+    for col_idx, text in enumerate(headers_discounted, 1):
+        cell = ws2.cell(row=1, column=col_idx, value=text)
+        cell.fill = header_fill
+        cell.font = font_headers
+        cell.alignment = align_center
+        cell.border = border_thin
+        ws2.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = 24
+    ws2.row_dimensions[1].height = 24
+        
+    # 3️⃣ شيت: اسعار المنتجات (تأمين الصف الأول الفارغ طبقاً للأصل)
+    ws3 = wb.create_sheet(title="اسعار المنتجات")
+    ws3.views.sheetView[0].rightToLeft = True
+    headers_prices = ["رمز المنتج sku", "أسم المنتج", "سعر المنتج"]
+    for col_idx, text in enumerate(headers_prices, 1):
+        cell = ws3.cell(row=2, column=col_idx, value=text) # يسكن بالصف الثاني
+        cell.fill = header_fill
+        cell.font = font_headers
+        cell.alignment = align_center
+        cell.border = border_thin
+        ws3.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = 24
+    ws3.row_dimensions[1].height = 18
+    ws3.row_dimensions[2].height = 24
+        
+    wb.save(output)
+    return output.getvalue()
+
 def parse_composite_sku(sku):
-    """
-    تحليل الأرقام المركبة والسلاسل الطويلة والمجموعات 
-    مع تصفية المسافات لضمان التوزيع الصحيح للقنوات
-    """
+    """تحليل الأرقام المركبة والسلاسل الطويلة والمجموعات مع تصفية المسافات"""
     sku = str(sku).strip().replace(" ", "")
     if not sku or sku == "nan" or sku == "":
         return None, None, None, [], False, False
@@ -161,7 +219,24 @@ def show():
     """, unsafe_allow_html=True)
 
     st.subheader("📂 رفع ملف التقرير الشامل")
-    uploaded_file = st.file_uploader("قم برفع ملف المبيعات والعروض المشترك لبلسم العلا", type=["xlsx", "xls"])
+    
+    # ⚡ [هندسة صف أدوات الرفع والتحميل المتوازي للنموذج القياسي]
+    col_upload, col_template = st.columns([3, 1])
+    with col_upload:
+        uploaded_file = st.file_uploader("قم برفع ملف المبيعات والعروض المشترك لبلسم العلا", type=["xlsx", "xls"])
+    with col_template:
+        st.markdown("<div style='text-align: center; padding-top: 1.6rem;'>", unsafe_allow_html=True)
+        template_bytes = generate_empty_template()
+        st.download_button(
+            label="📥 نموذج ملف العروض",
+            data=template_bytes,
+            file_name="نموذج_جميع_عروض_المتجر_الفعالة.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            type="primary",
+            help="تحميل النموذج الهيكلي الفارغ لتعبئته بنفس شروط السيستم"
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
     
     if uploaded_file is not None:
         excel_data = pd.ExcelFile(uploaded_file)
@@ -182,14 +257,12 @@ def show():
         df_discounted = pd.read_excel(uploaded_file, sheet_name=discounted_sheet) if discounted_sheet else pd.DataFrame()
         df_regular_prices = pd.read_excel(uploaded_file, sheet_name=prices_sheet) if prices_sheet else pd.DataFrame()
         
-        # تنظيف شيت الأسعار من الصفوف الفارغة العلوية تلقائياً
         if not df_regular_prices.empty:
             if not ('رمز المنتج' in str(df_regular_prices.columns) or 'sku' in str(df_regular_prices.columns).lower()):
                 if df_regular_prices.iloc[0].astype(str).str.contains('رمز المنتج|sku', case=False, na=False).any():
                     df_regular_prices.columns = df_regular_prices.iloc[0]
                     df_regular_prices = df_regular_prices[1:].reset_index(drop=True)
 
-        # 🧠 [محرك التعرف الآلي الكاشف]: قراءة وهندسة المؤشرات تلقائياً لمنع أخطاء الاختيار الإنساني
         sku_col_idx, name_col_idx, price_col_idx = 0, 1, 2
         for i, c in enumerate(df_regular_prices.columns):
             if 'sku' in str(c).lower() or 'رمز' in str(c): sku_col_idx = i
@@ -228,8 +301,8 @@ def show():
             c1, c2, c3, c4 = st.columns(4)
             with c1: disc_sku_col = st.selectbox("عمود معرف المنتج (SKU)", options=list(df_discounted.columns), index=disc_sku_idx)
             with c2: disc_price_col = st.selectbox("عمود السعر المخفض الحقيقي", options=list(df_discounted.columns), index=disc_price_idx)
-            with c3: disc_end_col = st.selectbox("عمود نهاية التخفيض", options=["لا يوجد"] + list(df_discounted.columns), index=disc_end_idx + 1)
-            with c4: disc_promo_col = st.selectbox("عمود الترويجات للخصم", options=["لا يوجد"] + list(df_discounted.columns), index=disc_promo_idx + 1)
+            with c3: disc_end_col = st.selectbox("عمود نهاية التخفيض", options=["لا يوجد"] + list(df_discounted.columns), index=disc_end_idx + 1 if disc_end_idx + 1 < len(df_discounted.columns) else 0)
+            with c4: disc_promo_col = st.selectbox("عمود الترويجات للخصم", options=["لا يوجد"] + list(df_discounted.columns), index=disc_promo_idx + 1 if disc_promo_idx + 1 < len(df_discounted.columns) else 0)
             
             for _, row in df_discounted.iterrows():
                 sku_raw = str(row[disc_sku_col]).strip()
@@ -264,7 +337,6 @@ def show():
                 is_daily_deal = "صفقة اليوم" in text
                 offer_payload = {"name": offer_name, "start": start_date, "end": end_date, "is_daily_deal": is_daily_deal}
                 
-                # 1. حصر عروض المجموعات التراكمية (*) فقط
                 groups_star = re.findall(r'(\d{3,6})\s*\*\s*(\d+)', text)
                 for base_sku, qty in groups_star:
                     group_sku = f"{base_sku}*{qty.strip()}"
@@ -272,7 +344,6 @@ def show():
                     sku_master[base_sku]["groups"].add(group_sku)
                     sku_master[base_sku]["offers"].append(offer_payload)
                 
-                # 2. حصر عروض السلاسل المتصلة بشرطة (-) وضخها في عمود "رقم منتج العرض الخاص"
                 groups_dash = re.findall(r'(\d{3,6}(?:-\d{3,6})+)', text)
                 for d_seq in groups_dash:
                     individual_skus = d_seq.split('-')
@@ -281,7 +352,6 @@ def show():
                         sku_master[sku]["special_offer_skus"].add(d_seq)
                         sku_master[sku]["offers"].append(offer_payload)
                 
-                # 3. حصر الأصناف الفردية
                 numbers = extract_numbers_from_text(text)
                 for sku in numbers:
                     if sku not in sku_master: sku_master[sku] = {"groups": set(), "special_offer_skus": set(), "offers": []}
@@ -304,12 +374,9 @@ def show():
                 offer_ends = " | ".join([o["end"] for o in unique_offers.values() if o["end"]])
                 is_daily = "نعم" if any(o["is_daily_deal"] for o in unique_offers.values()) else ""
                 
-                # 📦 قناة المجموعات القياسية (*)
                 g_skus_list, g_names_list, g_prices_list, g_qtys_list = [], [], [], []
-                # ⚡ قناة العروض المشتركة والخصومات للمجموعات (* أو -)
                 g_disc_prices_list, g_promos_list, g_ends_list = [], [], []
                 
-                # معالجة المجموعات النجمية النظيفة
                 for g_sku in sorted(list(data["groups"])):
                     g_skus_list.append(g_sku)
                     g_info = price_map.get(g_sku, {})
@@ -331,13 +398,11 @@ def show():
                     if q_match: qty_val = q_match.group(1)
                     g_qtys_list.append(qty_val)
                     
-                    # سحب الخصم للمجموعة
                     g_disc = group_discount_map.get(g_sku, {})
                     g_disc_prices_list.append(str(g_disc.get("discounted_price", "")))
                     g_promos_list.append(str(g_disc.get("promo_title", "")))
                     g_ends_list.append(str(g_disc.get("end_date", "")))
                 
-                # معالجة قنوات الشرطات لتنزيل ترويجاتها وأسعارها المخفضة في خانات المجموعات
                 for sp_sku in sorted(list(data["special_offer_skus"])):
                     g_disc = group_discount_map.get(sp_sku, {})
                     if g_disc:
@@ -391,12 +456,10 @@ def show():
         with col4: st.metric("🎯 ترويجات المجموعات والعروض", f"{(df_final['العنوان الترويجي للمجموعة'].astype(str).str.strip().str.len().gt(0)).sum():,}")
         with col5: st.metric("📊 أنواع العروض الفعالة", f"{df_final['اسم العرض الخاص'].nunique():,}")
         
-        # ⚡ [كشاف الاستعلام والبحث المتجهي فائق السرعة]:
         st.subheader("🔍 استعلام وبحث سريع في قاعدة التسويات")
-        search_term = st.text_input("أدخل رقم صنف، رقم مجموعة، أو سلسلة العرض الخاص للبحث اللحظي:", placeholder="مثال: 1500 أو 1500*6 أو 1000-2000-3000")
+        search_term = st.text_input("أدخل رقم صنف، رقم مجموعة، أو سلسلة العرض الخاص للبحث اللحظي:", placeholder="مثال: 9969")
         if search_term:
             search_term = search_term.strip()
-            # تعطيل محركات الـ Regex واستخدام البحث القطاعي المتوازي لسرعة فائقة
             filtered_df = df_final[
                 (df_final["رقم المنتج"].astype(str) == search_term) | 
                 (df_final["رقم المنتج للمجموعة"].astype(str).str.contains(search_term, na=False, regex=False)) | 
@@ -416,4 +479,12 @@ def show():
         with col_dl1:
             st.download_button(label="📥 استخراج الملف الشامل (توزيع شيتات العروض تلقائياً)", data=detailed_bytes, file_name="تقرير_العروض_المفصل_النهائي.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with col_dl2:
-            st.download_button(label="📥 استخراج الملف الموحد (جدول المطابقة المركزي المحمي)", data=simple_bytes, file_name="العروض الخاصة_والتخفيضات_الموحد.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            st.download_button(label="📥 استخراج الملف الموحد (جدول المطابقة المركزي المحمي)", data=simple_bytes, file_name="العروض_والمنتجات_الموحد_المثالي.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            
+        if "اسم العرض الخاص" in df_final and len(df_final["اسم العروض الخاص"].dropna().unique()) > 0:
+            st.subheader("📊 تصفية فرز مخصصة بنوع الخصم")
+            offer_types = ["الكل"] + sorted(df_final["اسم العرض الخاص"].dropna().unique().tolist())
+            selected_type = st.selectbox("اختر نوع المعاملة المالية لفرزها:", offer_types)
+            if selected_type != "الكل": st.dataframe(df_final[df_final["اسم العرض الخاص"] == selected_type], use_container_width=True)
+    else:
+        st.info("📂 بانتظار رفع ملف العروض المحدث لتنشيط المعالجة الفورية واستعراض القنوات المتوازية.")
