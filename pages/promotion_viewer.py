@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter # 👈 تم إضافة هذا الاستيراد الحاسم لحل المشكلة
 from io import BytesIO
 import re
 
@@ -41,14 +42,10 @@ def apply_excel_style(writer, sheet_name, df):
 
 @st.cache_data
 def generate_empty_template():
-    """
-    🧠 [محرك توليد نموذج العروض الحصين]:
-    بناء مستند إكسيل سحابي يطابق البنية والترويسات الثلاثة للملفات الأصلية بالملي
-    """
+    """توليد نموذج العروض الترويجي القياسي الفارغ بالشيتات الثلاثة المتطابقة بالملي"""
     output = BytesIO()
     wb = openpyxl.Workbook()
     
-    # تنسيقات الهوية البصرية لبلسم العلا
     header_fill = PatternFill(start_color="1F7A8C", end_color="1F7A8C", fill_type="solid")
     font_headers = Font(name="Tajawal", size=11, bold=True, color="FFFFFF")
     align_center = Alignment(horizontal="center", vertical="center")
@@ -79,20 +76,20 @@ def generate_empty_template():
         cell.font = font_headers
         cell.alignment = align_center
         cell.border = border_thin
-        ws2.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = 24
+        ws2.column_dimensions[get_column_letter(col_idx)].width = 24
     ws2.row_dimensions[1].height = 24
         
-    # 3️⃣ شيت: اسعار المنتجات (تأمين الصف الأول الفارغ طبقاً للأصل)
+    # 3️⃣ شيت: اسعار المنتجات
     ws3 = wb.create_sheet(title="اسعار المنتجات")
     ws3.views.sheetView[0].rightToLeft = True
     headers_prices = ["رمز المنتج sku", "أسم المنتج", "سعر المنتج"]
     for col_idx, text in enumerate(headers_prices, 1):
-        cell = ws3.cell(row=2, column=col_idx, value=text) # يسكن بالصف الثاني
+        cell = ws3.cell(row=2, column=col_idx, value=text)
         cell.fill = header_fill
         cell.font = font_headers
         cell.alignment = align_center
         cell.border = border_thin
-        ws3.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = 24
+        ws3.column_dimensions[get_column_letter(col_idx)].width = 24
     ws3.row_dimensions[1].height = 18
     ws3.row_dimensions[2].height = 24
         
@@ -220,7 +217,6 @@ def show():
 
     st.subheader("📂 رفع ملف التقرير الشامل")
     
-    # ⚡ [هندسة صف أدوات الرفع والتحميل المتوازي للنموذج القياسي]
     col_upload, col_template = st.columns([3, 1])
     with col_upload:
         uploaded_file = st.file_uploader("قم برفع ملف المبيعات والعروض المشترك لبلسم العلا", type=["xlsx", "xls"])
@@ -233,7 +229,6 @@ def show():
             file_name="نموذج_جميع_عروض_المتجر_الفعالة.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
-            type="primary",
             help="تحميل النموذج الهيكلي الفارغ لتعبئته بنفس شروط السيستم"
         )
         st.markdown("</div>", unsafe_allow_html=True)
@@ -481,7 +476,7 @@ def show():
         with col_dl2:
             st.download_button(label="📥 استخراج الملف الموحد (جدول المطابقة المركزي المحمي)", data=simple_bytes, file_name="العروض_والمنتجات_الموحد_المثالي.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
             
-        if "اسم العرض الخاص" in df_final and len(df_final["اسم العروض الخاص"].dropna().unique()) > 0:
+        if "اسم العرض الخاص" in df_final and len(df_final["اسم العرض الخاص"].dropna().unique()) > 0:
             st.subheader("📊 تصفية فرز مخصصة بنوع الخصم")
             offer_types = ["الكل"] + sorted(df_final["اسم العرض الخاص"].dropna().unique().tolist())
             selected_type = st.selectbox("اختر نوع المعاملة المالية لفرزها:", offer_types)
