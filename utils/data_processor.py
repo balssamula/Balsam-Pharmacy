@@ -1,24 +1,37 @@
+# utils/data_processor.py
 import pandas as pd
 import json
-import numpy as np
 
-def explode_skus(df):
-    """تفكيك الـ skus_json وتحويل الطلبات إلى صفوف منتجات مفردة"""
-    df['skus_json'] = df['skus_json'].apply(lambda x: json.loads(x) if isinstance(x, str) else [])
-    df = df.explode('skus_json')
-    # استخراج البيانات من الـ JSON المفكك (الاسم، الكمية، السعر)
-    df_skus = pd.json_normalize(df['skus_json'])
-    df = df.reset_index(drop=True).join(df_skus.reset_index(drop=True))
+def process_sales_file(file_path):
+    """تفكيك مبيعات سلة و JSON الخاص بالمنتجات"""
+    df = pd.read_excel(file_path)
+    # تفكيك عمود الـ JSON إلى منتجات مفردة
+    df['skus_list'] = df['skus_json'].apply(json.loads)
+    df = df.explode('skus_list')
+    # استخراج تفاصيل المنتج من JSON
+    skus_df = pd.json_normalize(df['skus_list'])
+    df = df.drop(columns=['skus_json', 'skus_list']).join(skus_df)
     return df
 
-def calculate_net_profit(df_sales, df_shipping, df_payments, other_expenses, marketing_costs):
-    """دمج المبيعات بالمصاريف وحساب الربح الصافي"""
-    # 1. دمج المصاريف (الشحن، الدفع، التسويق) بناءً على رقم الطلب
-    # 2. حساب عمولة شركة 'هاي تك' (8% من إجمالي المبيعات)
-    df_sales['marketing_comm_high_tech'] = df_sales['order_amount'] * 0.08
+def apply_financial_logic(df, shipping_fees, gateway_fees):
+    """دمج ملفات المصاريف (الشحن + الدفع) وحساب الربح الصافي"""
+    # ربط طلبات الشحن
+    df = df.merge(shipping_fees, on='رقم الطلب', how='left')
+    # ربط بوابات الدفع
+    df = df.merge(gateway_fees, on='رقم الطلب', how='left')
     
-    # 3. حساب صافي الربح
-    # Net Profit = (Sales - Discount) - (COGS) - (Shipping) - (Gateway Fees) - (Marketing)
-    df_sales['net_profit'] = df_sales['order_amount'] - df_sales['cogs'] - df_sales['shipping_fee'] - df_sales['gateway_fees'] - df_sales['marketing_comm_high_tech']
+    # حساب المصاريف التراكمية
+    df['total_shipping'] = df['shipping_amount'] # رسوم الشحن الفعلية
+    df['gateway_fees_calc'] = df.apply(lambda x: calculate_gateway_fee(x['amount'], x['payment_method']), axis=1)
+    df['marketing_comm'] = df['total_price'] * 0.08 # عمولة هاي تك 8%
     
-    return df_sales
+    # صافي الربح
+    df['net_profit'] = df['total_price'] - df['cost'] - df['total_shipping'] - df['gateway_fees_calc'] - df['marketing_comm']
+    return df
+
+def calculate_gateway_fee(amount, method):
+    """معادلة رسوم بوابات الدفع (مثال: مدى +0.8 ريال، تابي نسبة+ثابت)"""
+    if method == 'mada': return (amount * 0.005) + 0.8
+    if method == 'tabby': return (amount * 0.02) + 1.5
+    # إلخ لكل وسيلة دفع...
+    return 0
