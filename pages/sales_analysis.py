@@ -2,16 +2,42 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from io import BytesIO
 from utils.financial_engine import calculate_financials
+
+@st.cache_data(show_spinner=False)
+def generate_bi_excel_report(df_main, prod_profit, rfm_df, manual_expenses):
+    """توليد ملف إكسيل BI متكامل ومقسم لشيتات للإدارة"""
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # 1. شيت البيانات المالية الشاملة
+        df_main.to_excel(writer, sheet_name="البيانات المالية التفصيلية", index=False)
+        
+        # 2. شيت ربحية المنتجات
+        prod_profit.sort_values('net_profit', ascending=False).to_excel(writer, sheet_name="ربحية المنتجات", index=False)
+        
+        # 3. شيت المنتجات النازفة (الخاسرة)
+        loss_prods = prod_profit[prod_profit['net_profit'] < 0].sort_values('net_profit')
+        loss_prods.to_excel(writer, sheet_name="المنتجات الخاسرة", index=False)
+        
+        # 4. شيت تحليل العملاء (RFM)
+        if rfm_df is not None:
+            rfm_df.sort_values('إجمالي الإنفاق', ascending=False).to_excel(writer, sheet_name="تحليل العملاء", index=False)
+            
+        # 5. شيت المصروفات اليدوية
+        if manual_expenses:
+            pd.DataFrame(manual_expenses).to_excel(writer, sheet_name="المصروفات الإضافية", index=False)
+            
+    return output.getvalue()
 
 def show():
     st.markdown("""
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800&display=swap');
         * { font-family: 'Tajawal', sans-serif; }
-        .kpi-card {background: #ffffff; border-radius: 12px; padding: 24px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-right: 5px solid #1f7a8c;}
+        .kpi-card {background: #ffffff; border-radius: 12px; padding: 24px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-right: 5px solid #1f7a8c; margin-bottom: 15px;}
         .kpi-title {color: #6c757d; font-size: 15px; font-weight: 600; margin-bottom: 8px;}
-        .kpi-value {color: #16425b; font-size: 32px; font-weight: 800;}
+        .kpi-value {color: #16425b; font-size: 30px; font-weight: 800;}
         </style>
     """, unsafe_allow_html=True)
 
@@ -62,6 +88,7 @@ def show():
     if sales_file:
         with st.spinner("🧠 جاري معالجة ملايين البيانات، وتوزيع التكاليف على المنتجات..."):
             try:
+                # قراءة الملفات
                 df_sales = pd.read_excel(sales_file) if sales_file.name.endswith('xlsx') else pd.read_csv(sales_file)
                 df_pay = pd.read_csv(payment_file) if payment_file and payment_file.name.endswith('csv') else (pd.read_excel(payment_file) if payment_file else pd.DataFrame())
                 df_tabby = pd.read_csv(tabby_file) if tabby_file and tabby_file.name.endswith('csv') else (pd.read_excel(tabby_file, skiprows=10) if tabby_file else pd.DataFrame())
@@ -90,16 +117,20 @@ def show():
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 
+                # تجهيز جداول التحليل للإكسيل
+                prod_profit = df.groupby('product_name').agg({
+                    'qty': 'sum',
+                    'product_total': 'sum',
+                    'net_profit': 'sum'
+                }).reset_index()
+                
+                rfm = None # تهيئة متغير العملاء
+
                 # التبويبات الاحترافية
-                tab1, tab2, tab3 = st.tabs(["🛍️ تحليل المنتجات والربحية", "🚚 أداء الشحن والفروع", "👥 سلوك العملاء"])
+                tab1, tab2, tab3 = st.tabs(["🛍️ تحليل المنتجات والربحية", "🚚 أداء الشحن والتمركز", "👥 تحليل RFM وسلوك العملاء"])
                 
                 with tab1:
                     st.subheader("تحليل الربحية الدقيق لكل منتج (بعد خصم كافة التكاليف)")
-                    prod_profit = df.groupby('product_name').agg({
-                        'qty': 'sum',
-                        'product_total': 'sum',
-                        'net_profit': 'sum'
-                    }).reset_index()
                     
                     c_win, c_loss = st.columns(2)
                     with c_win:
@@ -119,10 +150,77 @@ def show():
                             
                 with tab2:
                     st.subheader("أين تذهب المبيعات؟ (تحليل مناطق التوصيل وشركات الشحن)")
-                    if 'المدينة' in df.columns:
-                        city_perf = df.groupby('المدينة').agg({'product_total': 'sum'}).reset_index()
-                        fig_city = px.pie(city_perf, names='المدينة', values='product_total', hole=0.4, title="توزيع المبيعات جغرافياً")
-                        st.plotly_chart(fig_city, use_container_width=True)
+                    col_city, col_ship = st.columns(2)
+                    
+                    with col_city:
+                        if 'المدينة' in df.columns:
+                            city_perf = df.groupby('المدينة').agg({'product_total': 'sum'}).reset_index().sort_values('product_total', ascending=False).head(10)
+                            fig_city = px.pie(city_perf, names='المدينة', values='product_total', hole=0.4, title="أعلى 10 مدن في المبيعات")
+                            st.plotly_chart(fig_city, use_container_width=True)
+                            
+                    with col_ship:
+                        if 'شركة الشحن' in df.columns:
+                            ship_perf = df.groupby('شركة الشحن').agg({'product_total': 'sum'}).reset_index()
+                            fig_ship = px.bar(ship_perf, x='شركة الشحن', y='product_total', title="حجم المبيعات حسب شركة الشحن/الفرع", color_discrete_sequence=['#1f7a8c'])
+                            st.plotly_chart(fig_ship, use_container_width=True)
+                
+                with tab3:
+                    st.subheader("تحليل العملاء (RFM) - الولاء مقابل خطر الفقدان")
+                    date_col = [c for c in df.columns if 'تاريخ' in c or 'Date' in c]
+                    name_col = [c for c in df.columns if 'اسم العميل' in c or 'Customer Name' in c]
+                    
+                    if date_col and name_col:
+                        date_c = date_col[0]
+                        name_c = name_col[0]
+                        
+                        df[date_c] = pd.to_datetime(df[date_c], errors='coerce')
+                        recent_date = df[date_c].max()
+                        
+                        rfm = df.groupby(name_c).agg({
+                            date_c: lambda x: (recent_date - x.max()).days, # Recency
+                            'رقم الطلب': 'nunique', # Frequency
+                            'product_total': 'sum' # Monetary
+                        }).reset_index()
+                        rfm.columns = ['اسم العميل', 'أيام منذ آخر طلب', 'عدد الطلبات', 'إجمالي الإنفاق']
+                        
+                        # تصنيف العملاء
+                        def classify_customer(row):
+                            if row['إجمالي الإنفاق'] >= 1000 and row['أيام منذ آخر طلب'] <= 30: return "🌟 عميل VIP نشط"
+                            elif row['إجمالي الإنفاق'] >= 500 and row['أيام منذ آخر طلب'] > 30: return "🚨 VIP في خطر (Churn Risk)"
+                            elif row['عدد الطلبات'] > 1: return "🔄 عميل متكرر"
+                            else: return "👤 عميل جديد/عادي"
+                            
+                        rfm['تصنيف العميل'] = rfm.apply(classify_customer, axis=1)
+                        
+                        r1, r2 = st.columns(2)
+                        with r1:
+                            st.success("🌟 قائمة عملاء الـ VIP (أنفقوا > 1000 ر.س ومستمرون بالطلب)")
+                            vip_active = rfm[rfm['تصنيف العميل'] == '🌟 عميل VIP نشط'].sort_values('إجمالي الإنفاق', ascending=False)
+                            st.dataframe(vip_active[['اسم العميل', 'عدد الطلبات', 'إجمالي الإنفاق']].head(10), use_container_width=True)
+                        
+                        with r2:
+                            st.error("🚨 عملاء ذو قيمة عالية لم يشتروا منذ فترة (يجب التواصل معهم فوراً)")
+                            risk_customers = rfm[rfm['تصنيف العميل'] == '🚨 VIP في خطر (Churn Risk)'].sort_values('إجمالي الإنفاق', ascending=False)
+                            st.dataframe(risk_customers[['اسم العميل', 'أيام منذ آخر طلب', 'إجمالي الإنفاق']].head(10), use_container_width=True)
+                            
+                    else:
+                        st.warning("لم يتم العثور على أعمدة 'تاريخ الطلب' أو 'اسم العميل' في الملف المرفوع.")
+                
+                # ==========================================
+                # 3. زر تحميل التقرير النهائي (BI Excel Report)
+                # ==========================================
+                st.markdown("---")
+                st.subheader("💾 استخراج التقارير الإدارية (BI Report)")
+                st.info("هذا الزر يقوم بتوليد ملف Excel احترافي يحتوي على كافة التحليلات، الأرباح، المنتجات الخاسرة، وقاعدة بيانات العملاء مقسمة في شيتات جاهزة للطباعة والعرض على الإدارة.")
+                
+                excel_bytes = generate_bi_excel_report(df, prod_profit, rfm, st.session_state.manual_expenses)
+                st.download_button(
+                    label="📥 تحميل تقرير ذكاء الأعمال المالي (Excel)",
+                    data=excel_bytes,
+                    file_name="Balsam_BI_Financial_Report.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
 
             except Exception as e:
                 st.error(f"حدث خطأ فني أثناء مطابقة الملفات: {str(e)}")
