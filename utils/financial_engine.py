@@ -14,16 +14,43 @@ def extract_single_sku(combined_sku):
         if char in sku_str: sku_str = sku_str.split(char)[0].strip()
     return sku_str
 
+def safe_json_loads(json_str):
+    """دالة قراءة آمنة تتخطى وتطهر أخطاء التنسيق (Invalid Escape) القادمة من سلة"""
+    if not isinstance(json_str, str) or not json_str.strip():
+        return []
+    try:
+        return json.loads(json_str, strict=False)
+    except Exception:
+        try:
+            # تطهير الشرطات المائلة الخاطئة التي تحقنها سلة
+            cleaned_str = json_str.replace('\\', '\\\\')
+            return json.loads(cleaned_str, strict=False)
+        except Exception:
+            # في حال كان السطر تالفاً تماماً من المصدر، نتخطاه لكي لا ينهار النظام
+            return []
+
 def process_sales_and_products(df_sales):
     if 'skus_json' not in df_sales.columns: return df_sales
-    df_sales['skus_list'] = df_sales['skus_json'].apply(lambda x: json.loads(x) if isinstance(x, str) else [])
+    
+    # استخدام الدالة الآمنة بدلاً من json.loads المباشرة
+    df_sales['skus_list'] = df_sales['skus_json'].apply(safe_json_loads)
     df_exploded = df_sales.explode('skus_list').reset_index(drop=True)
     
     def parse_sku_array(item):
         if isinstance(item, list) and len(item) >= 4:
-            return pd.Series({'product_name': str(item[0]), 'qty': float(item[1]), 'product_sku': extract_single_sku(item[2]), 'price': float(item[3])})
+            return pd.Series({
+                'product_name': str(item[0]), 
+                'qty': float(item[1]), 
+                'product_sku': extract_single_sku(item[2]), 
+                'price': float(item[3])
+            })
         elif isinstance(item, dict):
-            return pd.Series({'product_name': item.get('name', ''), 'product_sku': extract_single_sku(item.get('sku', '')), 'qty': float(item.get('quantity', 1)), 'price': float(item.get('price', 0.0))})
+            return pd.Series({
+                'product_name': item.get('name', ''), 
+                'product_sku': extract_single_sku(item.get('sku', '')), 
+                'qty': float(item.get('quantity', 1)), 
+                'price': float(item.get('price', 0.0))
+            })
         return pd.Series({'product_name': '', 'qty': 0, 'price': 0.0})
 
     parsed_skus = df_exploded['skus_list'].apply(parse_sku_array)
@@ -72,7 +99,7 @@ def calculate_financials(df_sales, df_profiles, df_payments, df_tabby, df_tamara
     df['marketing_commission'] = df['product_total'] * 0.08
     df['net_profit'] = df['product_total'] - df['total_cost'] - df['gateway_fee'] - df['shipping_cost'] - df['marketing_commission']
     
-    # 5. حساب الزخم (Momentum) وتحديد العلامات التجارية من الاسم
+    # 5. حساب الزخم (Momentum)
     if 'تاريخ الطلب' in df.columns:
         df['تاريخ الطلب'] = pd.to_datetime(df['تاريخ الطلب'], errors='coerce')
         max_date = df['تاريخ الطلب'].max()
