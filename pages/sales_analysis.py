@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import numpy as np  # 👈 تم إضافة هذا السطر لحل المشكلة
+import numpy as np
 import plotly.express as px
 from utils.financial_engine import calculate_financials, export_advanced_excel
 
@@ -22,7 +22,7 @@ def show():
 
     st.title("🎯 لوحة القيادة الاستراتيجية الشاملة (Strategic Dashboard)")
 
-    with st.expander("📥 1. مركز معالجة البيانات وتوزيع المصروفات (Data Ingestion)", expanded=False):
+    with st.expander("📥 1. مركز معالجة البيانات وتوزيع المصروفات", expanded=False):
         c1, c2, c3 = st.columns(3)
         sales_file = c1.file_uploader("📦 مبيعات سلة", type=["xlsx", "csv"])
         profiles_file = c2.file_uploader("💊 البروفايلات (للتكلفة)", type=["xlsx", "csv"])
@@ -73,9 +73,6 @@ def show():
                 st.session_state.manual_exp
             )
 
-            # ---------------------------------------------------------
-            # 1. المقاييس العليا (KPIs)
-            # ---------------------------------------------------------
             st.markdown("### 1️⃣ المقاييس الاستراتيجية (Executive KPIs)")
             total_rev = df['product_total'].sum()
             total_cogs = df['total_cost'].sum()
@@ -94,9 +91,6 @@ def show():
             outside_sales_ratio = len(df[~df['المدينة'].isin(['العلا', 'تبوك'])]) / len(df) * 100 if 'المدينة' in df.columns and len(df) > 0 else 0
             k5.markdown(f"<div class='kpi'><div class='kpi-title'>طلبات خارج العلا وتبوك</div><div class='kpi-val'>{outside_sales_ratio:.1f}%</div></div>", unsafe_allow_html=True)
 
-            # ---------------------------------------------------------
-            # 7. نظام الإنذار الآلي (Proactive Alerts)
-            # ---------------------------------------------------------
             st.markdown("### 🚨 نظام الإنذارات الاستباقية")
             if outside_sales_ratio > 15:
                 st.markdown("<div class='alert-box alert-success'>✅ نجاح تسويقي: طلبات التوصيل الخارجي ممتازة (>15%). ينصح النظام بزيادة ميزانية الإعلانات!</div>", unsafe_allow_html=True)
@@ -105,31 +99,36 @@ def show():
                 if len(df) > 0 and pickup_orders < (len(df) * 0.10):
                     st.markdown("<div class='alert-box alert-warning'>⚠️ تراجع الفروع: نسبة 'الاستلام من الفرع' منخفضة جداً. هناك مشكلة محتملة في أداء الفروع.</div>", unsafe_allow_html=True)
             
-            loss_makers = df.groupby('product_name')['net_profit'].sum()
+            loss_makers = df.groupby('product_display')['net_profit'].sum()
             loss_count = len(loss_makers[loss_makers < -10])
             if loss_count > 0:
                 st.markdown(f"<div class='alert-box alert-danger'>🛑 نزيف أموال: تم اكتشاف {loss_count} منتجاً تباع بخسارة صريحة. راجع تبويب تحليل المنتجات لإزالة العروض عنها فوراً!</div>", unsafe_allow_html=True)
 
-            # ---------------------------------------------------------
-            # التبويبات التفصيلية
-            # ---------------------------------------------------------
             st.markdown("<br>", unsafe_allow_html=True)
             tab_rfm, tab_prod, tab_opex, tab_branch, tab_export = st.tabs([
                 "👥 العملاء (RFM & Geo)", "📦 المنتجات (Profit & Momentum)", 
                 "💳 المصروفات (OPEX)", "🏢 أداء الفروع", "📤 تصدير التقارير (BI/PDF)"
             ])
 
-            # --- 2. تحليل العملاء (RFM) والتمركز الجغرافي ---
+            # --- 2. تحليل العملاء (مع رقم الجوال) ---
             with tab_rfm:
-                st.subheader("تحليل العملاء (Segmentation) وخطر الفقدان")
+                st.subheader("تحليل العملاء وخطر الفقدان (مُدمج ببيانات الاتصال)")
                 if 'تاريخ الطلب' in df.columns and 'اسم العميل' in df.columns:
                     recent_date = df['تاريخ الطلب'].max()
-                    rfm = df.groupby('اسم العميل').agg({
+                    # 💡 إضافة الجوال لمجموعة التجميع إذا كان متاحاً
+                    mob_col = 'رقم الجوال' if 'رقم الجوال' in df.columns else None
+                    group_cols = ['اسم العميل', mob_col] if mob_col else ['اسم العميل']
+                    
+                    rfm = df.groupby(group_cols).agg({
                         'تاريخ الطلب': lambda x: (recent_date - x.max()).days,
                         'رقم الطلب': 'nunique',
                         'product_total': 'sum'
                     }).reset_index()
-                    rfm.columns = ['العميل', 'أيام الانقطاع', 'الطلبات', 'الإنفاق']
+                    
+                    if mob_col:
+                        rfm.columns = ['العميل', 'رقم الجوال', 'أيام الانقطاع', 'الطلبات', 'الإنفاق']
+                    else:
+                        rfm.columns = ['العميل', 'أيام الانقطاع', 'الطلبات', 'الإنفاق']
                     
                     c1, c2 = st.columns(2)
                     c1.success("👑 عملاء VIP الوفيون (أعلى 20% إنفاق ونشطون)")
@@ -146,69 +145,59 @@ def show():
                         fig_city = px.bar(city_df, x='المدينة', y='product_total', color='product_total', color_continuous_scale='Viridis', title='أعلى 10 مدن مبيعاً')
                         st.plotly_chart(fig_city, use_container_width=True)
 
-            # --- 3. تحليل المنتجات (الربحية والزخم) ---
+            # --- 3. تحليل المنتجات (الآن مع الـ SKU) ---
             with tab_prod:
                 st.subheader("تحليل الأداء والربحية للمنتجات والعلامات التجارية")
-                prod_stats = df.groupby('product_name').agg({
+                # 💡 استخدام product_display الذي يجمع الاسم مع הـ SKU
+                prod_stats = df.groupby('product_display').agg({
                     'qty':'sum', 'product_total':'sum', 'net_profit':'sum', 'momentum':'mean'
                 }).reset_index()
                 
                 c1, c2 = st.columns(2)
                 c1.markdown("#### ✅ المنتجات التي تجلب الربح الحقيقي")
-                c1.dataframe(prod_stats.sort_values('net_profit', ascending=False).head(10)[['product_name', 'qty', 'net_profit']], use_container_width=True)
+                c1.dataframe(prod_stats.sort_values('net_profit', ascending=False).head(10)[['product_display', 'qty', 'net_profit']], use_container_width=True)
                 
                 c2.markdown("#### 🩸 المنتجات التي تنزف الربح (تباع بخسارة)")
-                c2.dataframe(prod_stats[prod_stats['net_profit'] < 0].sort_values('net_profit').head(10)[['product_name', 'net_profit', 'momentum']], use_container_width=True)
+                c2.dataframe(prod_stats[prod_stats['net_profit'] < 0].sort_values('net_profit').head(10)[['product_display', 'net_profit', 'momentum']], use_container_width=True)
 
                 c3, c4 = st.columns(2)
                 c3.markdown("#### 📈 منتجات صاعدة بقوة (مؤشر الزخم > 1)")
-                c3.dataframe(prod_stats[prod_stats['momentum'] > 1.2].sort_values('momentum', ascending=False).head(10)[['product_name', 'momentum', 'qty']], use_container_width=True)
+                c3.dataframe(prod_stats[prod_stats['momentum'] > 1.2].sort_values('momentum', ascending=False).head(10)[['product_display', 'momentum', 'qty']], use_container_width=True)
 
                 c4.markdown("#### 🏷️ أقوى العلامات التجارية (من حيث صافي الربح)")
                 if 'brand' in df.columns:
                     brand_stats = df.groupby('brand')['net_profit'].sum().reset_index().sort_values('net_profit', ascending=False)
                     c4.dataframe(brand_stats.head(10), use_container_width=True)
 
-            # --- 4. تحليل المصروفات التشغيلية (OPEX) ---
+            # --- 4. تحليل المصروفات ---
             with tab_opex:
                 st.subheader("تحليل دقيق لشركات الشحن وبوابات الدفع (تطابق الفواتير)")
                 c1, c2 = st.columns(2)
-                
                 with c1:
                     st.markdown("#### 🚚 تكاليف الشحن وتأثيرها على الأرباح")
                     if 'شركة الشحن' in df.columns:
-                        ship_stats = df.groupby('شركة الشحن').agg(
-                            الطلبات=('رقم الطلب', 'nunique'),
-                            الإيرادات=('product_total', 'sum'),
-                            الرسوم_المدفوعة=('shipping_cost', 'sum')
-                        ).reset_index()
-                        ship_stats['نسبة الرسوم للإيراد'] = (ship_stats['الرسوم_المدفوعة'] / ship_stats['الإيرادات'] * 100).map("{:.1f}%".format)
+                        ship_stats = df.groupby('شركة الشحن').agg(الطلبات=('رقم الطلب', 'nunique'), الإيرادات=('product_total', 'sum'), الرسوم_المدفوعة=('shipping_cost', 'sum')).reset_index()
+                        ship_stats['نسبة الرسوم'] = (ship_stats['الرسوم_المدفوعة'] / ship_stats['الإيرادات'] * 100).fillna(0).map("{:.1f}%".format)
                         st.dataframe(ship_stats.sort_values('الرسوم_المدفوعة', ascending=False), use_container_width=True)
-                
                 with c2:
                     st.markdown("#### 💳 رسوم بوابات الدفع الإلكتروني")
                     if 'طريقة الدفع' in df.columns:
-                        pay_stats = df.groupby('طريقة الدفع').agg(
-                            الطلبات=('رقم الطلب', 'nunique'),
-                            الإيرادات=('product_total', 'sum'),
-                            الرسوم=('gateway_fee', 'sum')
-                        ).reset_index()
-                        pay_stats['تكلفة البوابة %'] = (pay_stats['الرسوم'] / pay_stats['الإيرادات'] * 100).map("{:.2f}%".format)
+                        pay_stats = df.groupby('طريقة الدفع').agg(الطلبات=('رقم الطلب', 'nunique'), الإيرادات=('product_total', 'sum'), الرسوم=('gateway_fee', 'sum')).reset_index()
+                        pay_stats['تكلفة البوابة %'] = (pay_stats['الرسوم'] / pay_stats['الإيرادات'] * 100).fillna(0).map("{:.2f}%".format)
                         st.dataframe(pay_stats.sort_values('الرسوم', ascending=False), use_container_width=True)
 
             # --- 5. أداء الفروع ---
             with tab_branch:
                 st.subheader("أداء الفروع والمبيعات (Target vs Actual)")
-                st.info("💡 نظراً لاعتماد النظام على بيانات سلة الموحدة، يتم احتساب الفروع بناءً على مبيعات التوصيل الخاصة بالمدن والفروع المسجلة كـ 'استلام'.")
                 if 'المدينة' in df.columns:
-                    target_mock = {'العلا': 500000, 'تبوك': 400000} # يمكن ربطها بقاعدة بيانات لاحقاً
+                    target_mock = {'العلا': 500000, 'تبوك': 400000}
                     branch_df = df.groupby('المدينة')['product_total'].sum().reset_index()
                     branch_df['المستهدف (تقديري)'] = branch_df['المدينة'].map(target_mock).fillna(100000)
                     branch_df['نسبة الإنجاز'] = (branch_df['product_total'] / branch_df['المستهدف (تقديري)'] * 100).map("{:.1f}%".format)
                     branch_df['الحالة'] = np.where(branch_df['product_total'] >= branch_df['المستهدف (تقديري)'], "✅ محقق", "🔴 متراجع")
                     st.dataframe(branch_df.sort_values('product_total', ascending=False).head(15), use_container_width=True)
 
-            # --- 6. استخراج التقارير ---
+            # --- 6. التصدير ---
             with tab_export:
                 st.subheader("📥 استخراج تقارير الإدارة العليا")
                 st.success("اضغط لتحميل ملف قاعدة بيانات متكاملة بصيغة Excel مقسمة لشيتات جاهزة للربط مع Power BI.")
