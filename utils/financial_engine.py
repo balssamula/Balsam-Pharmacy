@@ -2,8 +2,10 @@ import pandas as pd
 import json
 import numpy as np
 from io import BytesIO
-import xlsxwriter
 from datetime import timedelta
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 
 def extract_single_sku(combined_sku):
     if pd.isna(combined_sku) or combined_sku == "": return ""
@@ -38,15 +40,14 @@ def calculate_financials(df_sales, df_profiles, df_payments, df_tabby, df_tamara
     df['total_cost'] = 0.0
     order_totals = df.groupby(order_col)['product_total'].sum()
 
-    # 1. التكلفة من ملف البروفايلات (Prescription No.)
+    # 1. التكاليف من البروفايلات
     if df_profiles is not None and not df_profiles.empty:
         prof_order_col = [c for c in df_profiles.columns if 'Prescription No' in c or 'رقم الوصفة' in c or 'رقم الطلب' in c][0]
-        # افتراض أن عمود التكلفة اسمه 'Net Amount' أو 'Cost'
         cost_col = [c for c in df_profiles.columns if 'Amount' in c or 'Cost' in c or 'التكلفة' in c][-1]
         cost_map = df_profiles.groupby(prof_order_col)[cost_col].sum().to_dict()
         df['total_cost'] = df.apply(lambda row: cost_map.get(row[order_col], 0.0) * (row['product_total'] / max(order_totals.get(row[order_col], 1), 1)), axis=1)
 
-    # 2. بوابات الدفع (مدى، فيزا، إمكان، تابي، تمارا)
+    # 2. بوابات الدفع
     def map_fees(df_fee, order_c, fee_c):
         if df_fee is not None and not df_fee.empty:
             f_map = df_fee.groupby(order_c)[fee_c].sum().to_dict()
@@ -55,85 +56,47 @@ def calculate_financials(df_sales, df_profiles, df_payments, df_tabby, df_tamara
     if df_payments is not None: map_fees(df_payments, df_payments.columns[0], [c for c in df_payments.columns if 'رسوم' in c][0])
     if df_tabby is not None: map_fees(df_tabby, [c for c in df_tabby.columns if 'Order' in c][0], [c for c in df_tabby.columns if 'Fee' in c or 'Deduction' in c][-1])
     if df_tamara is not None: map_fees(df_tamara, [c for c in df_tamara.columns if 'Order ID' in c][0], [c for c in df_tamara.columns if 'Fees' in c][0])
-    if df_emkan is not None: map_fees(df_emkan, df_emkan.columns[0], df_emkan.columns[-1]) # يفترض أن الإدخال اليدوي لإمكان تم ترتيبه
+    if df_emkan is not None: map_fees(df_emkan, df_emkan.columns[0], df_emkan.columns[-1])
 
-    # 3. تكاليف الشحن
+    # 3. الشحن
     if df_jnt is not None: map_fees(df_jnt, [c for c in df_jnt.columns if 'Client order' in c][0], [c for c in df_jnt.columns if 'Charge' in c][0])
     if df_aramex is not None: map_fees(df_aramex, df_aramex.columns[0], df_aramex.columns[-1])
-    
-    # بيز (18.5 ثابت أو من ملف)
-    if df_beez is not None and not df_beez.empty:
-        map_fees(df_beez, df_beez.columns[0], df_beez.columns[-1])
+    if df_beez is not None and not df_beez.empty: map_fees(df_beez, df_beez.columns[0], df_beez.columns[-1])
     elif 'شركة الشحن' in df.columns:
         bosta_orders = df[df['شركة الشحن'].astype(str).str.contains('بيز|beez', case=False, na=False)][order_col].unique()
         for o_id in bosta_orders:
             items = df[df[order_col] == o_id]['qty'].sum()
             df.loc[df[order_col] == o_id, 'shipping_cost'] += (18.5 / max(items, 1)) * df.loc[df[order_col] == o_id, 'qty']
 
-    # 4. الحسابات النهائية
+    # 4. الحسابات الصافية
     df['marketing_commission'] = df['product_total'] * 0.08
     df['net_profit'] = df['product_total'] - df['total_cost'] - df['gateway_fee'] - df['shipping_cost'] - df['marketing_commission']
-    df['profit_margin'] = np.where(df['product_total'] > 0, (df['net_profit'] / df['product_total']), 0)
     
-    # 5. حساب الزخم (Momentum) للمنتجات
+    # 5. حساب الزخم (Momentum) وتحديد العلامات التجارية من الاسم
     if 'تاريخ الطلب' in df.columns:
         df['تاريخ الطلب'] = pd.to_datetime(df['تاريخ الطلب'], errors='coerce')
         max_date = df['تاريخ الطلب'].max()
-        last_7_days = df[df['تاريخ الطلب'] >= (max_date - timedelta(days=7))]
-        prev_21_days = df[(df['تاريخ الطلب'] >= (max_date - timedelta(days=28))) & (df['تاريخ الطلب'] < (max_date - timedelta(days=7)))]
+        last_7_days = df[df['تاريخ الطلب'] >= (max_date - pd.Timedelta(days=7))]
+        prev_21_days = df[(df['تاريخ الطلب'] >= (max_date - pd.Timedelta(days=28))) & (df['تاريخ الطلب'] < (max_date - pd.Timedelta(days=7)))]
         
-        l7_sales = last_7_days.groupby('product_name')['qty'].sum()
-        p21_sales = prev_21_days.groupby('product_name')['qty'].sum() / 3 # متوسط أسبوعي
+        l7 = last_7_days.groupby('product_name')['qty'].sum()
+        p21 = prev_21_days.groupby('product_name')['qty'].sum() / 3
+        df['momentum'] = df['product_name'].map(l7 / p21.replace(0, 1)).fillna(0)
         
-        df['momentum'] = df['product_name'].map(l7_sales / p21_sales.replace(0, 1)).fillna(0)
+    df['brand'] = df['product_name'].apply(lambda x: str(x).split(' ')[0] if pd.notna(x) else 'أخرى')
 
     total_manual_expenses = sum([float(exp['amount']) for exp in manual_expenses]) if manual_expenses else 0.0
     return df, total_manual_expenses
 
-def export_advanced_excel(df, rfm_df, shipping_stats, payment_stats):
-    """توليد ملف Excel احترافي مع فلاتر، ألوان، ورسوم بيانية لـ Power BI"""
+def export_advanced_excel(df, rfm_df):
     output = BytesIO()
-    writer = pd.ExcelWriter(output, engine='xlsxwriter')
-    
-    # 1. شيت تفاصيل الطلبات (للـ Power BI)
-    df.to_excel(writer, sheet_name='قاعدة البيانات الشاملة', index=False)
-    workbook = writer.book
-    worksheet = writer.sheets['قاعدة البيانات الشاملة']
-    
-    # التنسيق الاحترافي
-    header_format = workbook.add_format({'bold': True, 'bg_color': '#16425b', 'font_color': 'white', 'border': 1, 'align': 'center'})
-    money_format = workbook.add_format({'num_format': '#,##0.00'})
-    
-    for col_num, value in enumerate(df.columns.values):
-        worksheet.write(0, col_num, value, header_format)
-        worksheet.set_column(col_num, col_num, 15)
-        if 'profit' in str(value).lower() or 'cost' in str(value).lower() or 'fee' in str(value).lower() or 'total' in str(value).lower():
-            worksheet.set_column(col_num, col_num, 15, money_format)
-            
-    worksheet.autofilter(0, 0, len(df), len(df.columns) - 1)
-    
-    # 2. شيت المنتجات النازفة
-    bleeders = df[df['net_profit'] < 0].groupby('product_name').agg({'qty':'sum', 'net_profit':'sum'}).sort_values('net_profit')
-    bleeders.to_excel(writer, sheet_name='المنتجات النازفة (تحذير)')
-    
-    # 3. شيت العملاء RFM
-    if rfm_df is not None: rfm_df.to_excel(writer, sheet_name='تحليل العملاء RFM', index=False)
-    
-    # 4. إضافة رسم بياني (Chart) داخل الإكسيل
-    chart_sheet = workbook.add_worksheet('ملخص الرسوم البيانية')
-    chart = workbook.add_chart({'type': 'column'})
-    
-    # بيانات تلخيصية للرسم
-    summary = df.groupby('شركة الشحن')['net_profit'].sum().reset_index()
-    summary.to_excel(writer, sheet_name='ملخص الرسوم البيانية', startrow=1, index=False)
-    
-    chart.add_series({
-        'categories': ['ملخص الرسوم البيانية', 2, 0, len(summary)+1, 0],
-        'values':     ['ملخص الرسوم البيانية', 2, 1, len(summary)+1, 1],
-        'name':       'صافي الربح حسب شركة الشحن',
-        'fill':       {'color': '#1f7a8c'}
-    })
-    chart_sheet.insert_chart('E2', chart)
-    
-    writer.close()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='البيانات الشاملة', index=False)
+        if rfm_df is not None: rfm_df.to_excel(writer, sheet_name='RFM العملاء', index=False)
+        
+        bleeders = df[df['net_profit'] < 0].groupby('product_name').agg({'qty':'sum', 'net_profit':'sum'}).sort_values('net_profit')
+        bleeders.to_excel(writer, sheet_name='المنتجات النازفة')
+        
+        brand_prof = df.groupby('brand').agg({'product_total':'sum', 'net_profit':'sum'}).sort_values('net_profit', ascending=False)
+        brand_prof.to_excel(writer, sheet_name='ربحية العلامات التجارية')
     return output.getvalue()
