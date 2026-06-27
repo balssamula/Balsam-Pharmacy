@@ -14,7 +14,6 @@ def extract_single_sku(combined_sku):
     return sku_str
 
 def fast_json_loads(val):
-    """محرك فك JSON سريع ومحصن ضد أخطاء سلة الإملائية"""
     if not isinstance(val, str) or not val.strip(): return []
     try: return json.loads(val, strict=False)
     except:
@@ -22,21 +21,16 @@ def fast_json_loads(val):
         except: return []
 
 def process_sales_and_products(df_sales):
-    """المعالج السريع لآلاف الصفوف (Turbo Parser)"""
-    
-    # 1. توحيد أسماء الأعمدة في حال تم رفع ملف منتجات بدلاً من الطلبات
     col_map = {
         'الكمية': 'qty', 'اسم المنتج': 'product_name', 'أسم المنتج': 'product_name',
         'سعر المنتج': 'price', 'السعر': 'price', 'الإجمالي': 'product_total', 'المجموع': 'product_total'
     }
     df_sales = df_sales.rename(columns=col_map)
     
-    # 2. إذا كان الملف يحتوي على Skus_json يتم فكه بسرعة البرق
     if 'skus_json' in df_sales.columns:
         df_sales['skus_list'] = [fast_json_loads(x) for x in df_sales['skus_json']]
         df_exploded = df_sales.explode('skus_list').reset_index(drop=True)
         
-        # استخراج البيانات باستخدام القواميس (أسرع بـ 100 مرة من بانداز apply)
         extracted = []
         for item in df_exploded['skus_list']:
             if isinstance(item, list) and len(item) >= 4:
@@ -61,22 +55,25 @@ def process_sales_and_products(df_sales):
         df_extracted = pd.DataFrame(extracted)
         df_final = pd.concat([df_exploded.drop(columns=['skus_json', 'skus_list']), df_extracted], axis=1)
         
-        # التأكد القاطع من أنواع البيانات
         df_final['qty'] = pd.to_numeric(df_final['qty'], errors='coerce').fillna(1)
         df_final['price'] = pd.to_numeric(df_final['price'], errors='coerce').fillna(0)
         df_final['cost'] = pd.to_numeric(df_final['cost'], errors='coerce').fillna(0)
+        
+        # 💡 [التعديل الجديد]: دمج الـ SKU مع اسم المنتج (بسرعة فائقة وبدون استخدام apply البطيئة)
+        has_sku = df_final['product_sku'].astype(str).str.strip() != ""
+        df_final['product_display'] = df_final['product_name']
+        df_final.loc[has_sku, 'product_display'] = df_final['product_name'] + " (SKU: " + df_final['product_sku'].astype(str) + ")"
         
         df_final['product_total'] = df_final['price'] * df_final['qty']
         df_final['total_cost'] = df_final['cost'] * df_final['qty']
         
         return df_final
 
-    # 3. خط الدفاع الأخير: إذا كان الملف بدون JSON (يخلق الأعمدة المطلوبة لتفادي الانهيار)
     else:
-        for col in ['qty', 'product_total', 'total_cost', 'price', 'product_name']:
+        for col in ['qty', 'product_total', 'total_cost', 'price', 'product_name', 'product_display']:
             if col not in df_sales.columns:
                 if col == 'qty': df_sales[col] = 1.0
-                elif col == 'product_name': df_sales[col] = 'منتج غير محدد'
+                elif col in ['product_name', 'product_display']: df_sales[col] = 'منتج غير محدد'
                 else: df_sales[col] = 0.0
         
         df_sales['qty'] = pd.to_numeric(df_sales['qty'], errors='coerce').fillna(1)
@@ -95,7 +92,6 @@ def calculate_financials(df_sales, df_profiles, df_payments, df_tabby, df_tamara
     if order_col and order_col in df.columns:
         order_totals = df.groupby(order_col)['product_total'].sum()
 
-        # حساب البروفايلات
         if df_profiles is not None and not df_profiles.empty:
             prof_order_col = [c for c in df_profiles.columns if 'Prescription No' in c or 'رقم الوصفة' in c or 'رقم الطلب' in c]
             if prof_order_col:
@@ -103,7 +99,6 @@ def calculate_financials(df_sales, df_profiles, df_payments, df_tabby, df_tamara
                 cost_map = df_profiles.groupby(prof_order_col[0])[cost_col].sum().to_dict()
                 df['total_cost'] = df.apply(lambda row: cost_map.get(row[order_col], 0.0) * (row['product_total'] / max(order_totals.get(row[order_col], 1), 1)), axis=1)
 
-        # دالة الخصم الآمنة
         def map_fees(df_fee, order_c, fee_c):
             if df_fee is not None and not df_fee.empty:
                 f_map = df_fee.groupby(order_c)[fee_c].sum().to_dict()
@@ -123,21 +118,19 @@ def calculate_financials(df_sales, df_profiles, df_payments, df_tabby, df_tamara
                 items = df[df[order_col] == o_id]['qty'].sum()
                 df.loc[df[order_col] == o_id, 'shipping_cost'] += (18.5 / max(items, 1)) * df.loc[df[order_col] == o_id, 'qty']
 
-    # الحسابات المالية الختامية
     df['marketing_commission'] = df['product_total'] * 0.08
     df['net_profit'] = df['product_total'] - df['total_cost'] - df['gateway_fee'] - df['shipping_cost'] - df['marketing_commission']
     
-    # حساب الزخم (بأمان تام يمنع الانهيار)
-    if 'تاريخ الطلب' in df.columns and 'product_name' in df.columns and 'qty' in df.columns:
+    if 'تاريخ الطلب' in df.columns and 'product_display' in df.columns and 'qty' in df.columns:
         df['تاريخ الطلب'] = pd.to_datetime(df['تاريخ الطلب'], errors='coerce')
         max_date = df['تاريخ الطلب'].max()
         if pd.notnull(max_date):
             last_7_days = df[df['تاريخ الطلب'] >= (max_date - pd.Timedelta(days=7))]
             prev_21_days = df[(df['تاريخ الطلب'] >= (max_date - pd.Timedelta(days=28))) & (df['تاريخ الطلب'] < (max_date - pd.Timedelta(days=7)))]
             
-            l7 = last_7_days.groupby('product_name')['qty'].sum()
-            p21 = prev_21_days.groupby('product_name')['qty'].sum() / 3
-            df['momentum'] = df['product_name'].map(l7 / p21.replace(0, 1)).fillna(0)
+            l7 = last_7_days.groupby('product_display')['qty'].sum()
+            p21 = prev_21_days.groupby('product_display')['qty'].sum() / 3
+            df['momentum'] = df['product_display'].map(l7 / p21.replace(0, 1)).fillna(0)
         else:
             df['momentum'] = 0.0
     else:
@@ -154,7 +147,7 @@ def export_advanced_excel(df, rfm_df):
         df.to_excel(writer, sheet_name='البيانات الشاملة', index=False)
         if rfm_df is not None: rfm_df.to_excel(writer, sheet_name='RFM العملاء', index=False)
         
-        bleeders = df[df['net_profit'] < 0].groupby('product_name').agg({'qty':'sum', 'net_profit':'sum'}).sort_values('net_profit')
+        bleeders = df[df['net_profit'] < 0].groupby('product_display').agg({'qty':'sum', 'net_profit':'sum'}).sort_values('net_profit')
         bleeders.to_excel(writer, sheet_name='المنتجات النازفة')
         
         brand_prof = df.groupby('brand').agg({'product_total':'sum', 'net_profit':'sum'}).sort_values('net_profit', ascending=False)
