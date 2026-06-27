@@ -91,7 +91,7 @@ def show():
             k3.markdown(f"<div class='kpi'><div class='kpi-title'>صافي الربح</div><div class='kpi-val' style='color:{'#27ae60' if net_profit>0 else '#d63031'}'>SAR {net_profit:,.0f}</div></div>", unsafe_allow_html=True)
             k4.markdown(f"<div class='kpi'><div class='kpi-title'>هامش الربح (Margin)</div><div class='kpi-val'>{margin:.1f}%</div></div>", unsafe_allow_html=True)
             
-            outside_sales_ratio = len(df[~df['المدينة'].isin(['العلا', 'تبوك'])]) / len(df) * 100 if 'المدينة' in df.columns else 0
+            outside_sales_ratio = len(df[~df['المدينة'].isin(['العلا', 'تبوك'])]) / len(df) * 100 if 'المدينة' in df.columns and len(df) > 0 else 0
             k5.markdown(f"<div class='kpi'><div class='kpi-title'>طلبات خارج العلا وتبوك</div><div class='kpi-val'>{outside_sales_ratio:.1f}%</div></div>", unsafe_allow_html=True)
 
             # ---------------------------------------------------------
