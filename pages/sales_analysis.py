@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np  # 👈 تم إضافة هذا السطر لحل المشكلة
 import plotly.express as px
 from utils.financial_engine import calculate_financials, export_advanced_excel
 
@@ -101,7 +102,7 @@ def show():
                 st.markdown("<div class='alert-box alert-success'>✅ نجاح تسويقي: طلبات التوصيل الخارجي ممتازة (>15%). ينصح النظام بزيادة ميزانية الإعلانات!</div>", unsafe_allow_html=True)
             if 'طريقة الدفع' in df.columns:
                 pickup_orders = len(df[df['شركة الشحن'].astype(str).str.contains('استلام', na=False)]) if 'شركة الشحن' in df.columns else 0
-                if pickup_orders < (len(df) * 0.10):
+                if len(df) > 0 and pickup_orders < (len(df) * 0.10):
                     st.markdown("<div class='alert-box alert-warning'>⚠️ تراجع الفروع: نسبة 'الاستلام من الفرع' منخفضة جداً. هناك مشكلة محتملة في أداء الفروع.</div>", unsafe_allow_html=True)
             
             loss_makers = df.groupby('product_name')['net_profit'].sum()
@@ -164,8 +165,9 @@ def show():
                 c3.dataframe(prod_stats[prod_stats['momentum'] > 1.2].sort_values('momentum', ascending=False).head(10)[['product_name', 'momentum', 'qty']], use_container_width=True)
 
                 c4.markdown("#### 🏷️ أقوى العلامات التجارية (من حيث صافي الربح)")
-                brand_stats = df.groupby('brand')['net_profit'].sum().reset_index().sort_values('net_profit', ascending=False)
-                c4.dataframe(brand_stats.head(10), use_container_width=True)
+                if 'brand' in df.columns:
+                    brand_stats = df.groupby('brand')['net_profit'].sum().reset_index().sort_values('net_profit', ascending=False)
+                    c4.dataframe(brand_stats.head(10), use_container_width=True)
 
             # --- 4. تحليل المصروفات التشغيلية (OPEX) ---
             with tab_opex:
@@ -210,7 +212,7 @@ def show():
             with tab_export:
                 st.subheader("📥 استخراج تقارير الإدارة العليا")
                 st.success("اضغط لتحميل ملف قاعدة بيانات متكاملة بصيغة Excel مقسمة لشيتات جاهزة للربط مع Power BI.")
-                excel_data = export_advanced_excel(df, rfm if 'تاريخ الطلب' in df.columns else None)
+                excel_data = export_advanced_excel(df, rfm if 'تاريخ الطلب' in df.columns and 'اسم العميل' in df.columns else None)
                 st.download_button("📊 تحميل تقرير Business Intelligence (Excel)", data=excel_data, file_name="Balsam_BI_Full_Report.xlsx", use_container_width=True)
                 
                 st.markdown("""
