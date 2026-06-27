@@ -1,228 +1,158 @@
-# pages/sales_analysis.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from io import BytesIO
-from utils.financial_engine import calculate_financials
-
-@st.cache_data(show_spinner=False)
-def generate_bi_excel_report(df_main, prod_profit, rfm_df, manual_expenses):
-    """توليد ملف إكسيل BI متكامل ومقسم لشيتات للإدارة"""
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # 1. شيت البيانات المالية الشاملة
-        df_main.to_excel(writer, sheet_name="البيانات المالية التفصيلية", index=False)
-        
-        # 2. شيت ربحية المنتجات
-        prod_profit.sort_values('net_profit', ascending=False).to_excel(writer, sheet_name="ربحية المنتجات", index=False)
-        
-        # 3. شيت المنتجات النازفة (الخاسرة)
-        loss_prods = prod_profit[prod_profit['net_profit'] < 0].sort_values('net_profit')
-        loss_prods.to_excel(writer, sheet_name="المنتجات الخاسرة", index=False)
-        
-        # 4. شيت تحليل العملاء (RFM)
-        if rfm_df is not None:
-            rfm_df.sort_values('إجمالي الإنفاق', ascending=False).to_excel(writer, sheet_name="تحليل العملاء", index=False)
-            
-        # 5. شيت المصروفات اليدوية
-        if manual_expenses:
-            pd.DataFrame(manual_expenses).to_excel(writer, sheet_name="المصروفات الإضافية", index=False)
-            
-    return output.getvalue()
+from utils.financial_engine import calculate_financials, export_advanced_excel
 
 def show():
+    st.set_page_config(layout="wide", page_title="نظام ذكاء الأعمال ERP - بلسم العلا")
     st.markdown("""
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700&display=swap');
         * { font-family: 'Tajawal', sans-serif; }
-        .kpi-card {background: #ffffff; border-radius: 12px; padding: 24px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-right: 5px solid #1f7a8c; margin-bottom: 15px;}
-        .kpi-title {color: #6c757d; font-size: 15px; font-weight: 600; margin-bottom: 8px;}
-        .kpi-value {color: #16425b; font-size: 30px; font-weight: 800;}
+        .kpi {background: #fff; padding: 20px; border-radius: 10px; border-top: 5px solid #1f7a8c; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align:center;}
+        .kpi-title {color: #888; font-size: 14px;}
+        .kpi-val {color: #111; font-size: 28px; font-weight: bold;}
+        .alert-box {padding: 15px; border-radius: 8px; margin-bottom: 10px; font-weight: bold;}
+        .alert-danger {background-color: #ffe5e5; color: #d63031; border-left: 5px solid #d63031;}
+        .alert-success {background-color: #e5f9e5; color: #27ae60; border-left: 5px solid #27ae60;}
         </style>
     """, unsafe_allow_html=True)
 
-    st.markdown("<h1>📊 لوحة القيادة الذكية - بلسم العلا (BI Dashboard)</h1>", unsafe_allow_html=True)
-    
-    # ==========================================
-    # 1. محطة الرفع والمصروفات
-    # ==========================================
-    with st.expander("📥 محطة رفع الملفات المالية وإدارة المصروفات", expanded=True):
-        st.markdown("### 📂 رفع التقارير الشهرية")
-        col1, col2, col3 = st.columns(3)
-        col4, col5 = st.columns(2)
+    st.title("🚀 لوحة القيادة الاستراتيجية الشاملة (Strategic KPI Dashboard)")
+
+    with st.expander("📥 1. مركز معالجة البيانات (Data Ingestion)", expanded=True):
+        c1, c2, c3 = st.columns(3)
+        sales_file = c1.file_uploader("📦 مبيعات سلة", type=["xlsx", "csv"])
+        profiles_file = c2.file_uploader("💊 فواتير البروفايلات (لحساب التكلفة)", type=["xlsx", "csv"])
+        payment_file = c3.file_uploader("💳 بوابات الدفع (مدى/فيزا)", type=["xlsx", "csv"])
         
-        with col1: sales_file = st.file_uploader("1️⃣ ملف المبيعات (سلة)", type=["csv", "xlsx"])
-        with col2: payment_file = st.file_uploader("2️⃣ تقرير بوابات الدفع (مدى/فيزا)", type=["csv", "xlsx"])
-        with col3: tabby_file = st.file_uploader("3️⃣ كشف حساب Tabby", type=["csv", "xlsx"])
-        with col4: tamara_file = st.file_uploader("4️⃣ فاتورة Tamara", type=["csv", "xlsx"])
-        with col5: jnt_file = st.file_uploader("5️⃣ فاتورة شحن J&T", type=["csv", "xlsx"])
+        c4, c5, c6 = st.columns(3)
+        tabby_file = c4.file_uploader("🟢 تابي", type=["xlsx", "csv"])
+        tamara_file = c5.file_uploader("🟣 تمارا", type=["xlsx", "csv"])
+        emkan_file = c6.file_uploader("🔵 إمكان (يدوي برقم الطلب)", type=["xlsx", "csv"])
         
+        c7, c8, c9 = st.columns(3)
+        jnt_file = c7.file_uploader("🚚 J&T", type=["xlsx", "csv"])
+        aramex_file = c8.file_uploader("🚚 Aramex", type=["xlsx", "csv"])
+        beez_file = c9.file_uploader("🚚 Beez", type=["xlsx", "csv"])
+
         st.markdown("---")
-        st.markdown("### 💸 سجل المصروفات التشغيلية والتسويقية الإضافية (OPEX)")
-        
-        if 'manual_expenses' not in st.session_state:
-            st.session_state.manual_expenses = []
-            
-        c_desc, c_amt, c_btn = st.columns([3, 2, 1])
-        with c_desc: exp_desc = st.text_input("بيان المصروف (مثال: رسوم سناب شات، إيجار، رواتب)")
-        with c_amt: exp_amt = st.number_input("المبلغ (SAR)", min_value=0.0, step=100.0)
-        with c_btn: 
-            st.write("") 
-            if st.button("➕ إدراج المصروف", use_container_width=True):
-                if exp_desc and exp_amt > 0:
-                    st.session_state.manual_expenses.append({'desc': exp_desc, 'amount': exp_amt})
-                    st.rerun()
-                    
-        if st.session_state.manual_expenses:
-            for i, exp in enumerate(st.session_state.manual_expenses):
-                ct, cd = st.columns([5, 1])
-                with ct: st.info(f"🏷️ {exp['desc']} | 💰 {exp['amount']:,.2f} ر.س")
-                with cd: 
-                    if st.button("❌ حذف", key=f"del_{i}"):
-                        st.session_state.manual_expenses.pop(i)
-                        st.rerun()
+        if 'manual_exp' not in st.session_state: st.session_state.manual_exp = []
+        c_n, c_a, c_b = st.columns([3,2,1])
+        with c_n: exp_name = st.text_input("بيان المصروف الثابت (إيجار/تسويق)")
+        with c_a: exp_amt = st.number_input("المبلغ", min_value=0.0)
+        with c_b: 
+            st.write(""); 
+            if st.button("إضافة"): st.session_state.manual_exp.append({'desc': exp_name, 'amount': exp_amt}); st.rerun()
 
-    # ==========================================
-    # 2. معالجة البيانات وبناء الـ Dashboard
-    # ==========================================
     if sales_file:
-        with st.spinner("🧠 جاري معالجة ملايين البيانات، وتوزيع التكاليف على المنتجات..."):
-            try:
-                # قراءة الملفات
-                df_sales = pd.read_excel(sales_file) if sales_file.name.endswith('xlsx') else pd.read_csv(sales_file)
-                df_pay = pd.read_csv(payment_file) if payment_file and payment_file.name.endswith('csv') else (pd.read_excel(payment_file) if payment_file else pd.DataFrame())
-                df_tabby = pd.read_csv(tabby_file) if tabby_file and tabby_file.name.endswith('csv') else (pd.read_excel(tabby_file, skiprows=10) if tabby_file else pd.DataFrame())
-                df_tamara = pd.read_csv(tamara_file) if tamara_file and tamara_file.name.endswith('csv') else (pd.read_excel(tamara_file, skiprows=26) if tamara_file else pd.DataFrame())
-                df_jnt = pd.read_csv(jnt_file) if jnt_file and jnt_file.name.endswith('csv') else (pd.read_excel(jnt_file, sheet_name="DETAILS") if jnt_file else pd.DataFrame())
+        with st.spinner("جاري دمج وتحليل ملايين السجلات..."):
+            # Load Data
+            def load_df(f, **kwargs): return pd.read_excel(f, **kwargs) if f and f.name.endswith('xlsx') else (pd.read_csv(f, **kwargs) if f else None)
+            
+            df_sales = load_df(sales_file)
+            df_prof = load_df(profiles_file)
+            df_pay, df_tabby, df_tamara, df_emkan = load_df(payment_file), load_df(tabby_file, skiprows=10), load_df(tamara_file, skiprows=26), load_df(emkan_file)
+            df_jnt, df_aramex, df_beez = load_df(jnt_file, sheet_name="DETAILS" if jnt_file and jnt_file.name.endswith('xlsx') else 0), load_df(aramex_file), load_df(beez_file)
 
-                # تشغيل المحرك المالي
-                df, total_opex = calculate_financials(df_sales, df_pay, df_tabby, df_tamara, df_jnt, st.session_state.manual_expenses)
-                
-                # حساب الـ KPIs
-                total_revenue = df['product_total'].sum()
-                total_cogs = df['total_cost'].sum()
-                gross_profit = total_revenue - total_cogs
-                operating_profit = df['net_profit'].sum()
-                net_profit_final = operating_profit - total_opex
-                profit_margin = (net_profit_final / total_revenue * 100) if total_revenue > 0 else 0
-                
-                st.markdown("---")
-                
-                # عرض بطاقات الأداء
-                mc1, mc2, mc3, mc4 = st.columns(4)
-                mc1.markdown(f"<div class='kpi-card'><div class='kpi-title'>إجمالي المبيعات (Revenue)</div><div class='kpi-value'>SAR {total_revenue:,.0f}</div></div>", unsafe_allow_html=True)
-                mc2.markdown(f"<div class='kpi-card'><div class='kpi-title'>إجمالي التكلفة (COGS)</div><div class='kpi-value'>SAR {total_cogs:,.0f}</div></div>", unsafe_allow_html=True)
-                mc3.markdown(f"<div class='kpi-card'><div class='kpi-title'>صافي الربح الفعلي</div><div class='kpi-value' style='color:{'#2a9d8f' if net_profit_final > 0 else '#e63946'}'>SAR {net_profit_final:,.0f}</div></div>", unsafe_allow_html=True)
-                mc4.markdown(f"<div class='kpi-card'><div class='kpi-title'>هامش الربح (Margin)</div><div class='kpi-value'>{profit_margin:,.1f}%</div></div>", unsafe_allow_html=True)
-                
-                st.markdown("<br>", unsafe_allow_html=True)
-                
-                # تجهيز جداول التحليل للإكسيل
-                prod_profit = df.groupby('product_name').agg({
-                    'qty': 'sum',
-                    'product_total': 'sum',
-                    'net_profit': 'sum'
-                }).reset_index()
-                
-                rfm = None # تهيئة متغير العملاء
+            # Engine
+            df, total_opex = calculate_financials(df_sales, df_prof, df_pay, df_tabby, df_tamara, df_emkan, df_jnt, df_aramex, df_beez, st.session_state.manual_exp)
+            
+            # Totals
+            total_rev = df['product_total'].sum()
+            total_gateway = df['gateway_fee'].sum()
+            total_ship = df['shipping_cost'].sum()
+            total_expenses = total_opex + total_gateway + total_ship + df['marketing_commission'].sum()
+            net_profit = df['net_profit'].sum() - total_opex
+            margin = (net_profit / total_rev * 100) if total_rev else 0
 
-                # التبويبات الاحترافية
-                tab1, tab2, tab3 = st.tabs(["🛍️ تحليل المنتجات والربحية", "🚚 أداء الشحن والتمركز", "👥 تحليل RFM وسلوك العملاء"])
-                
-                with tab1:
-                    st.subheader("تحليل الربحية الدقيق لكل منتج (بعد خصم كافة التكاليف)")
-                    
-                    c_win, c_loss = st.columns(2)
-                    with c_win:
-                        st.success("⭐ أعلى 10 منتجات دراً للربح")
-                        top_prods = prod_profit.sort_values('net_profit', ascending=False).head(10)
-                        fig_top = px.bar(top_prods, x='net_profit', y='product_name', orientation='h', color_discrete_sequence=['#2a9d8f'])
-                        st.plotly_chart(fig_top, use_container_width=True)
-                        
-                    with c_loss:
-                        st.error("⚠️ منتجات تنزف الأرباح (تباع بخسارة بعد خصم العمولات والشحن)")
-                        loss_prods = prod_profit[prod_profit['net_profit'] < 0].sort_values('net_profit').head(10)
-                        if not loss_prods.empty:
-                            fig_loss = px.bar(loss_prods, x='net_profit', y='product_name', orientation='h', color_discrete_sequence=['#e63946'])
-                            st.plotly_chart(fig_loss, use_container_width=True)
-                        else:
-                            st.info("لا يوجد منتجات مباعة بخسارة.")
-                            
-                with tab2:
-                    st.subheader("أين تذهب المبيعات؟ (تحليل مناطق التوصيل وشركات الشحن)")
-                    col_city, col_ship = st.columns(2)
-                    
-                    with col_city:
-                        if 'المدينة' in df.columns:
-                            city_perf = df.groupby('المدينة').agg({'product_total': 'sum'}).reset_index().sort_values('product_total', ascending=False).head(10)
-                            fig_city = px.pie(city_perf, names='المدينة', values='product_total', hole=0.4, title="أعلى 10 مدن في المبيعات")
-                            st.plotly_chart(fig_city, use_container_width=True)
-                            
-                    with col_ship:
-                        if 'شركة الشحن' in df.columns:
-                            ship_perf = df.groupby('شركة الشحن').agg({'product_total': 'sum'}).reset_index()
-                            fig_ship = px.bar(ship_perf, x='شركة الشحن', y='product_total', title="حجم المبيعات حسب شركة الشحن/الفرع", color_discrete_sequence=['#1f7a8c'])
-                            st.plotly_chart(fig_ship, use_container_width=True)
-                
-                with tab3:
-                    st.subheader("تحليل العملاء (RFM) - الولاء مقابل خطر الفقدان")
-                    date_col = [c for c in df.columns if 'تاريخ' in c or 'Date' in c]
-                    name_col = [c for c in df.columns if 'اسم العميل' in c or 'Customer Name' in c]
-                    
-                    if date_col and name_col:
-                        date_c = date_col[0]
-                        name_c = name_col[0]
-                        
-                        df[date_c] = pd.to_datetime(df[date_c], errors='coerce')
-                        recent_date = df[date_c].max()
-                        
-                        rfm = df.groupby(name_c).agg({
-                            date_c: lambda x: (recent_date - x.max()).days, # Recency
-                            'رقم الطلب': 'nunique', # Frequency
-                            'product_total': 'sum' # Monetary
-                        }).reset_index()
-                        rfm.columns = ['اسم العميل', 'أيام منذ آخر طلب', 'عدد الطلبات', 'إجمالي الإنفاق']
-                        
-                        # تصنيف العملاء
-                        def classify_customer(row):
-                            if row['إجمالي الإنفاق'] >= 1000 and row['أيام منذ آخر طلب'] <= 30: return "🌟 عميل VIP نشط"
-                            elif row['إجمالي الإنفاق'] >= 500 and row['أيام منذ آخر طلب'] > 30: return "🚨 VIP في خطر (Churn Risk)"
-                            elif row['عدد الطلبات'] > 1: return "🔄 عميل متكرر"
-                            else: return "👤 عميل جديد/عادي"
-                            
-                        rfm['تصنيف العميل'] = rfm.apply(classify_customer, axis=1)
-                        
-                        r1, r2 = st.columns(2)
-                        with r1:
-                            st.success("🌟 قائمة عملاء الـ VIP (أنفقوا > 1000 ر.س ومستمرون بالطلب)")
-                            vip_active = rfm[rfm['تصنيف العميل'] == '🌟 عميل VIP نشط'].sort_values('إجمالي الإنفاق', ascending=False)
-                            st.dataframe(vip_active[['اسم العميل', 'عدد الطلبات', 'إجمالي الإنفاق']].head(10), use_container_width=True)
-                        
-                        with r2:
-                            st.error("🚨 عملاء ذو قيمة عالية لم يشتروا منذ فترة (يجب التواصل معهم فوراً)")
-                            risk_customers = rfm[rfm['تصنيف العميل'] == '🚨 VIP في خطر (Churn Risk)'].sort_values('إجمالي الإنفاق', ascending=False)
-                            st.dataframe(risk_customers[['اسم العميل', 'أيام منذ آخر طلب', 'إجمالي الإنفاق']].head(10), use_container_width=True)
-                            
-                    else:
-                        st.warning("لم يتم العثور على أعمدة 'تاريخ الطلب' أو 'اسم العميل' في الملف المرفوع.")
-                
-                # ==========================================
-                # 3. زر تحميل التقرير النهائي (BI Excel Report)
-                # ==========================================
-                st.markdown("---")
-                st.subheader("💾 استخراج التقارير الإدارية (BI Report)")
-                st.info("هذا الزر يقوم بتوليد ملف Excel احترافي يحتوي على كافة التحليلات، الأرباح، المنتجات الخاسرة، وقاعدة بيانات العملاء مقسمة في شيتات جاهزة للطباعة والعرض على الإدارة.")
-                
-                excel_bytes = generate_bi_excel_report(df, prod_profit, rfm, st.session_state.manual_expenses)
-                st.download_button(
-                    label="📥 تحميل تقرير ذكاء الأعمال المالي (Excel)",
-                    data=excel_bytes,
-                    file_name="Balsam_BI_Financial_Report.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
+            # --- 1. KPI Dashboard ---
+            st.markdown("### 📊 المؤشرات العليا (KPIs)")
+            k1, k2, k3, k4, k5 = st.columns(5)
+            k1.markdown(f"<div class='kpi'><div class='kpi-title'>إجمالي المبيعات</div><div class='kpi-val'>SAR {total_rev:,.0f}</div></div>", unsafe_allow_html=True)
+            k2.markdown(f"<div class='kpi'><div class='kpi-title'>إجمالي المصروفات</div><div class='kpi-val'>SAR {total_expenses:,.0f}</div></div>", unsafe_allow_html=True)
+            k3.markdown(f"<div class='kpi'><div class='kpi-title'>صافي الربح</div><div class='kpi-val' style='color:{'green' if net_profit>0 else 'red'}'>SAR {net_profit:,.0f}</div></div>", unsafe_allow_html=True)
+            k4.markdown(f"<div class='kpi'><div class='kpi-title'>هامش الربح</div><div class='kpi-val'>{margin:.1f}%</div></div>", unsafe_allow_html=True)
+            
+            delivery_growth = len(df[df['المدينة'] != 'العلا']) / len(df) * 100 if 'المدينة' in df.columns else 0
+            k5.markdown(f"<div class='kpi'><div class='kpi-title'>مبيعات خارج العلا</div><div class='kpi-val'>{delivery_growth:.1f}%</div></div>", unsafe_allow_html=True)
 
-            except Exception as e:
-                st.error(f"حدث خطأ فني أثناء مطابقة الملفات: {str(e)}")
-    else:
-        st.info("📂 يرجى رفع ملف المبيعات (سلة) كحد أدنى لبدء لوحة ذكاء الأعمال.")
+            # --- 7. Proactive Alerts ---
+            st.markdown("### 🚨 الإنذارات الاستراتيجية الآلية")
+            if delivery_growth > 15:
+                st.markdown("<div class='alert-box alert-success'>🎯 فرصة تسويقية: طلبات التوصيل الخارجي ممتازة (>15%). نوصي بزيادة ميزانية الإعلانات الرقمية في هذه المدن!</div>", unsafe_allow_html=True)
+            if (df['net_profit'] < 0).any():
+                st.markdown(f"<div class='alert-box alert-danger'>⚠️ نزيف أموال: يوجد {len(df[df['net_profit'] < 0]['product_name'].unique())} منتجات تباع بخسارة! يجب إزالة العروض عنها فوراً.</div>", unsafe_allow_html=True)
+
+            tab1, tab2, tab3, tab4 = st.tabs(["👥 العملاء (RFM)", "📦 أداء المنتجات", "🚚 المصروفات (شحن/دفع)", "📤 تصدير BI"])
+
+            with tab1:
+                st.subheader("تحليل العملاء (RFM) ومخاطر الفقدان")
+                if 'تاريخ الطلب' in df.columns and 'اسم العميل' in df.columns:
+                    rfm = df.groupby('اسم العميل').agg({
+                        'تاريخ الطلب': lambda x: (df['تاريخ الطلب'].max() - x.max()).days,
+                        'رقم الطلب': 'nunique',
+                        'product_total': 'sum'
+                    }).reset_index()
+                    rfm.columns = ['العميل', 'أيام الانقطاع', 'الطلبات', 'الإنفاق']
+                    
+                    c1, c2 = st.columns(2)
+                    c1.success("🌟 عملاء VIP (للرعاية الخاصة)")
+                    c1.dataframe(rfm[(rfm['الإنفاق'] > 1000) & (rfm['أيام الانقطاع'] <= 30)].sort_values('الإنفاق', ascending=False).head(10))
+                    
+                    c2.error("🚨 عملاء في خطر الفقدان (يجب الاتصال بهم!)")
+                    c2.dataframe(rfm[(rfm['الإنفاق'] > 500) & (rfm['أيام الانقطاع'] > 45)].sort_values('الإنفاق', ascending=False).head(10))
+
+            with tab2:
+                st.subheader("تحليل ربحية المنتجات (Profitability)")
+                c1, c2 = st.columns(2)
+                prod_stats = df.groupby('product_name').agg({'product_total':'sum', 'net_profit':'sum', 'momentum':'mean'}).reset_index()
+                
+                c1.markdown("#### ✅ المنتجات التي تجلب الربح الحقيقي")
+                c1.dataframe(prod_stats.sort_values('net_profit', ascending=False).head(10))
+                
+                c2.markdown("#### 🩸 المنتجات النازفة (تباع بخسارة)")
+                c2.dataframe(prod_stats[prod_stats['net_profit'] < 0].sort_values('net_profit').head(10))
+
+            with tab3:
+                st.subheader("تحليل المصروفات (مُطابق لتقارير الإدارة)")
+                c1, c2 = st.columns(2)
+                
+                with c1:
+                    st.markdown("#### 🚚 تحليل شركات الشحن")
+                    if 'شركة الشحن' in df.columns:
+                        ship_stats = df.groupby('شركة الشحن').agg(
+                            الطلبات=('رقم الطلب', 'nunique'),
+                            قيمة_الطلبات=('product_total', 'sum'),
+                            الرسوم_المدفوعة=('shipping_cost', 'sum')
+                        ).reset_index()
+                        ship_stats['الفرق'] = ship_stats['قيمة_الطلبات'] - ship_stats['الرسوم_المدفوعة']
+                        st.dataframe(ship_stats.style.background_gradient(cmap='Blues', subset=['الطلبات']))
+                
+                with c2:
+                    st.markdown("#### 💳 تحليل بوابات الدفع")
+                    if 'طريقة الدفع' in df.columns:
+                        pay_stats = df.groupby('طريقة الدفع').agg(
+                            الطلبات=('رقم الطلب', 'nunique'),
+                            قيمة_الطلبات=('product_total', 'sum'),
+                            الرسوم_المستقطعة=('gateway_fee', 'sum')
+                        ).reset_index()
+                        pay_stats['نسبة الرسوم'] = (pay_stats['الرسوم_المستقطعة'] / pay_stats['قيمة_الطلبات'] * 100).fillna(0).map("{:.2f}%".format)
+                        st.dataframe(pay_stats.style.background_gradient(cmap='Greens', subset=['قيمة_الطلبات']))
+
+            with tab4:
+                st.subheader("📥 استخراج تقارير Power BI و PDF")
+                st.info("تم تجهيز ملف Excel احترافي يحتوي على كافة الطلبات، الحسابات الدقيقة، الفلاتر، والرسوم البيانية المدمجة الجاهزة للربط المباشر مع Power BI.")
+                
+                excel_data = export_advanced_excel(df, rfm if 'تاريخ الطلب' in df.columns else None, None, None)
+                
+                c1, c2 = st.columns(2)
+                c1.download_button("📊 تحميل ملف قاعدة البيانات (Power BI Excel)", data=excel_data, file_name="Balsam_BI_Database.xlsx", use_container_width=True)
+                
+                # طباعة PDF عبر HTML
+                st.markdown("""
+                    <script>
+                    function printReport() { window.print(); }
+                    </script>
+                    <button onclick="printReport()" style="width:100%; padding:10px; background:#e74c3c; color:white; border:none; border-radius:5px; cursor:pointer;">📄 طباعة التقرير كـ PDF</button>
+                """, unsafe_allow_html=True)
