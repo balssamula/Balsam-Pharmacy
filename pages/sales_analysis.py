@@ -4,6 +4,26 @@ import numpy as np
 import plotly.express as px
 from utils.financial_engine import calculate_financials, export_advanced_excel
 
+# 🧠 التخزين المؤقت للبيانات لمنع إعادة المعالجة البطيئة عند كل نقرة
+@st.cache_data(show_spinner=False)
+def load_and_process_data(sales_file, profiles_file, payment_file, tabby_file, tamara_file, emkan_file, jnt_file, aramex_file, beez_file, manual_exp):
+    def load_df(f, **kwargs):
+        if not f: return None
+        fname = f.name.lower()
+        try:
+            if fname.endswith('.xlsx') or fname.endswith('.xls'): return pd.read_excel(f, **kwargs)
+            elif fname.endswith('.csv'): kwargs.pop('sheet_name', None); return pd.read_csv(f, **kwargs)
+            return None
+        except Exception: return None
+
+    df_sales = load_df(sales_file)
+    return calculate_financials(
+        df_sales, load_df(profiles_file), load_df(payment_file), 
+        load_df(tabby_file, skiprows=10), load_df(tamara_file, skiprows=26), load_df(emkan_file), 
+        load_df(jnt_file, sheet_name="DETAILS"), load_df(aramex_file), load_df(beez_file), 
+        manual_exp
+    )
+
 def show():
     st.set_page_config(layout="wide", page_title="نظام ذكاء الأعمال ERP - بلسم العلا")
     st.markdown("""
@@ -54,23 +74,12 @@ def show():
                 if col_del.button("❌", key=f"del_{i}"): st.session_state.manual_exp.pop(i); st.rerun()
 
     if sales_file:
-        with st.spinner("جاري دمج وتحليل ملايين السجلات وتوليد رؤى ذكاء الأعمال..."):
+        with st.spinner("جاري دمج وتحليل البيانات الضخمة بأمان..."):
             
-            def load_df(f, **kwargs):
-                if not f: return None
-                fname = f.name.lower()
-                try:
-                    if fname.endswith('.xlsx') or fname.endswith('.xls'): return pd.read_excel(f, **kwargs)
-                    elif fname.endswith('.csv'): kwargs.pop('sheet_name', None); return pd.read_csv(f, **kwargs)
-                    return None
-                except Exception: return None
-            
-            df_sales = load_df(sales_file)
-            df, total_opex = calculate_financials(
-                df_sales, load_df(profiles_file), load_df(payment_file), 
-                load_df(tabby_file, skiprows=10), load_df(tamara_file, skiprows=26), load_df(emkan_file), 
-                load_df(jnt_file, sheet_name="DETAILS"), load_df(aramex_file), load_df(beez_file), 
-                st.session_state.manual_exp
+            # 🛡️ استدعاء البيانات باستخدام دالة الكاش لحماية المتصفح من الانهيار
+            df, total_opex = load_and_process_data(
+                sales_file, profiles_file, payment_file, tabby_file, tamara_file, 
+                emkan_file, jnt_file, aramex_file, beez_file, st.session_state.manual_exp
             )
 
             st.markdown("### 1️⃣ المقاييس الاستراتيجية (Executive KPIs)")
@@ -99,10 +108,11 @@ def show():
                 if len(df) > 0 and pickup_orders < (len(df) * 0.10):
                     st.markdown("<div class='alert-box alert-warning'>⚠️ تراجع الفروع: نسبة 'الاستلام من الفرع' منخفضة جداً. هناك مشكلة محتملة في أداء الفروع.</div>", unsafe_allow_html=True)
             
+            # 🛡️ تحديد عدد المنتجات المعروضة في التحذير لتخفيف الذاكرة
             loss_makers = df.groupby('product_display')['net_profit'].sum()
             loss_count = len(loss_makers[loss_makers < -10])
             if loss_count > 0:
-                st.markdown(f"<div class='alert-box alert-danger'>🛑 نزيف أموال: تم اكتشاف {loss_count} منتجاً تباع بخسارة صريحة. راجع تبويب تحليل المنتجات لإزالة العروض عنها فوراً!</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='alert-box alert-danger'>🛑 نزيف أموال: تم اكتشاف {loss_count} منتجاً تباع بخسارة صريحة. راجع التقرير المستخرج لإزالتها!</div>", unsafe_allow_html=True)
 
             st.markdown("<br>", unsafe_allow_html=True)
             tab_rfm, tab_prod, tab_opex, tab_branch, tab_export = st.tabs([
@@ -110,12 +120,11 @@ def show():
                 "💳 المصروفات (OPEX)", "🏢 أداء الفروع", "📤 تصدير التقارير (BI/PDF)"
             ])
 
-            # --- 2. تحليل العملاء (مع رقم الجوال) ---
+            # --- 2. تحليل العملاء (الحد من عرض الجداول الكبيرة) ---
             with tab_rfm:
                 st.subheader("تحليل العملاء وخطر الفقدان (مُدمج ببيانات الاتصال)")
                 if 'تاريخ الطلب' in df.columns and 'اسم العميل' in df.columns:
                     recent_date = df['تاريخ الطلب'].max()
-                    # 💡 إضافة الجوال لمجموعة التجميع إذا كان متاحاً
                     mob_col = 'رقم الجوال' if 'رقم الجوال' in df.columns else None
                     group_cols = ['اسم العميل', mob_col] if mob_col else ['اسم العميل']
                     
@@ -131,13 +140,13 @@ def show():
                         rfm.columns = ['العميل', 'أيام الانقطاع', 'الطلبات', 'الإنفاق']
                     
                     c1, c2 = st.columns(2)
-                    c1.success("👑 عملاء VIP الوفيون (أعلى 20% إنفاق ونشطون)")
+                    c1.success("👑 عملاء VIP الوفيون (أعلى 10 نشطون)")
                     vip_df = rfm[(rfm['الإنفاق'] > 1000) & (rfm['أيام الانقطاع'] <= 30)].sort_values('الإنفاق', ascending=False)
-                    c1.dataframe(vip_df.head(10), use_container_width=True)
+                    c1.dataframe(vip_df.head(10), use_container_width=True) # 🛡️ عرض 10 فقط في المتصفح
                     
-                    c2.error("🚨 عملاء VIP في خطر الفقدان (لم يشتروا منذ 45 يوماً!)")
+                    c2.error("🚨 عملاء VIP في خطر الفقدان (أعلى 10 عرضة للفقدان)")
                     churn_df = rfm[(rfm['الإنفاق'] > 500) & (rfm['أيام الانقطاع'] > 45)].sort_values('الإنفاق', ascending=False)
-                    c2.dataframe(churn_df.head(10), use_container_width=True)
+                    c2.dataframe(churn_df.head(10), use_container_width=True) # 🛡️ عرض 10 فقط في المتصفح
                     
                     if 'المدينة' in df.columns:
                         st.markdown("#### 🗺️ خريطة التمركز الجغرافي للعملاء")
@@ -145,26 +154,25 @@ def show():
                         fig_city = px.bar(city_df, x='المدينة', y='product_total', color='product_total', color_continuous_scale='Viridis', title='أعلى 10 مدن مبيعاً')
                         st.plotly_chart(fig_city, use_container_width=True)
 
-            # --- 3. تحليل المنتجات (الآن مع الـ SKU) ---
+            # --- 3. تحليل المنتجات (الحد من العرض) ---
             with tab_prod:
                 st.subheader("تحليل الأداء والربحية للمنتجات والعلامات التجارية")
-                # 💡 استخدام product_display الذي يجمع الاسم مع הـ SKU
                 prod_stats = df.groupby('product_display').agg({
                     'qty':'sum', 'product_total':'sum', 'net_profit':'sum', 'momentum':'mean'
                 }).reset_index()
                 
                 c1, c2 = st.columns(2)
-                c1.markdown("#### ✅ المنتجات التي تجلب الربح الحقيقي")
-                c1.dataframe(prod_stats.sort_values('net_profit', ascending=False).head(10)[['product_display', 'qty', 'net_profit']], use_container_width=True)
+                c1.markdown("#### ✅ أعلى 20 منتجاً دراً للربح")
+                c1.dataframe(prod_stats.sort_values('net_profit', ascending=False).head(20)[['product_display', 'qty', 'net_profit']], use_container_width=True)
                 
-                c2.markdown("#### 🩸 المنتجات التي تنزف الربح (تباع بخسارة)")
-                c2.dataframe(prod_stats[prod_stats['net_profit'] < 0].sort_values('net_profit').head(10)[['product_display', 'net_profit', 'momentum']], use_container_width=True)
+                c2.markdown("#### 🩸 أعلى 20 منتجاً نازفاً للربح")
+                c2.dataframe(prod_stats[prod_stats['net_profit'] < 0].sort_values('net_profit').head(20)[['product_display', 'net_profit', 'momentum']], use_container_width=True)
 
                 c3, c4 = st.columns(2)
-                c3.markdown("#### 📈 منتجات صاعدة بقوة (مؤشر الزخم > 1)")
+                c3.markdown("#### 📈 أقوى 10 منتجات صاعدة بقوة")
                 c3.dataframe(prod_stats[prod_stats['momentum'] > 1.2].sort_values('momentum', ascending=False).head(10)[['product_display', 'momentum', 'qty']], use_container_width=True)
 
-                c4.markdown("#### 🏷️ أقوى العلامات التجارية (من حيث صافي الربح)")
+                c4.markdown("#### 🏷️ أقوى 10 علامات تجارية")
                 if 'brand' in df.columns:
                     brand_stats = df.groupby('brand')['net_profit'].sum().reset_index().sort_values('net_profit', ascending=False)
                     c4.dataframe(brand_stats.head(10), use_container_width=True)
@@ -197,12 +205,12 @@ def show():
                     branch_df['الحالة'] = np.where(branch_df['product_total'] >= branch_df['المستهدف (تقديري)'], "✅ محقق", "🔴 متراجع")
                     st.dataframe(branch_df.sort_values('product_total', ascending=False).head(15), use_container_width=True)
 
-            # --- 6. التصدير ---
+            # --- 6. التصدير (المكان الذي تحصل فيه على بياناتك الكاملة 100%) ---
             with tab_export:
-                st.subheader("📥 استخراج تقارير الإدارة العليا")
-                st.success("اضغط لتحميل ملف قاعدة بيانات متكاملة بصيغة Excel مقسمة لشيتات جاهزة للربط مع Power BI.")
+                st.subheader("📥 استخراج تقارير الإدارة العليا (بكامل البيانات)")
+                st.success("اضغط لتحميل ملف قاعدة بيانات متكاملة بصيغة Excel (تتضمن جميع الـ 100 ألف صف) مقسمة لشيتات جاهزة للربط مع Power BI.")
                 excel_data = export_advanced_excel(df, rfm if 'تاريخ الطلب' in df.columns and 'اسم العميل' in df.columns else None)
-                st.download_button("📊 تحميل تقرير Business Intelligence (Excel)", data=excel_data, file_name="Balsam_BI_Full_Report.xlsx", use_container_width=True)
+                st.download_button("📊 تحميل التقرير الكامل (Excel)", data=excel_data, file_name="Balsam_BI_Full_Report.xlsx", use_container_width=True)
                 
                 st.markdown("""
                     <hr>
