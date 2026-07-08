@@ -125,26 +125,90 @@ def parse_composite_sku(sku):
     return sku, None, None, [sku], False, False
 
 def extract_offer_name(text):
-    """استخراج اسم العرض التفصيلي من النصوص"""
+    """
+    استخراج اسم العرض التفصيلي من النصوص مع دعم جميع الصيغ الممكنة
+    """
     text = str(text) if not pd.isna(text) else ""
+    
+    # 1️⃣ خصم على القطعة الثانية (مع النسبة المئوية)
     if "خصم" in text and "القطعة الثانية" in text:
-        match = re.search(r'(خصم \d+% على القطعة الثانية)', text)
-        return match.group(1) if match else "خصم على القطعة الثانية"
+        # محاولة استخراج النسبة المئوية
+        match = re.search(r'خصم\s*(\d+)\s*%\s*على\s*القطعة\s*الثانية', text)
+        if match:
+            return f"خصم {match.group(1)}% على القطعة الثانية"
+        # محاولة أخرى
+        match = re.search(r'خصم\s*(\d+)\s*%\s*على\s*القطعة', text)
+        if match:
+            return f"خصم {match.group(1)}% على القطعة الثانية"
+        return "خصم على القطعة الثانية"
+    
+    # 2️⃣ خصم على الحبة الثانية (مع النسبة المئوية)
     if "خصم" in text and "الحبة الثانية" in text:
-        match = re.search(r'(خصم \d+% على الحبة الثانية)', text)
-        if match: return match.group(1)
-        match = re.search(r'(خصم \d+ ريال على الحبة الثانية)', text)
-        return match.group(1) if match else "خصم على الحبة الثانية"
+        match = re.search(r'خصم\s*(\d+)\s*%\s*على\s*الحبة\s*الثانية', text)
+        if match:
+            return f"خصم {match.group(1)}% على الحبة الثانية"
+        # محاولة أخرى
+        match = re.search(r'خصم\s*(\d+)\s*%\s*على\s*الحبة', text)
+        if match:
+            return f"خصم {match.group(1)}% على الحبة الثانية"
+        # خصم بقيمة ريال
+        match = re.search(r'خصم\s*(\d+)\s*ريال\s*على\s*الحبة\s*الثانية', text)
+        if match:
+            return f"خصم {match.group(1)} ريال على الحبة الثانية"
+        return "خصم على الحبة الثانية"
+    
+    # 3️⃣ عرض مجاني (مثل 2+1 مجاناً)
     if "عرض" in text and "مجاناً" in text:
-        match = re.search(r'(عرض \d+\+\d+ مجاناً?)', text)
-        return match.group(1) if match else "عرض مجاني"
+        match = re.search(r'عرض\s*(\d+)\s*\+\s*(\d+)\s*مجاناً?', text)
+        if match:
+            return f"عرض {match.group(1)}+{match.group(2)} مجاناً"
+        match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجاناً?', text)
+        if match:
+            return f"عرض {match.group(1)}+{match.group(2)} مجاناً"
+        return "عرض مجاني"
+    
+    # 4️⃣ صفقة اليوم (مع الحفاظ على النص الكامل)
     if "صفقة اليوم" in text:
+        # محاولة استخراج النص الكامل للصفقة
         match = re.search(r'صفقة اليوم\s*:\s*([^:]+?)(?=\s*(?:اذا اشترى|نسبة من|يبدأ بتاريخ|$))', text)
-        if match: return f"صفقة اليوم : {match.group(1).strip()}"
+        if match:
+            full_text = match.group(1).strip()
+            # إذا كان النص طويلاً جداً، نأخذ جزءاً منه
+            if len(full_text) > 50:
+                full_text = full_text[:50] + "..."
+            return f"صفقة اليوم : {full_text}"
         return "صفقة اليوم"
+    
+    # 5️⃣ عروض الكميات (مثل 6حبات بسعر 77 ريال)
     if "حبة بسعر" in text or "حبات بسعر" in text:
-        match = re.search(r'(\d+حبات? بسعر [\d.]+ ريال)', text)
-        return match.group(1) if match else "عرض كميات"
+        match = re.search(r'(\d+)\s*حبات?\s*بسعر\s*([\d.]+)\s*ريال', text)
+        if match:
+            return f"{match.group(1)}حبات بسعر {match.group(2)} ريال"
+        return "عرض كميات"
+    
+    # 6️⃣ عرض خاص - خصم 60% على الحبة الثانية (صيغة خاصة)
+    if "عرض خاص" in text and "خصم" in text:
+        match = re.search(r'عرض خاص\s*-\s*خصم\s*(\d+)\s*%\s*على\s*الحبة\s*الثانية', text)
+        if match:
+            return f"عرض خاص - خصم {match.group(1)}% على الحبة الثانية"
+        return "عرض خاص"
+    
+    # 7️⃣ عروض أخرى (مثل 2حبة بسعر 99 ريال)
+    if "حبة بسعر" in text:
+        match = re.search(r'(\d+)\s*حبة\s*بسعر\s*([\d.]+)\s*ريال', text)
+        if match:
+            return f"{match.group(1)}حبة بسعر {match.group(2)} ريال"
+    
+    # 8️⃣ حالة خاصة: أرقام فقط بدون عرض واضح
+    # نحاول استخراج أي نص قبل "/" أو "-" قد يكون اسم العرض
+    if "/" in text:
+        parts = text.split("/")
+        if len(parts) >= 2:
+            potential_name = parts[0].strip()
+            # إذا كان هناك نص قبل / وليس مجرد أرقام
+            if re.search(r'[^\d\s\-]', potential_name):
+                return potential_name
+    
     return "عرض خاص"
 
 def extract_dates(text):
