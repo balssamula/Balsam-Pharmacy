@@ -271,6 +271,86 @@ def parse_composite_sku(sku):
     return sku, None, None, [sku], False, False
 
 # ========== دوال حساب الخصم والنسب ==========
+def calculate_discount_percentage_advanced(original_price, discounted_price, promo_text, is_taxable, quantity=1):
+    """
+    حساب نسبة الخصم المتقدمة مع مراعاة:
+    1. الضريبة (15%)
+    2. عدد الحبات
+    3. أنواع العناوين الترويجية المختلفة
+    """
+    try:
+        original = float(str(original_price).replace(',', '').strip()) if original_price else 0
+        discounted = float(str(discounted_price).replace(',', '').strip()) if discounted_price else 0
+    except (ValueError, TypeError):
+        return "", 0
+    
+    if original <= 0:
+        return "", 0
+    
+    # حساب السعر الأصلي بعد ضرب عدد الحبات
+    try:
+        qty = int(quantity) if quantity and str(quantity).isdigit() else 1
+    except (ValueError, TypeError):
+        qty = 1
+    
+    original_total = original * qty
+    
+    # 1️⃣ التحقق من وجود نسبة مئوية مباشرة في النص الترويجي
+    if promo_text and isinstance(promo_text, str):
+        match = re.search(r'خصم\s*(\d+)\s*%', promo_text)
+        if match:
+            return f"{match.group(1)}%", float(match.group(1))
+    
+    # 2️⃣ استخراج السعر من النص الترويجي (مثل 12حبة ب29.95 ريال)
+    promo_price = extract_price_from_promo(promo_text)
+    if promo_price is not None and promo_price > 0:
+        # إعادة السعر إلى ما قبل الضريبة إذا كان المنتج خاضعاً للضريبة
+        if is_taxable:
+            promo_price_before_tax = promo_price / 1.15
+        else:
+            promo_price_before_tax = promo_price
+        
+        if original_total > promo_price_before_tax:
+            discount_amount = original_total - promo_price_before_tax
+            percentage = (discount_amount / original_total) * 100
+            return f"{round(percentage, 0)}%", round(percentage, 0)
+    
+    # 3️⃣ استخراج قيمة الخصم بالريال (مثل خصم 17 ريال)
+    discount_value = extract_discount_value_from_promo(promo_text)
+    if discount_value is not None and discount_value > 0:
+        # إذا كان المنتج خاضعاً للضريبة، قيمة الخصم تُطبق على السعر قبل الضريبة
+        if is_taxable:
+            discount_value_before_tax = discount_value / 1.15
+        else:
+            discount_value_before_tax = discount_value
+        
+        if original_total > 0:
+            percentage = (discount_value_before_tax / original_total) * 100
+            return f"{round(percentage, 0)}%", round(percentage, 0)
+    
+    # 4️⃣ حساب النسبة من السعر الأصلي والمخفض (مع مراعاة الضريبة)
+    if discounted > 0 and original_total > discounted:
+        # إعادة السعر المخفض إلى ما قبل الضريبة إذا كان المنتج خاضعاً للضريبة
+        if is_taxable:
+            discounted_before_tax = discounted / 1.15
+        else:
+            discounted_before_tax = discounted
+        
+        if original_total > discounted_before_tax:
+            discount_amount = original_total - discounted_before_tax
+            percentage = (discount_amount / original_total) * 100
+            return f"{round(percentage, 0)}%", round(percentage, 0)
+    
+    # 5️⃣ عروض مجانية (2+1 مجاناً)
+    match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجاناً?', str(promo_text) if promo_text else "")
+    if match:
+        free_qty = int(match.group(2))
+        total_qty = int(match.group(1)) + free_qty
+        percentage = (free_qty / total_qty) * 100
+        return f"{round(percentage, 0)}%", round(percentage, 0)
+    
+    return "", 0
+
 def is_taxable(sku, price_map):
     """التحقق من أن المنتج خاضع للضريبة من خلال العمود D"""
     if sku in price_map:
