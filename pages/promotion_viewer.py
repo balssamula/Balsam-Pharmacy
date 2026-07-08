@@ -492,6 +492,8 @@ def show():
                 group_qty_str = " | ".join(g_qtys_list) if any(x != "" for x in g_qtys_list) else ""
                 group_promo_str = " | ".join([x for x in g_promos_list if x != ""]) if g_promos_list else ""
                 group_end_str = " | ".join([x for x in g_ends_list if x != ""]) if g_ends_list else ""
+                discount_percentage = extract_discount_percentage(text)  # يجب تمرير النص الأصلي
+                offer_quantity = extract_offer_quantity(text)
                 
                 final_results.append({
                     "رقم المنتج": base_sku, 
@@ -502,6 +504,8 @@ def show():
                     "اسم المنتج للمجموعة": group_name_str, 
                     "سعر المنتج للمجموعة": group_price_str,
                     "اسم العرض الخاص": offer_names, "بداية العرض": offer_starts, "نهاية العرض": offer_ends,
+                    "نسبة الخصم": discount_percentage,  # 🆕 عمود جديد
+                    "عدد حبات العرض": offer_quantity,   # 🆕 عمود جديد
                     "سعر مخفض للمنتج": disc_price_item, "سعر مخفض للمجموعة": group_disc_price_str, "عدد حبات المجموعة": group_qty_str,
                     "العنوان الترويجي للمنتج": disc_promo_item, "العنوان الترويجي للمجموعة": group_promo_str,
                     "تاريخ نهاية التخفيض للمنتج": disc_end_item, "تاريخ نهاية التخفيض للمجموعة": group_end_str,
@@ -561,3 +565,173 @@ def show():
             if selected_type != "الكل": st.dataframe(df_final[df_final["اسم العرض الخاص"] == selected_type], use_container_width=True)
     else:
         st.info("📂 بانتظار رفع ملف العروض المحدث لتنشيط المعالجة الفورية واستعراض القنوات المتوازية.")
+
+def extract_discount_percentage(text):
+    """
+    استخراج نسبة الخصم من نص العرض
+    - إذا كان "خصم 50% على الحبة الثانية" → 50%
+    - إذا كان "2+1 مجاناً" → 100% (لأن الحبة الثالثة مجانية بالكامل)
+    - إذا كان "خصم 20 ريال" → يتم حساب النسبة بناءً على السعر (سيتم حسابه لاحقاً)
+    - إذا كان "عرض 3+1 مجاناً" → 100% (الحبة الرابعة مجانية)
+    """
+    text = str(text) if not pd.isna(text) else ""
+    
+    # 1️⃣ خصم بنسبة مئوية
+    match = re.search(r'خصم\s*(\d+)\s*%', text)
+    if match:
+        return f"{match.group(1)}%"
+    
+    # 2️⃣ عروض مجانية (2+1 مجاناً، 3+1 مجاناً، إلخ)
+    match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجاناً?', text)
+    if match:
+        free_qty = int(match.group(2))
+        total_qty = int(match.group(1)) + free_qty
+        # النسبة = (عدد الحبات المجانية / إجمالي الحبات) × 100
+        percentage = (free_qty / total_qty) * 100
+        return f"{round(percentage, 0)}%"
+    
+    # 3️⃣ صيغة "2 +1 مجانا" بدون كلمة عرض
+    match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجانا', text)
+    if match:
+        free_qty = int(match.group(2))
+        total_qty = int(match.group(1)) + free_qty
+        percentage = (free_qty / total_qty) * 100
+        return f"{round(percentage, 0)}%"
+    
+    # 4️⃣ عروض مجانية بصيغة أخرى (مثل "1+1 مجاناً")
+    match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجاناً?', text)
+    if match:
+        free_qty = int(match.group(2))
+        total_qty = int(match.group(1)) + free_qty
+        percentage = (free_qty / total_qty) * 100
+        return f"{round(percentage, 0)}%"
+    
+    # 5️⃣ خصم بقيمة ريال (سيتم حسابه لاحقاً عند توفر السعر)
+    match = re.search(r'خصم\s*(\d+)\s*ريال', text)
+    if match:
+        return f"{match.group(1)} ريال"
+    
+    return ""
+
+def extract_offer_quantity(text):
+    """
+    استخراج عدد حبات العرض من نص العرض
+    - "2+1 مجاناً" → 3 حبات (2 مدفوعة + 1 مجانية)
+    - "خصم 50% على الحبة الثانية" → 2 حبة
+    - "6حبات بسعر 77 ريال" → 6 حبات
+    """
+    text = str(text) if not pd.isna(text) else ""
+    
+    # 1️⃣ عروض مجانية (2+1 مجاناً)
+    match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجاناً?', text)
+    if match:
+        paid = int(match.group(1))
+        free = int(match.group(2))
+        return f"{paid + free}"
+    
+    # 2️⃣ صيغة "2 +1 مجانا"
+    match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجانا', text)
+    if match:
+        paid = int(match.group(1))
+        free = int(match.group(2))
+        return f"{paid + free}"
+    
+    # 3️⃣ عروض الكميات (6حبات بسعر 77 ريال)
+    match = re.search(r'(\d+)\s*حبات?\s*بسعر', text)
+    if match:
+        return match.group(1)
+    
+    # 4️⃣ خصم على الحبة الثانية
+    if "الحبة الثانية" in text:
+        return "2"
+    
+    # 5️⃣ خصم على القطعة الثانية
+    if "القطعة الثانية" in text:
+        return "2"
+    
+    return ""
+
+def extract_offer_name_enhanced(text):
+    """
+    استخراج اسم العرض التفصيلي من النصوص مع دعم جميع الصيغ الممكنة
+    """
+    text = str(text) if not pd.isna(text) else ""
+    
+    # 1️⃣ خصم على القطعة الثانية (مع النسبة المئوية)
+    if "خصم" in text and "القطعة الثانية" in text:
+        match = re.search(r'خصم\s*(\d+)\s*%\s*على\s*القطعة\s*الثانية', text)
+        if match:
+            return f"خصم {match.group(1)}% على القطعة الثانية"
+        match = re.search(r'خصم\s*(\d+)\s*%\s*على\s*القطعة', text)
+        if match:
+            return f"خصم {match.group(1)}% على القطعة الثانية"
+        return "خصم على القطعة الثانية"
+    
+    # 2️⃣ خصم على الحبة الثانية (مع النسبة المئوية)
+    if "خصم" in text and "الحبة الثانية" in text:
+        match = re.search(r'خصم\s*(\d+)\s*%\s*على\s*الحبة\s*الثانية', text)
+        if match:
+            return f"خصم {match.group(1)}% على الحبة الثانية"
+        match = re.search(r'خصم\s*(\d+)\s*%\s*على\s*الحبة', text)
+        if match:
+            return f"خصم {match.group(1)}% على الحبة الثانية"
+        match = re.search(r'خصم\s*(\d+)\s*ريال\s*على\s*الحبة\s*الثانية', text)
+        if match:
+            return f"خصم {match.group(1)} ريال على الحبة الثانية"
+        return "خصم على الحبة الثانية"
+    
+    # 3️⃣ عرض مجاني (مثل 2+1 مجاناً) - مع دعم الصيغ المختلفة
+    if "مجاناً" in text or "مجانا" in text:
+        # البحث عن صيغة "2+1 مجاناً"
+        match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجاناً?', text)
+        if match:
+            return f"عرض {match.group(1)}+{match.group(2)} مجاناً"
+        # البحث عن صيغة "2 +1 مجانا" بدون كلمة عرض
+        match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجانا', text)
+        if match:
+            return f"عرض {match.group(1)}+{match.group(2)} مجاناً"
+        # البحث عن صيغة عامة
+        match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجاناً?', text)
+        if match:
+            return f"عرض {match.group(1)}+{match.group(2)} مجاناً"
+        return "عرض مجاني"
+    
+    # 4️⃣ صفقة اليوم (مع الحفاظ على النص الكامل)
+    if "صفقة اليوم" in text:
+        match = re.search(r'صفقة اليوم\s*:\s*([^:]+?)(?=\s*(?:اذا اشترى|نسبة من|يبدأ بتاريخ|$))', text)
+        if match:
+            full_text = match.group(1).strip()
+            if len(full_text) > 50:
+                full_text = full_text[:50] + "..."
+            return f"صفقة اليوم : {full_text}"
+        return "صفقة اليوم"
+    
+    # 5️⃣ عروض الكميات (مثل 6حبات بسعر 77 ريال)
+    if "حبة بسعر" in text or "حبات بسعر" in text:
+        match = re.search(r'(\d+)\s*حبات?\s*بسعر\s*([\d.]+)\s*ريال', text)
+        if match:
+            return f"{match.group(1)}حبات بسعر {match.group(2)} ريال"
+        return "عرض كميات"
+    
+    # 6️⃣ عرض خاص - خصم 60% على الحبة الثانية
+    if "عرض خاص" in text and "خصم" in text:
+        match = re.search(r'عرض خاص\s*-\s*خصم\s*(\d+)\s*%\s*على\s*الحبة\s*الثانية', text)
+        if match:
+            return f"عرض خاص - خصم {match.group(1)}% على الحبة الثانية"
+        return "عرض خاص"
+    
+    # 7️⃣ عروض أخرى (مثل 2حبة بسعر 99 ريال)
+    if "حبة بسعر" in text:
+        match = re.search(r'(\d+)\s*حبة\s*بسعر\s*([\d.]+)\s*ريال', text)
+        if match:
+            return f"{match.group(1)}حبة بسعر {match.group(2)} ريال"
+    
+    # 8️⃣ حالة خاصة: أرقام فقط بدون عرض واضح
+    if "/" in text:
+        parts = text.split("/")
+        if len(parts) >= 2:
+            potential_name = parts[0].strip()
+            if re.search(r'[^\d\s\-]', potential_name):
+                return potential_name
+    
+    return "عرض خاص"
