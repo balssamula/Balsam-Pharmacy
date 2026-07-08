@@ -691,25 +691,22 @@ def show():
                 except (ValueError, TypeError):
                     pass
             
-            # 4️⃣ حساب النسبة من السعر الأصلي والمخفض مباشرة
+            # 4️⃣ حساب النسبة من السعر الأصلي والمخفض مباشرة (من الأعمدة وليس النص)
             if original_price and discounted_price:
                 try:
                     original = float(str(original_price).replace(',', '').strip())
                     discounted = float(str(discounted_price).replace(',', '').strip())
                     
-                    # ✅ التعديل هنا: حساب السعر الأصلي الإجمالي بضربه في الكمية
+                    # حساب السعر الأصلي الإجمالي بناءً على الكمية
                     total_original = original
                     if discounted >= original and quantity > 1:
                         total_original = original * quantity
 
                     if total_original > 0 and discounted > 0 and total_original > discounted:
-                        # إذا كان المنتج خاضعاً للضريبة
-                        if has_tax:
-                            discounted_before_tax = discounted / 1.15
-                        else:
-                            discounted_before_tax = discounted
+                        # ⚠️ التعديل هنا: تم إزالة اقتطاع الضريبة (/ 1.15) لأن الأرقام في 
+                        # عمود "السعر المخفض" وعمود "السعر الأصلي" من نفس النوع (غير شاملة الضريبة)
                         
-                        discount_amount = total_original - discounted_before_tax
+                        discount_amount = total_original - discounted
                         percentage = (discount_amount / total_original) * 100
                         return f"{round(percentage, 0)}%", 0
                 except (ValueError, TypeError):
