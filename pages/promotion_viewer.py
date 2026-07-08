@@ -705,15 +705,21 @@ def show():
                 try:
                     original = float(str(original_price).replace(',', '').strip())
                     discounted = float(str(discounted_price).replace(',', '').strip())
-                    if original > 0 and discounted > 0 and original > discounted:
+                    
+                    # ✅ التعديل هنا: حساب السعر الأصلي الإجمالي بضربه في الكمية
+                    total_original = original
+                    if discounted >= original and quantity > 1:
+                        total_original = original * quantity
+
+                    if total_original > 0 and discounted > 0 and total_original > discounted:
                         # إذا كان المنتج خاضعاً للضريبة
                         if has_tax:
                             discounted_before_tax = discounted / 1.15
                         else:
                             discounted_before_tax = discounted
                         
-                        discount_amount = original - discounted_before_tax
-                        percentage = (discount_amount / original) * 100
+                        discount_amount = total_original - discounted_before_tax
+                        percentage = (discount_amount / total_original) * 100
                         return f"{round(percentage, 0)}%", 0
                 except (ValueError, TypeError):
                     pass
