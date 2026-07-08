@@ -636,45 +636,39 @@ def show():
         
         def extract_discount_percentage_full(text, original_price=None, discounted_price=None, promo_text="", quantity=1, has_tax=False):
             """
-            استخراج نسبة الخصم من جميع المصادر الممكنة مع مراعاة الضريبة
+            استخراج نسبة الخصم من جميع المصادر الممكنة مع مراعاة الضريبة والكميات
             """
             text = str(text) if not pd.isna(text) else ""
             
-            # 1️⃣ خصم بنسبة مئوية مباشرة
+            # 1️⃣ خصم بنسبة مئوية مباشرة (حل مشكلة اختفاء عدد الحبات)
             match = re.search(r'خصم\s*(\d+)\s*%', text)
             if match:
-                return f"{match.group(1)}%", 0
+                # إرجاع الكمية الممررة بدلاً من 0
+                return f"{match.group(1)}%", quantity
             
-            # 2️⃣ خصم بقيمة ريال (مثل خصم 17 ريال)
+            # 2️⃣ خصم بقيمة ريال (مثل خصم 17 ريال) - (حل مشكلة الحساب الخاطئ للضريبة والكمية)
             match = re.search(r'خصم\s*([\d.]+)\s*ريال', text)
             if match and original_price:
                 try:
                     discount_value = float(match.group(1))
                     original = float(str(original_price).replace(',', '').strip())
-                    if original > 0:
-                        # إذا كان المنتج خاضعاً للضريبة، نحتاج لمعرفة السعر قبل الضريبة
+                    total_original = original * quantity  # ضرب السعر الأصلي في الكمية
+                    
+                    if total_original > 0:
                         if has_tax:
-                            # السعر المخفض قبل الضريبة = السعر الأصلي - قيمة الخصم
-                            discounted_before_tax = original - discount_value
-                            # ولكن قيمة الخصم قد تكون شاملة للضريبة، لذا نحتاج لتعديلها
-                            # نفرض أن قيمة الخصم شاملة للضريبة
+                            # إزالة الضريبة من قيمة الخصم المعلنة
                             discount_before_tax = discount_value / 1.15
-                            percentage = (discount_before_tax / original) * 100
                         else:
-                            percentage = (discount_value / original) * 100
-                        return f"{round(percentage, 0)}%", 0
+                            discount_before_tax = discount_value
+                            
+                        percentage = (discount_before_tax / total_original) * 100
+                        return f"{round(percentage, 0)}%", quantity
                 except (ValueError, TypeError):
                     pass
             
-            # 3️⃣ عروض الكميات (مثل 6حبات ب 75ريال)
-            # محاولة استخراج الكمية والسعر من النص
-            qty_match = re.search(r'(\d+)\s*حبات?\s*ب\s*([\d.]+)\s*ريال', text)
-            if not qty_match:
-                qty_match = re.search(r'(\d+)\s*حبات?\s*بسعر\s*([\d.]+)\s*ريال', text)
-            if not qty_match:
-                qty_match = re.search(r'(\d+)\s*حبة\s*بسعر\s*([\d.]+)\s*ريال', text)
-            if not qty_match:
-                qty_match = re.search(r'(\d+)\s*حبة\s*ب\s*([\d.]+)\s*ريال', text)
+            # 3️⃣ عروض الكميات (حل مشكلة 12حبة ب39.5ريال والمسافات المفقودة)
+            # Regex محدث يصطاد (الكمية) ثم (حبة/حبات) ثم (ب/بسعر) ثم (السعر) مع تجاهل المسافات
+            qty_match = re.search(r'(\d+)\s*(?:حبة|حبات)\s*(?:ب|بسعر)\s*([\d.]+)', text)
             
             if qty_match and original_price:
                 try:
@@ -683,11 +677,8 @@ def show():
                     original = float(str(original_price).replace(',', '').strip())
                     
                     if original > 0 and promo_price > 0:
-                        # حساب النسبة مع مراعاة الضريبة
-                        # السعر الأصلي الإجمالي
                         total_original = original * qty
                         
-                        # إذا كان المنتج خاضعاً للضريبة، نعيد السعر الترويجي إلى ما قبل الضريبة
                         if has_tax:
                             promo_before_tax = promo_price / 1.15
                         else:
@@ -761,12 +752,12 @@ def show():
                 return f"{paid + free}"
             
             # 3️⃣ عروض الكميات (6حبات بسعر 77 ريال)
-            match = re.search(r'(\d+)\s*حبات?\s*بسعر', text)
+            match = re.search(r'(\d+)\s*(?:حبة|حبات)\s*(?:ب|بسعر)', text)
             if match:
                 return match.group(1)
             
             # 4️⃣ عروض الكميات (6حبات ب 77 ريال)
-            match = re.search(r'(\d+)\s*حبات?\s*ب\s*[\d.]+\s*ريال', text)
+            match = re.search(r'(\d+)\s*(?:حبة|حبات)\s*(?:ب|بسعر)', text)
             if match:
                 return match.group(1)
             
