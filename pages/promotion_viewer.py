@@ -80,7 +80,7 @@ def generate_empty_template():
         
     ws3 = wb.create_sheet(title="اسعار المنتجات")
     ws3.views.sheetView[0].rightToLeft = True
-    headers_prices = ["رمز المنتج sku", "أسم المنتج", "سعر المنتج", "خاضع للضريبة (نعم/لا)"]
+    headers_prices = ["رمز المنتج sku", "أسم المنتج", "سعر المنتج", "خاضع للضريبة"]
     for col_idx, text in enumerate(headers_prices, 1):
         cell = ws3.cell(row=2, column=col_idx, value=text)
         cell.fill = header_fill
@@ -138,8 +138,10 @@ def extract_offer_name(text):
         return "صفقة اليوم"
     
     # 5️⃣ عروض الكميات (6حبات بسعر 77 ريال)
-    if "حبة بسعر" in text or "حبات بسعر" in text or "حبة ب" in text or "حبات ب" in text:
-        match = re.search(r'(\d+)\s*حبات?\s*(?:بسعر|ب)\s*([\d.]+)\s*ريال', text)
+    if "حبة بسعر" in text or "حبات بسعر" in text:
+        match = re.search(r'(\d+)\s*حبات?\s*بسعر\s*([\d.]+)\s*ريال', text)
+        if match: return f"{match.group(1)}حبات بسعر {match.group(2)} ريال"
+        match = re.search(r'(\d+)\s*حبات?\s*ب\s*([\d.]+)\s*ريال', text)
         if match: return f"{match.group(1)}حبات بسعر {match.group(2)} ريال"
         return "عرض كميات"
     
@@ -149,8 +151,11 @@ def extract_offer_name(text):
         if match: return f"عرض خاص - خصم {match.group(1)}% على الحبة الثانية"
         return "عرض خاص"
     
-    # 7️⃣ صيغة "2حبة بسعر 65.50 ريال" (بدون مسافة)
-    match = re.search(r'(\d+)\s*حبة\s*(?:بسعر|ب)\s*([\d.]+)\s*ريال', text)
+    # 7️⃣ صيغة "2حبة بسعر 65.50 ريال"
+    match = re.search(r'(\d+)\s*حبة\s*بسعر\s*([\d.]+)\s*ريال', text)
+    if match: return f"{match.group(1)}حبة بسعر {match.group(2)} ريال"
+    
+    match = re.search(r'(\d+)\s*حبة\s*ب\s*([\d.]+)\s*ريال', text)
     if match: return f"{match.group(1)}حبة بسعر {match.group(2)} ريال"
     
     # 8️⃣ حالة خاصة: أرقام فقط بدون عرض واضح
@@ -182,7 +187,11 @@ def extract_offer_quantity(text):
         return f"{paid + free}"
     
     # 3️⃣ عروض الكميات (6حبات بسعر 77 ريال)
-    match = re.search(r'(\d+)\s*حبات?\s*(?:بسعر|ب)', text)
+    match = re.search(r'(\d+)\s*حبات?\s*بسعر', text)
+    if match:
+        return match.group(1)
+    
+    match = re.search(r'(\d+)\s*حبات?\s*ب', text)
     if match:
         return match.group(1)
     
@@ -194,169 +203,18 @@ def extract_offer_quantity(text):
     if "القطعة الثانية" in text:
         return "2"
     
-    return "1"
-
-def extract_quantity_from_promo(promo_text):
-    """استخراج عدد الحبات من النص الترويجي (مثل 6حبات ب 75ريال)"""
-    if not promo_text or not isinstance(promo_text, str):
-        return None
-    
-    match = re.search(r'(\d+)\s*حبات?\s*(?:بسعر|ب)', promo_text)
-    if match:
-        return int(match.group(1))
-    return None
-
-def extract_price_from_promo(promo_text):
-    """استخراج السعر من النص الترويجي (مثل 6حبات ب 75ريال)"""
-    if not promo_text or not isinstance(promo_text, str):
-        return None
-    
-    patterns = [
-        r'(\d+)\s*حبات?\s*(?:بسعر|ب)\s*([\d.]+)\s*ريال',
-        r'(\d+)\s*حبة\s*(?:بسعر|ب)\s*([\d.]+)\s*ريال',
-        r'(?:بسعر|ب)\s*([\d.]+)\s*ريال'
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, promo_text)
-        if match:
-            if len(match.groups()) >= 2:
-                return float(match.group(2))
-            else:
-                return float(match.group(1))
-    
-    return None
-
-def extract_discount_value_from_promo(promo_text):
-    """استخراج قيمة الخصم بالريال من النص الترويجي (مثل خصم 17 ريال)"""
-    if not promo_text or not isinstance(promo_text, str):
-        return None
-    
-    match = re.search(r'خصم\s*([\d.]+)\s*ريال', promo_text)
-    if match:
-        return float(match.group(1))
-    
-    return None
-
-def calculate_discount_percentage_advanced(original_price, discounted_price, promo_text="", is_taxable=False, quantity=1):
-    """
-    حساب نسبة الخصم بشكل متقدم مع مراعاة:
-    1. الضريبة (15%)
-    2. عدد الحبات
-    3. العناوين الترويجية المختلفة
-    """
-    try:
-        original = float(str(original_price).replace(',', '').strip()) if original_price else 0
-        discounted = float(str(discounted_price).replace(',', '').strip()) if discounted_price else 0
-    except (ValueError, TypeError):
-        return ""
-    
-    if original <= 0 or discounted <= 0:
-        return ""
-    
-    # 1️⃣ إذا كان النص الترويجي يحتوي على نسبة مئوية مباشرة
-    if promo_text and isinstance(promo_text, str):
-        match = re.search(r'خصم\s*(\d+)\s*%', promo_text)
-        if match:
-            return f"{match.group(1)}%"
-    
-    # 2️⃣ حساب السعر الأصلي الإجمالي (السعر × عدد الحبات)
-    total_original = original * quantity
-    
-    # 3️⃣ حساب السعر المخفض الإجمالي
-    total_discounted = discounted
-    
-    # 4️⃣ إذا كان المنتج خاضعاً للضريبة، نخصم الضريبة من السعر المخفض
-    if is_taxable:
-        # الضريبة 15%، السعر شامل الضريبة = السعر × 1.15
-        # السعر قبل الضريبة = السعر شامل الضريبة / 1.15
-        total_discounted_excl_tax = total_discounted / 1.15
-    else:
-        total_discounted_excl_tax = total_discounted
-    
-    # 5️⃣ حساب قيمة الخصم والنسبة
-    if total_original > total_discounted_excl_tax:
-        discount_amount = total_original - total_discounted_excl_tax
-        percentage = (discount_amount / total_original) * 100
-        return f"{round(percentage, 0)}%"
-    
-    return ""
-
-def extract_discount_percentage(text, original_price=None, discounted_price=None, promo_text=None, is_taxable=False, quantity=1):
-    """
-    استخراج نسبة الخصم من مصادر متعددة مع مراعاة الضريبة وعدد الحبات
-    """
-    text = str(text) if not pd.isna(text) else ""
-    
-    # 1️⃣ خصم بنسبة مئوية مباشرة
-    match = re.search(r'خصم\s*(\d+)\s*%', text)
-    if match:
-        return f"{match.group(1)}%"
-    
-    # 2️⃣ إذا كان هناك نص ترويجي منفصل
-    if promo_text and isinstance(promo_text, str):
-        # 2أ: البحث عن نسبة مئوية في النص الترويجي
-        match = re.search(r'خصم\s*(\d+)\s*%', promo_text)
-        if match:
-            return f"{match.group(1)}%"
-        
-        # 2ب: البحث عن سعر محدد في النص الترويجي
-        promo_price = extract_price_from_promo(promo_text)
-        if promo_price and original_price:
-            return calculate_discount_percentage_advanced(
-                original_price=original_price,
-                discounted_price=promo_price,
-                promo_text=promo_text,
-                is_taxable=is_taxable,
-                quantity=quantity
-            )
-        
-        # 2ج: البحث عن قيمة خصم بالريال
-        discount_value = extract_discount_value_from_promo(promo_text)
-        if discount_value and original_price:
-            total_original = original_price * quantity
-            if total_original > 0:
-                percentage = (discount_value / total_original) * 100
-                return f"{round(percentage, 0)}%"
-    
-    # 3️⃣ حساب النسبة من السعر الأصلي والمخفض (مع مراعاة الضريبة والعدد)
-    if original_price and discounted_price:
-        return calculate_discount_percentage_advanced(
-            original_price=original_price,
-            discounted_price=discounted_price,
-            promo_text=promo_text,
-            is_taxable=is_taxable,
-            quantity=quantity
-        )
-    
-    # 4️⃣ عروض مجانية (2+1 مجاناً)
-    match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجاناً?', text)
-    if match:
-        free_qty = int(match.group(2))
-        total_qty = int(match.group(1)) + free_qty
-        percentage = (free_qty / total_qty) * 100
-        return f"{round(percentage, 0)}%"
-    
-    # 5️⃣ صيغة "2 +1 مجانا"
-    match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجانا', text)
-    if match:
-        free_qty = int(match.group(2))
-        total_qty = int(match.group(1)) + free_qty
-        percentage = (free_qty / total_qty) * 100
-        return f"{round(percentage, 0)}%"
-    
     return ""
 
 def extract_special_offer_sku(text):
     """استخراج رقم المنتج الخاص بالعرض (المجموعة) من النص"""
     text = str(text) if not pd.isna(text) else ""
     
-    # البحث عن صيغة "رقم-رقم-رقم"
+    # البحث عن صيغة "رقم-رقم-رقم" (مثل 5209-17164-4846)
     match = re.search(r'(\d{3,6}-\d{3,6}-\d{3,6})', text)
     if match:
         return match.group(1)
     
-    # البحث عن صيغة "رقم*رقم"
+    # البحث عن صيغة "رقم*رقم" (مثل 16265*6)
     match = re.search(r'(\d{3,6}\*\d+)', text)
     if match:
         return match.group(1)
@@ -412,6 +270,220 @@ def parse_composite_sku(sku):
 
     return sku, None, None, [sku], False, False
 
+# ========== دوال حساب الخصم والنسب ==========
+def is_taxable(sku, price_map):
+    """التحقق من أن المنتج خاضع للضريبة من خلال العمود D"""
+    if sku in price_map:
+        return price_map[sku].get("taxable", False)
+    return False
+
+def remove_tax(price_including_tax):
+    """إزالة الضريبة 15% من السعر الشامل"""
+    try:
+        price = float(str(price_including_tax).replace(',', '').strip())
+        if price <= 0:
+            return price
+        return price / 1.15
+    except (ValueError, TypeError):
+        return price_including_tax
+
+def extract_quantity_from_promo(promo_text):
+    """استخراج عدد الحبات من النص الترويجي (مثل 6حبات ب 75ريال)"""
+    if not promo_text or not isinstance(promo_text, str):
+        return 1
+    
+    patterns = [
+        r'(\d+)\s*حبات?\s*ب',
+        r'(\d+)\s*حبة\s*ب',
+        r'(\d+)\s*حبات?\s*بسعر',
+        r'(\d+)\s*حبة\s*بسعر'
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, promo_text)
+        if match:
+            return int(match.group(1))
+    
+    return 1
+
+def extract_price_from_promo(promo_text):
+    """استخراج السعر من النص الترويجي"""
+    if not promo_text or not isinstance(promo_text, str):
+        return None
+    
+    patterns = [
+        r'ب\s*([\d.]+)\s*ريال',
+        r'بسعر\s*([\d.]+)\s*ريال',
+        r'ب\s*([\d.]+)'
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, promo_text)
+        if match:
+            return float(match.group(1))
+    
+    return None
+
+def extract_discount_value_from_promo(promo_text):
+    """استخراج قيمة الخصم بالريال من النص الترويجي (مثل خصم 17 ريال)"""
+    if not promo_text or not isinstance(promo_text, str):
+        return None
+    
+    match = re.search(r'خصم\s*([\d.]+)\s*ريال', promo_text)
+    if match:
+        return float(match.group(1))
+    
+    return None
+
+def calculate_discount_percentage(original_price, discounted_price, promo_text="", quantity=1, taxable=False, price_map=None, sku=None):
+    """
+    حساب نسبة الخصم بشكل صحيح مع مراعاة الضريبة وعدد الحبات
+    """
+    try:
+        # 1️⃣ إذا كان النص الترويجي يحتوي على نسبة مئوية مباشرة
+        if promo_text and isinstance(promo_text, str):
+            match = re.search(r'خصم\s*(\d+)\s*%', promo_text)
+            if match:
+                return f"{match.group(1)}%"
+        
+        # 2️⃣ التحويل إلى أرقام
+        try:
+            original = float(str(original_price).replace(',', '').strip()) if original_price else 0
+            discounted = float(str(discounted_price).replace(',', '').strip()) if discounted_price else 0
+        except (ValueError, TypeError):
+            return ""
+        
+        if original <= 0 or discounted <= 0:
+            return ""
+        
+        # 3️⃣ إذا كان المنتج خاضع للضريبة، نعيد السعر المخفض إلى ما قبل الضريبة
+        if taxable:
+            discounted_before_tax = remove_tax(discounted)
+        else:
+            discounted_before_tax = discounted
+        
+        # 4️⃣ حساب السعر الأصلي الإجمالي (السعر الأصلي × عدد الحبات)
+        original_total = original * quantity
+        
+        # 5️⃣ حساب قيمة الخصم
+        discount_amount = original_total - discounted_before_tax
+        
+        # 6️⃣ إذا كانت قيمة الخصم سالبة (يعني السعر المخفض أعلى من الأصلي)
+        if discount_amount <= 0:
+            return ""
+        
+        # 7️⃣ حساب النسبة المئوية
+        percentage = (discount_amount / original_total) * 100
+        
+        return f"{round(percentage, 0)}%"
+        
+    except Exception:
+        return ""
+
+def calculate_discount_percentage_from_promo(original_price, promo_text, quantity=1, taxable=False):
+    """
+    حساب نسبة الخصم من النص الترويجي مباشرة
+    """
+    if not promo_text or not isinstance(promo_text, str):
+        return ""
+    
+    try:
+        original = float(str(original_price).replace(',', '').strip()) if original_price else 0
+        if original <= 0:
+            return ""
+        
+        # 1️⃣ إذا كان النص يحتوي على نسبة مئوية
+        match = re.search(r'خصم\s*(\d+)\s*%', promo_text)
+        if match:
+            return f"{match.group(1)}%"
+        
+        # 2️⃣ إذا كان النص يحتوي على قيمة خصم بالريال (مثل خصم 17 ريال)
+        discount_value = extract_discount_value_from_promo(promo_text)
+        if discount_value:
+            if taxable:
+                discount_value = remove_tax(discount_value)
+            original_total = original * quantity
+            if original_total > 0:
+                percentage = (discount_value / original_total) * 100
+                return f"{round(percentage, 0)}%"
+        
+        # 3️⃣ إذا كان النص يحتوي على سعر محدد (مثل 6حبات ب 75ريال)
+        promo_price = extract_price_from_promo(promo_text)
+        if promo_price:
+            if taxable:
+                promo_price_before_tax = remove_tax(promo_price)
+            else:
+                promo_price_before_tax = promo_price
+            
+            original_total = original * quantity
+            if original_total > 0 and promo_price_before_tax < original_total:
+                discount_amount = original_total - promo_price_before_tax
+                percentage = (discount_amount / original_total) * 100
+                return f"{round(percentage, 0)}%"
+        
+        return ""
+        
+    except Exception:
+        return ""
+
+def extract_promo_details(promo_text, original_price, quantity=1, taxable=False):
+    """
+    استخراج جميع تفاصيل الخصم من النص الترويجي
+    """
+    if not promo_text or not isinstance(promo_text, str):
+        return {"discount_percentage": "", "discount_value": "", "final_price": ""}
+    
+    try:
+        original = float(str(original_price).replace(',', '').strip()) if original_price else 0
+        if original <= 0:
+            return {"discount_percentage": "", "discount_value": "", "final_price": ""}
+        
+        # 1️⃣ نسبة مئوية مباشرة
+        match = re.search(r'خصم\s*(\d+)\s*%', promo_text)
+        if match:
+            return {
+                "discount_percentage": f"{match.group(1)}%",
+                "discount_value": "",
+                "final_price": ""
+            }
+        
+        # 2️⃣ قيمة خصم بالريال
+        discount_value = extract_discount_value_from_promo(promo_text)
+        if discount_value:
+            if taxable:
+                discount_value = remove_tax(discount_value)
+            original_total = original * quantity
+            if original_total > 0:
+                percentage = (discount_value / original_total) * 100
+                return {
+                    "discount_percentage": f"{round(percentage, 0)}%",
+                    "discount_value": discount_value,
+                    "final_price": original_total - discount_value
+                }
+        
+        # 3️⃣ سعر محدد (مثل 6حبات ب 75ريال)
+        promo_price = extract_price_from_promo(promo_text)
+        if promo_price:
+            if taxable:
+                promo_price_before_tax = remove_tax(promo_price)
+            else:
+                promo_price_before_tax = promo_price
+            
+            original_total = original * quantity
+            if original_total > 0 and promo_price_before_tax < original_total:
+                discount_amount = original_total - promo_price_before_tax
+                percentage = (discount_amount / original_total) * 100
+                return {
+                    "discount_percentage": f"{round(percentage, 0)}%",
+                    "discount_value": discount_amount,
+                    "final_price": promo_price_before_tax
+                }
+        
+        return {"discount_percentage": "", "discount_value": "", "final_price": ""}
+        
+    except Exception:
+        return {"discount_percentage": "", "discount_value": "", "final_price": ""}
+
 # ========== دوال التصدير ==========
 @st.cache_data(show_spinner=False)
 def generate_excel_download_files(df):
@@ -440,7 +512,7 @@ def generate_excel_download_files(df):
     detailed_bytes = detailed_output.getvalue()
     return simple_bytes, detailed_bytes
 
-# ========== الدالة الرئيسية ==========
+# ========== دالة العرض الرئيسية ==========
 def show():
     st.markdown("""
     <style>
@@ -457,7 +529,7 @@ def show():
     st.markdown("""
     <div class="offers-header">
         <h1>🛍️ مركز معالجة وإدارة عروض المتجر</h1>
-        <p>فصل أوتوماتيكي لسلاسل العروض الخاصة مع احتساب نسب الخصم بدقة</p>
+        <p>فصل أوتوماتيكي لسلاسل العروض الخاصة، مع حساب نسبة الخصم بدقة مع مراعاة الضريبة</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -487,59 +559,51 @@ def show():
         prices_sheet = None
         
         for sheet in sheet_names:
-            if "عرض خاص" in sheet or "عروض" in sheet: 
-                offers_sheet = sheet
-            if "سعر مخفض" in sheet or "مخفض" in sheet: 
-                discounted_sheet = sheet
-            if "اسعار المنتجات" in sheet or "سعر المنتج" in sheet or "أسعار المنتجات" in sheet: 
-                prices_sheet = sheet
+            if "عرض خاص" in sheet or "عروض" in sheet: offers_sheet = sheet
+            if "سعر مخفض" in sheet or "مخفض" in sheet: discounted_sheet = sheet
+            if "اسعار المنتجات" in sheet or "سعر المنتج" in sheet or "أسعار المنتجات" in sheet: prices_sheet = sheet
         
-        if not offers_sheet: 
-            offers_sheet = sheet_names[0]
+        if not offers_sheet: offers_sheet = sheet_names[0]
         
-        # قراءة البيانات
         df_raw = pd.read_excel(uploaded_file, sheet_name=offers_sheet, header=None)
         df_discounted = pd.read_excel(uploaded_file, sheet_name=discounted_sheet) if discounted_sheet else pd.DataFrame()
         df_regular_prices = pd.read_excel(uploaded_file, sheet_name=prices_sheet) if prices_sheet else pd.DataFrame()
         
-        # ========== 1. معالجة الأسعار العادية ==========
-        price_map = {}
-        tax_map = {}
-        
+        # ========== معالجة الأسعار العادية ==========
+        price_map = {}  # {sku: {name, price, taxable}}
         if not df_regular_prices.empty:
             # تحديد الأعمدة
             sku_col_idx, name_col_idx, price_col_idx, tax_col_idx = 0, 1, 2, 3
             for i, c in enumerate(df_regular_prices.columns):
                 c_str = str(c).lower()
-                if 'sku' in c_str or 'رمز' in c_str: 
-                    sku_col_idx = i
-                elif 'اسم' in c_str or 'أسم' in c_str: 
-                    name_col_idx = i
-                elif 'سعر' in c_str: 
-                    price_col_idx = i
-                elif 'ضريبة' in c_str or 'tax' in c_str: 
-                    tax_col_idx = i
+                if 'sku' in c_str or 'رمز' in c_str: sku_col_idx = i
+                elif 'اسم' in c_str or 'أسم' in c_str: name_col_idx = i
+                elif 'سعر' in c_str: price_col_idx = i
+                elif 'ضريبة' in c_str or 'خاضع' in c_str or 'tax' in c_str: tax_col_idx = i
             
-            sku_col_choice = df_regular_prices.columns[sku_col_idx] if sku_col_idx < len(df_regular_prices.columns) else df_regular_prices.columns[0]
-            name_col_choice = df_regular_prices.columns[name_col_idx] if name_col_idx < len(df_regular_prices.columns) else df_regular_prices.columns[1]
-            price_col_choice = df_regular_prices.columns[price_col_idx] if price_col_idx < len(df_regular_prices.columns) else df_regular_prices.columns[2]
+            sku_col_choice = df_regular_prices.columns[sku_col_idx]
+            name_col_choice = df_regular_prices.columns[name_col_idx]
+            price_col_choice = df_regular_prices.columns[price_col_idx]
             tax_col_choice = df_regular_prices.columns[tax_col_idx] if tax_col_idx < len(df_regular_prices.columns) else None
             
             for _, row in df_regular_prices.iterrows():
                 sku = str(row[sku_col_choice]).strip()
                 if sku and sku != "nan":
+                    taxable = False
+                    if tax_col_choice and pd.notna(row[tax_col_choice]):
+                        tax_val = str(row[tax_col_choice]).strip().lower()
+                        taxable = tax_val in ['نعم', 'yes', 'true', '1', 'خاضع', '✓', 'x']
+                    
                     price_map[sku] = {
                         "name": row[name_col_choice] if pd.notna(row[name_col_choice]) else "",
-                        "price": row[price_col_choice] if pd.notna(row[price_col_choice]) else ""
+                        "price": row[price_col_choice] if pd.notna(row[price_col_choice]) else "",
+                        "taxable": taxable
                     }
-                    if tax_col_choice:
-                        tax_val = str(row[tax_col_choice]).strip().lower()
-                        tax_map[sku] = tax_val in ["نعم", "yes", "true", "1", "خاضع"]
         
-        # ========== 2. معالجة الأسعار المخفضة ==========
-        individual_discount_map = {}
-        group_discount_map = {}
-        sku_master = {}
+        # ========== معالجة الأسعار المخفضة ==========
+        individual_discount_map = {}  # {sku: {discounted_price, end_date, promo_title, discount_percentage, offer_quantity}}
+        group_discount_map = {}       # {group_sku: {discounted_price, end_date, promo_title, discount_percentage, offer_quantity}}
+        sku_master = {}               # {sku: {groups: set(), special_offer_skus: set(), offers: []}}
         
         # تعريف المتغيرات مسبقاً
         disc_sku_col = None
@@ -548,22 +612,20 @@ def show():
         disc_promo_col = None
         
         if not df_discounted.empty:
+            # عرض أسماء الأعمدة للمستخدم
             st.subheader("🔧 تحديد أعمدة شيت 'سعر مخفض'")
             c1, c2, c3, c4 = st.columns(4)
             
             discounted_options = ["لا يوجد"] + list(df_discounted.columns)
             
+            # تحديد المواقع الافتراضية
             disc_sku_idx, disc_price_idx, disc_end_idx, disc_promo_idx = 0, 2, 3, 4
             for i, c in enumerate(df_discounted.columns):
                 c_str = str(c).lower()
-                if 'sku' in c_str or 'رمز' in c_str: 
-                    disc_sku_idx = i
-                elif 'مخفض' in c_str or 'سعر' in c_str: 
-                    disc_price_idx = i
-                elif 'نهاية' in c_str or 'تاريخ' in c_str: 
-                    disc_end_idx = i
-                elif 'ترويج' in c_str or 'عنوان' in c_str: 
-                    disc_promo_idx = i
+                if 'sku' in c_str or 'رمز' in c_str: disc_sku_idx = i
+                elif 'مخفض' in c_str or 'سعر' in c_str: disc_price_idx = i
+                elif 'نهاية' in c_str or 'تاريخ' in c_str: disc_end_idx = i
+                elif 'ترويج' in c_str or 'عنوان' in c_str: disc_promo_idx = i
             
             default_sku_col = df_discounted.columns[disc_sku_idx] if disc_sku_idx < len(df_discounted.columns) else df_discounted.columns[0]
             default_price_col = df_discounted.columns[disc_price_idx] if disc_price_idx < len(df_discounted.columns) else df_discounted.columns[0]
@@ -595,6 +657,7 @@ def show():
                     index=discounted_options.index(default_promo_col)
                 )
             
+            # ✅ التحقق من وجود عمود SKU
             if disc_sku_col is None:
                 st.warning("⚠️ لم يتم العثور على عمود معرف المنتج (SKU) في شيت 'سعر مخفض'")
             else:
@@ -605,7 +668,7 @@ def show():
                     
                     base_sku, group_sku, group_qty, individual_skus, is_star, is_dash = parse_composite_sku(sku_raw)
                     
-                    # الحصول على السعر
+                    # الحصول على السعر المخفض
                     price_val = ""
                     if disc_price_col and disc_price_col in row:
                         price_val = row[disc_price_col] if pd.notna(row[disc_price_col]) else ""
@@ -620,30 +683,37 @@ def show():
                     if disc_promo_col and disc_promo_col != "لا يوجد" and disc_promo_col in row:
                         promo_val = row[disc_promo_col] if pd.notna(row[disc_promo_col]) else ""
                     
-                    # استخراج عدد الحبات من العنوان الترويجي
-                    promo_quantity = extract_quantity_from_promo(promo_val) or 1
+                    # الحصول على السعر الأصلي وحالة الضريبة
+                    original_price = price_map.get(base_sku, {}).get("price", "")
+                    taxable = price_map.get(base_sku, {}).get("taxable", False)
                     
-                    # التحقق من خضوع المنتج للضريبة
-                    is_taxable = tax_map.get(base_sku, False)
+                    # استخراج عدد الحبات من النص الترويجي
+                    promo_quantity = extract_quantity_from_promo(promo_val)
                     
                     # حساب نسبة الخصم
-                    original_price = price_map.get(base_sku, {}).get("price", "")
-                    
-                    discount_percentage = extract_discount_percentage(
-                        text=promo_val,
+                    discount_percentage = calculate_discount_percentage(
                         original_price=original_price,
                         discounted_price=price_val,
                         promo_text=promo_val,
-                        is_taxable=is_taxable,
-                        quantity=promo_quantity
+                        quantity=promo_quantity,
+                        taxable=taxable
                     )
+                    
+                    # إذا لم يتم حساب النسبة، جرب من النص الترويجي مباشرة
+                    if not discount_percentage:
+                        discount_percentage = calculate_discount_percentage_from_promo(
+                            original_price=original_price,
+                            promo_text=promo_val,
+                            quantity=promo_quantity,
+                            taxable=taxable
+                        )
                     
                     disc_payload = {
                         "discounted_price": price_val,
                         "end_date": end_val,
                         "promo_title": promo_val,
                         "discount_percentage": discount_percentage,
-                        "promo_quantity": promo_quantity
+                        "offer_quantity": promo_quantity
                     }
                     
                     if is_star or is_dash:
@@ -660,14 +730,13 @@ def show():
                         if base_sku not in sku_master:
                             sku_master[base_sku] = {"groups": set(), "special_offer_skus": set(), "offers": []}
         
-        # ========== 3. معالجة العروض ==========
+        # ========== معالجة العروض ==========
         with st.spinner("🧠 جاري معالجة العروض..."):
             offers_col = df_raw.columns[0]
             
             for idx, row in df_raw.iterrows():
                 text = str(row[offers_col]).strip()
-                if not text or text == "nan": 
-                    continue
+                if not text or text == "nan": continue
                 
                 # استخراج البيانات الأساسية
                 offer_name = extract_offer_name(text)
@@ -711,21 +780,19 @@ def show():
                         sku_master[sku] = {"groups": set(), "special_offer_skus": set(), "offers": []}
                     sku_master[sku]["offers"].append(offer_payload)
             
-            # ========== 4. بناء النتيجة النهائية ==========
+            # ========== بناء النتيجة النهائية ==========
             final_results = []
             
             for base_sku in sorted(sku_master.keys()):
                 data = sku_master[base_sku]
-                product_info = price_map.get(base_sku, {"name": "", "price": ""})
-                is_taxable = tax_map.get(base_sku, False)
+                product_info = price_map.get(base_sku, {"name": "", "price": "", "taxable": False})
                 
-                # جلب بيانات الخصم الفردي
                 ind_disc = individual_discount_map.get(base_sku, {})
                 disc_price_item = ind_disc.get("discounted_price", "")
                 disc_promo_item = ind_disc.get("promo_title", "")
                 disc_end_item = ind_disc.get("end_date", "")
                 disc_percentage_item = ind_disc.get("discount_percentage", "")
-                promo_quantity_item = ind_disc.get("promo_quantity", 1)
+                disc_offer_qty_item = ind_disc.get("offer_quantity", "")
                 
                 # دمج العروض المتعددة
                 unique_offers = {}
@@ -739,13 +806,34 @@ def show():
                 offer_ends = " | ".join([o["end"] for o in unique_offers.values() if o["end"]])
                 is_daily = "نعم" if any(o["is_daily_deal"] for o in unique_offers.values()) else ""
                 
-                # دمج عدد حبات العرض
+                # دمج عدد حبات العرض من العروض المختلفة
                 offer_quantities = [o.get("offer_quantity", "") for o in unique_offers.values() if o.get("offer_quantity")]
                 offer_quantity_str = " | ".join(set([str(x) for x in offer_quantities if x])) if offer_quantities else ""
                 
+                # دمج نسب الخصم من العروض المختلفة
+                discount_percentages = []
+                for o in unique_offers.values():
+                    # حساب نسبة الخصم لكل عرض
+                    if o["name"] and "مجاناً" in o["name"]:
+                        match = re.search(r'(\d+)\s*\+\s*(\d+)', o["name"])
+                        if match:
+                            free = int(match.group(2))
+                            total = int(match.group(1)) + free
+                            discount_percentages.append(f"{round((free/total)*100, 0)}%")
+                    elif o["name"] and "خصم" in o["name"]:
+                        match = re.search(r'خصم\s*(\d+)\s*%', o["name"])
+                        if match:
+                            discount_percentages.append(f"{match.group(1)}%")
+                
+                # إضافة نسبة الخصم من السعر المخفض إذا كانت موجودة
+                if disc_percentage_item:
+                    discount_percentages.append(disc_percentage_item)
+                
+                discount_percentage_str = " | ".join(set([x for x in discount_percentages if x])) if discount_percentages else ""
+                
                 # دمج أرقام العروض الخاصة
                 special_offer_skus = [o.get("special_offer_sku", "") for o in unique_offers.values() if o.get("special_offer_sku")]
-                special_offer_sku_str = " | ".join(set([str(x) for x in special_offer_skus if x])) if special_offer_skus else ""
+                special_offer_sku_str = " | ".join(set([x for x in special_offer_skus if x])) if special_offer_skus else ""
                 
                 # معالجة المجموعات
                 g_skus_list = []
@@ -755,8 +843,8 @@ def show():
                 g_disc_prices_list = []
                 g_promos_list = []
                 g_ends_list = []
-                g_disc_percentages_list = []
-                g_promo_quantities_list = []
+                g_discount_percentages_list = []
+                g_offer_qtys_list = []
                 
                 for g_sku in sorted(list(data["groups"])):
                     g_skus_list.append(g_sku)
@@ -776,16 +864,15 @@ def show():
                     
                     qty_val = ""
                     q_match = re.search(r'\*(\d+)', g_sku)
-                    if q_match: 
-                        qty_val = q_match.group(1)
+                    if q_match: qty_val = q_match.group(1)
                     g_qtys_list.append(qty_val)
                     
                     g_disc = group_discount_map.get(g_sku, {})
                     g_disc_prices_list.append(str(g_disc.get("discounted_price", "")))
                     g_promos_list.append(str(g_disc.get("promo_title", "")))
                     g_ends_list.append(str(g_disc.get("end_date", "")))
-                    g_disc_percentages_list.append(str(g_disc.get("discount_percentage", "")))
-                    g_promo_quantities_list.append(str(g_disc.get("promo_quantity", "")))
+                    g_discount_percentages_list.append(str(g_disc.get("discount_percentage", "")))
+                    g_offer_qtys_list.append(str(g_disc.get("offer_quantity", "")))
                 
                 # إضافة عروض خاصة
                 for sp_sku in sorted(list(data["special_offer_skus"])):
@@ -794,18 +881,32 @@ def show():
                         g_disc_prices_list.append(str(g_disc.get("discounted_price", "")))
                         g_promos_list.append(str(g_disc.get("promo_title", "")))
                         g_ends_list.append(str(g_disc.get("end_date", "")))
-                        g_disc_percentages_list.append(str(g_disc.get("discount_percentage", "")))
-                        g_promo_quantities_list.append(str(g_disc.get("promo_quantity", "")))
+                        g_discount_percentages_list.append(str(g_disc.get("discount_percentage", "")))
+                        g_offer_qtys_list.append(str(g_disc.get("offer_quantity", "")))
                 
                 group_sku_str = " | ".join(g_skus_list) if g_skus_list else ""
                 group_name_str = " | ".join(g_names_list) if any(x != "" for x in g_names_list) else ""
                 group_price_str = " | ".join(g_prices_list) if any(x != "" for x in g_prices_list) else ""
-                group_qty_str = " | ".join(g_qtys_list) if any(x != "" for x in g_qtys_list) else ""
                 group_disc_price_str = " | ".join([x for x in g_disc_prices_list if x != ""]) if g_disc_prices_list else ""
+                group_qty_str = " | ".join(g_qtys_list) if any(x != "" for x in g_qtys_list) else ""
                 group_promo_str = " | ".join([x for x in g_promos_list if x != ""]) if g_promos_list else ""
                 group_end_str = " | ".join([x for x in g_ends_list if x != ""]) if g_ends_list else ""
-                group_disc_percentage_str = " | ".join([x for x in g_disc_percentages_list if x != ""]) if g_disc_percentages_list else ""
-                group_promo_quantity_str = " | ".join([x for x in g_promo_quantities_list if x != ""]) if g_promo_quantities_list else ""
+                group_discount_percentage_str = " | ".join([x for x in g_discount_percentages_list if x != ""]) if g_discount_percentages_list else ""
+                group_offer_qty_str = " | ".join([x for x in g_offer_qtys_list if x != ""]) if g_offer_qtys_list else ""
+                
+                # دمج نسبة الخصم للمنتج مع نسبة المجموعة
+                final_discount_percentage = discount_percentage_str
+                if group_discount_percentage_str and final_discount_percentage:
+                    final_discount_percentage = f"{final_discount_percentage} | {group_discount_percentage_str}"
+                elif group_discount_percentage_str:
+                    final_discount_percentage = group_discount_percentage_str
+                
+                # دمج عدد حبات العرض
+                final_offer_quantity = offer_quantity_str
+                if group_offer_qty_str and final_offer_quantity:
+                    final_offer_quantity = f"{final_offer_quantity} | {group_offer_qty_str}"
+                elif group_offer_qty_str:
+                    final_offer_quantity = group_offer_qty_str
                 
                 final_results.append({
                     "رقم المنتج": base_sku,
@@ -813,14 +914,11 @@ def show():
                     "رقم منتج العرض الخاص": special_offer_sku_str,
                     "اسم المنتج": product_info["name"],
                     "سعر المنتج": product_info["price"],
-                    "خاضع للضريبة": "نعم" if is_taxable else "لا",
                     "اسم المنتج للمجموعة": group_name_str,
                     "سعر المنتج للمجموعة": group_price_str,
                     "اسم العرض الخاص": offer_names,
-                    "نسبة الخصم": disc_percentage_item,
-                    "نسبة الخصم للمجموعة": group_disc_percentage_str,
-                    "عدد حبات العرض": offer_quantity_str,
-                    "عدد حبات العرض للمجموعة": group_promo_quantity_str,
+                    "نسبة الخصم": final_discount_percentage,
+                    "عدد حبات العرض": final_offer_quantity,
                     "بداية العرض": offer_starts,
                     "نهاية العرض": offer_ends,
                     "سعر مخفض للمنتج": disc_price_item,
@@ -840,10 +938,8 @@ def show():
             
             column_order = [
                 "رقم المنتج", "رقم المنتج للمجموعة", "رقم منتج العرض الخاص",
-                "اسم المنتج", "سعر المنتج", "خاضع للضريبة",
-                "اسم المنتج للمجموعة", "سعر المنتج للمجموعة",
-                "اسم العرض الخاص", "نسبة الخصم", "نسبة الخصم للمجموعة",
-                "عدد حبات العرض", "عدد حبات العرض للمجموعة",
+                "اسم المنتج", "سعر المنتج", "اسم المنتج للمجموعة", "سعر المنتج للمجموعة",
+                "اسم العرض الخاص", "نسبة الخصم", "عدد حبات العرض",
                 "بداية العرض", "نهاية العرض",
                 "سعر مخفض للمنتج", "سعر مخفض للمجموعة", "عدد حبات المجموعة",
                 "العنوان الترويجي للمنتج", "العنوان الترويجي للمجموعة",
@@ -856,16 +952,11 @@ def show():
         
         # عرض الإحصائيات
         col1, col2, col3, col4, col5 = st.columns(5)
-        with col1: 
-            st.metric("📦 إجمالي المنتجات", f"{len(df_final):,}")
-        with col2: 
-            st.metric("🏷️ مع عروض", f"{(df_final['اسم العرض الخاص'].astype(str).str.strip().str.len().gt(0)).sum():,}")
-        with col3: 
-            st.metric("💰 نسبة الخصم", f"{df_final['نسبة الخصم'].astype(str).str.strip().str.len().gt(0).sum():,}")
-        with col4: 
-            st.metric("🎯 عدد حبات العرض", f"{df_final['عدد حبات العرض'].astype(str).str.strip().str.len().gt(0).sum():,}")
-        with col5: 
-            st.metric("📊 أنواع العروض", f"{df_final['اسم العرض الخاص'].nunique():,}")
+        with col1: st.metric("📦 إجمالي المنتجات", f"{len(df_final):,}")
+        with col2: st.metric("🏷️ مع عروض", f"{(df_final['اسم العرض الخاص'].astype(str).str.strip().str.len().gt(0)).sum():,}")
+        with col3: st.metric("💰 نسبة الخصم", f"{df_final['نسبة الخصم'].astype(str).str.strip().str.len().gt(0).sum():,}")
+        with col4: st.metric("🎯 عدد حبات العرض", f"{df_final['عدد حبات العرض'].astype(str).str.strip().str.len().gt(0).sum():,}")
+        with col5: st.metric("📊 أنواع العروض", f"{df_final['اسم العرض الخاص'].nunique():,}")
         
         # ========== تصفية ==========
         st.subheader("🔍 استعلام وبحث سريع")
