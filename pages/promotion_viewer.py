@@ -712,13 +712,17 @@ def show():
                 except (ValueError, TypeError):
                     pass
             
-            # 5️⃣ عروض مجانية (2+1 مجاناً)
+            # 5️⃣ عروض مجانية (مثل 1+1 مجاناً، 2+1 مجاناً، إلخ)
             match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجاناً?', text)
             if match:
+                paid_qty = int(match.group(1))
                 free_qty = int(match.group(2))
-                total_qty = int(match.group(1)) + free_qty
-                percentage = (free_qty / total_qty) * 100
-                return f"{round(percentage, 0)}%", 0
+                total_qty = paid_qty + free_qty
+                
+                # التعديل هنا: إرجاع نسبة 100% ثابتة كما طلبت، مع إجمالي عدد الحبات
+                return "100%", total_qty
+            
+            return "", 0
             
             # 6️⃣ صيغة "2 +1 مجانا"
             match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجانا', text)
