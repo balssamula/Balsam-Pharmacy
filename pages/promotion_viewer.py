@@ -117,11 +117,13 @@ def extract_offer_name(text):
         if match: return f"خصم {match.group(1)} ريال على الحبة الثانية"
         return "خصم على الحبة الثانية"
     
-    # 3️⃣ عروض مجانية
+    # 3️⃣ عروض مجانية (2+1 مجاناً، 2 +1 مجانا، إلخ)
     if "مجاناً" in text or "مجانا" in text:
         match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجاناً?', text)
         if match: return f"عرض {match.group(1)}+{match.group(2)} مجاناً"
         match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجانا', text)
+        if match: return f"عرض {match.group(1)}+{match.group(2)} مجاناً"
+        match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجاناً?', text)
         if match: return f"عرض {match.group(1)}+{match.group(2)} مجاناً"
         return "عرض مجاني"
     
@@ -135,11 +137,11 @@ def extract_offer_name(text):
             return f"صفقة اليوم : {full_text}"
         return "صفقة اليوم"
     
-    # 5️⃣ عروض الكميات
-    if "حبة بسعر" in text or "حبات بسعر" in text or "حبة ب" in text:
-        match = re.search(r'(\d+)\s*حبات?\s*ب\s*([\d.]+)\s*ريال', text)
-        if match: return f"{match.group(1)}حبات بسعر {match.group(2)} ريال"
+    # 5️⃣ عروض الكميات (6حبات بسعر 77 ريال)
+    if "حبة بسعر" in text or "حبات بسعر" in text:
         match = re.search(r'(\d+)\s*حبات?\s*بسعر\s*([\d.]+)\s*ريال', text)
+        if match: return f"{match.group(1)}حبات بسعر {match.group(2)} ريال"
+        match = re.search(r'(\d+)\s*حبات?\s*ب\s*([\d.]+)\s*ريال', text)
         if match: return f"{match.group(1)}حبات بسعر {match.group(2)} ريال"
         return "عرض كميات"
     
@@ -148,6 +150,21 @@ def extract_offer_name(text):
         match = re.search(r'عرض خاص\s*-\s*خصم\s*(\d+)\s*%\s*على\s*الحبة\s*الثانية', text)
         if match: return f"عرض خاص - خصم {match.group(1)}% على الحبة الثانية"
         return "عرض خاص"
+    
+    # 7️⃣ صيغة "2حبة بسعر 65.50 ريال"
+    match = re.search(r'(\d+)\s*حبة\s*بسعر\s*([\d.]+)\s*ريال', text)
+    if match: return f"{match.group(1)}حبة بسعر {match.group(2)} ريال"
+    
+    match = re.search(r'(\d+)\s*حبة\s*ب\s*([\d.]+)\s*ريال', text)
+    if match: return f"{match.group(1)}حبة بسعر {match.group(2)} ريال"
+    
+    # 8️⃣ حالة خاصة: أرقام فقط بدون عرض واضح
+    if "/" in text:
+        parts = text.split("/")
+        if len(parts) >= 2:
+            potential_name = parts[0].strip()
+            if re.search(r'[^\d\s\-]', potential_name):
+                return potential_name
     
     return "عرض خاص"
 
@@ -170,6 +187,10 @@ def extract_offer_quantity(text):
         return f"{paid + free}"
     
     # 3️⃣ عروض الكميات (6حبات بسعر 77 ريال)
+    match = re.search(r'(\d+)\s*حبات?\s*بسعر', text)
+    if match:
+        return match.group(1)
+    
     match = re.search(r'(\d+)\s*حبات?\s*ب', text)
     if match:
         return match.group(1)
@@ -188,12 +209,12 @@ def extract_special_offer_sku(text):
     """استخراج رقم المنتج الخاص بالعرض (المجموعة) من النص"""
     text = str(text) if not pd.isna(text) else ""
     
-    # البحث عن صيغة "رقم-رقم-رقم"
+    # البحث عن صيغة "رقم-رقم-رقم" (مثل 5209-17164-4846)
     match = re.search(r'(\d{3,6}-\d{3,6}-\d{3,6})', text)
     if match:
         return match.group(1)
     
-    # البحث عن صيغة "رقم*رقم"
+    # البحث عن صيغة "رقم*رقم" (مثل 16265*6)
     match = re.search(r'(\d{3,6}\*\d+)', text)
     if match:
         return match.group(1)
@@ -249,117 +270,57 @@ def parse_composite_sku(sku):
 
     return sku, None, None, [sku], False, False
 
-# ========== دوال حساب الخصم ==========
-def calculate_discount_percentage_advanced(original_price, discounted_price, promo_text, is_taxable, quantity=1):
-    """
-    حساب نسبة الخصم المتقدمة مع مراعاة:
-    1. الضريبة (15%)
-    2. عدد الحبات
-    3. أنواع العناوين الترويجية المختلفة
-    """
-    try:
-        original = float(str(original_price).replace(',', '').strip()) if original_price else 0
-        discounted = float(str(discounted_price).replace(',', '').strip()) if discounted_price else 0
-    except (ValueError, TypeError):
-        return "", 0
-    
-    if original <= 0:
-        return "", 0
-    
-    # حساب السعر الأصلي بعد ضرب عدد الحبات
-    try:
-        qty = int(quantity) if quantity and str(quantity).isdigit() else 1
-    except (ValueError, TypeError):
-        qty = 1
-    
-    original_total = original * qty
-    
-    # 1️⃣ التحقق من وجود نسبة مئوية مباشرة في النص الترويجي
-    if promo_text and isinstance(promo_text, str):
-        match = re.search(r'خصم\s*(\d+)\s*%', promo_text)
-        if match:
-            return f"{match.group(1)}%", float(match.group(1))
-    
-    # 2️⃣ استخراج السعر من النص الترويجي (مثل 12حبة ب29.95 ريال)
-    promo_price = extract_price_from_promo(promo_text)
-    if promo_price is not None and promo_price > 0:
-        # إعادة السعر إلى ما قبل الضريبة إذا كان المنتج خاضعاً للضريبة
-        if is_taxable:
-            promo_price_before_tax = promo_price / 1.15
-        else:
-            promo_price_before_tax = promo_price
-        
-        if original_total > promo_price_before_tax:
-            discount_amount = original_total - promo_price_before_tax
-            percentage = (discount_amount / original_total) * 100
-            return f"{round(percentage, 0)}%", round(percentage, 0)
-    
-    # 3️⃣ استخراج قيمة الخصم بالريال (مثل خصم 17 ريال)
-    discount_value = extract_discount_value_from_promo(promo_text)
-    if discount_value is not None and discount_value > 0:
-        # إذا كان المنتج خاضعاً للضريبة، قيمة الخصم تُطبق على السعر قبل الضريبة
-        if is_taxable:
-            discount_value_before_tax = discount_value / 1.15
-        else:
-            discount_value_before_tax = discount_value
-        
-        if original_total > 0:
-            percentage = (discount_value_before_tax / original_total) * 100
-            return f"{round(percentage, 0)}%", round(percentage, 0)
-    
-    # 4️⃣ حساب النسبة من السعر الأصلي والمخفض (مع مراعاة الضريبة)
-    if discounted > 0 and original_total > discounted:
-        # إعادة السعر المخفض إلى ما قبل الضريبة إذا كان المنتج خاضعاً للضريبة
-        if is_taxable:
-            discounted_before_tax = discounted / 1.15
-        else:
-            discounted_before_tax = discounted
-        
-        if original_total > discounted_before_tax:
-            discount_amount = original_total - discounted_before_tax
-            percentage = (discount_amount / original_total) * 100
-            return f"{round(percentage, 0)}%", round(percentage, 0)
-    
-    # 5️⃣ عروض مجانية (2+1 مجاناً)
-    match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجاناً?', str(promo_text) if promo_text else "")
-    if match:
-        free_qty = int(match.group(2))
-        total_qty = int(match.group(1)) + free_qty
-        percentage = (free_qty / total_qty) * 100
-        return f"{round(percentage, 0)}%", round(percentage, 0)
-    
-    return "", 0
+# ========== دوال حساب الخصم والنسب ==========
+def is_taxable(sku, price_map):
+    """التحقق من أن المنتج خاضع للضريبة من خلال العمود D"""
+    if sku in price_map:
+        return price_map[sku].get("taxable", False)
+    return False
 
-def extract_price_from_promo(promo_text):
-    """استخراج السعر من النص الترويجي (مثل 12حبة ب29.95 ريال)"""
+def remove_tax(price_including_tax):
+    """إزالة الضريبة 15% من السعر الشامل"""
+    try:
+        price = float(str(price_including_tax).replace(',', '').strip())
+        if price <= 0:
+            return price
+        return price / 1.15
+    except (ValueError, TypeError):
+        return price_including_tax
+
+def extract_quantity_from_promo(promo_text):
+    """استخراج عدد الحبات من النص الترويجي (مثل 6حبات ب 75ريال)"""
     if not promo_text or not isinstance(promo_text, str):
-        return None
+        return 1
     
-    # تنظيف النص
-    text = str(promo_text).strip()
-    
-    # أنماط البحث المدعومة
     patterns = [
-        # 6حبات ب 75ريال
-        r'(\d+)\s*حبات?\s*ب\s*([\d.]+)\s*ريال',
-        # 6حبات بسعر 75 ريال
-        r'(\d+)\s*حبات?\s*بسعر\s*([\d.]+)\s*ريال',
-        # 12حبة ب75ريال
-        r'(\d+)\s*حبة\s*ب\s*([\d.]+)\s*ريال',
-        # بسعر 75 ريال (بدون عدد)
-        r'بسعر\s*([\d.]+)\s*ريال',
-        # ب 75 ريال (بدون عدد)
-        r'ب\s*([\d.]+)\s*ريال'
+        r'(\d+)\s*حبات?\s*ب',
+        r'(\d+)\s*حبة\s*ب',
+        r'(\d+)\s*حبات?\s*بسعر',
+        r'(\d+)\s*حبة\s*بسعر'
     ]
     
     for pattern in patterns:
-        match = re.search(pattern, text)
+        match = re.search(pattern, promo_text)
         if match:
-            # إذا كان هناك مجموعتان (عدد + سعر) أو مجموعة واحدة (سعر فقط)
-            if len(match.groups()) >= 2:
-                return float(match.group(2))
-            else:
-                return float(match.group(1))
+            return int(match.group(1))
+    
+    return 1
+
+def extract_price_from_promo(promo_text):
+    """استخراج السعر من النص الترويجي"""
+    if not promo_text or not isinstance(promo_text, str):
+        return None
+    
+    patterns = [
+        r'ب\s*([\d.]+)\s*ريال',
+        r'بسعر\s*([\d.]+)\s*ريال',
+        r'ب\s*([\d.]+)'
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, promo_text)
+        if match:
+            return float(match.group(1))
     
     return None
 
@@ -373,6 +334,155 @@ def extract_discount_value_from_promo(promo_text):
         return float(match.group(1))
     
     return None
+
+def calculate_discount_percentage(original_price, discounted_price, promo_text="", quantity=1, taxable=False, price_map=None, sku=None):
+    """
+    حساب نسبة الخصم بشكل صحيح مع مراعاة الضريبة وعدد الحبات
+    """
+    try:
+        # 1️⃣ إذا كان النص الترويجي يحتوي على نسبة مئوية مباشرة
+        if promo_text and isinstance(promo_text, str):
+            match = re.search(r'خصم\s*(\d+)\s*%', promo_text)
+            if match:
+                return f"{match.group(1)}%"
+        
+        # 2️⃣ التحويل إلى أرقام
+        try:
+            original = float(str(original_price).replace(',', '').strip()) if original_price else 0
+            discounted = float(str(discounted_price).replace(',', '').strip()) if discounted_price else 0
+        except (ValueError, TypeError):
+            return ""
+        
+        if original <= 0 or discounted <= 0:
+            return ""
+        
+        # 3️⃣ إذا كان المنتج خاضع للضريبة، نعيد السعر المخفض إلى ما قبل الضريبة
+        if taxable:
+            discounted_before_tax = remove_tax(discounted)
+        else:
+            discounted_before_tax = discounted
+        
+        # 4️⃣ حساب السعر الأصلي الإجمالي (السعر الأصلي × عدد الحبات)
+        original_total = original * quantity
+        
+        # 5️⃣ حساب قيمة الخصم
+        discount_amount = original_total - discounted_before_tax
+        
+        # 6️⃣ إذا كانت قيمة الخصم سالبة (يعني السعر المخفض أعلى من الأصلي)
+        if discount_amount <= 0:
+            return ""
+        
+        # 7️⃣ حساب النسبة المئوية
+        percentage = (discount_amount / original_total) * 100
+        
+        return f"{round(percentage, 0)}%"
+        
+    except Exception:
+        return ""
+
+def calculate_discount_percentage_from_promo(original_price, promo_text, quantity=1, taxable=False):
+    """
+    حساب نسبة الخصم من النص الترويجي مباشرة
+    """
+    if not promo_text or not isinstance(promo_text, str):
+        return ""
+    
+    try:
+        original = float(str(original_price).replace(',', '').strip()) if original_price else 0
+        if original <= 0:
+            return ""
+        
+        # 1️⃣ إذا كان النص يحتوي على نسبة مئوية
+        match = re.search(r'خصم\s*(\d+)\s*%', promo_text)
+        if match:
+            return f"{match.group(1)}%"
+        
+        # 2️⃣ إذا كان النص يحتوي على قيمة خصم بالريال (مثل خصم 17 ريال)
+        discount_value = extract_discount_value_from_promo(promo_text)
+        if discount_value:
+            if taxable:
+                discount_value = remove_tax(discount_value)
+            original_total = original * quantity
+            if original_total > 0:
+                percentage = (discount_value / original_total) * 100
+                return f"{round(percentage, 0)}%"
+        
+        # 3️⃣ إذا كان النص يحتوي على سعر محدد (مثل 6حبات ب 75ريال)
+        promo_price = extract_price_from_promo(promo_text)
+        if promo_price:
+            if taxable:
+                promo_price_before_tax = remove_tax(promo_price)
+            else:
+                promo_price_before_tax = promo_price
+            
+            original_total = original * quantity
+            if original_total > 0 and promo_price_before_tax < original_total:
+                discount_amount = original_total - promo_price_before_tax
+                percentage = (discount_amount / original_total) * 100
+                return f"{round(percentage, 0)}%"
+        
+        return ""
+        
+    except Exception:
+        return ""
+
+def extract_promo_details(promo_text, original_price, quantity=1, taxable=False):
+    """
+    استخراج جميع تفاصيل الخصم من النص الترويجي
+    """
+    if not promo_text or not isinstance(promo_text, str):
+        return {"discount_percentage": "", "discount_value": "", "final_price": ""}
+    
+    try:
+        original = float(str(original_price).replace(',', '').strip()) if original_price else 0
+        if original <= 0:
+            return {"discount_percentage": "", "discount_value": "", "final_price": ""}
+        
+        # 1️⃣ نسبة مئوية مباشرة
+        match = re.search(r'خصم\s*(\d+)\s*%', promo_text)
+        if match:
+            return {
+                "discount_percentage": f"{match.group(1)}%",
+                "discount_value": "",
+                "final_price": ""
+            }
+        
+        # 2️⃣ قيمة خصم بالريال
+        discount_value = extract_discount_value_from_promo(promo_text)
+        if discount_value:
+            if taxable:
+                discount_value = remove_tax(discount_value)
+            original_total = original * quantity
+            if original_total > 0:
+                percentage = (discount_value / original_total) * 100
+                return {
+                    "discount_percentage": f"{round(percentage, 0)}%",
+                    "discount_value": discount_value,
+                    "final_price": original_total - discount_value
+                }
+        
+        # 3️⃣ سعر محدد (مثل 6حبات ب 75ريال)
+        promo_price = extract_price_from_promo(promo_text)
+        if promo_price:
+            if taxable:
+                promo_price_before_tax = remove_tax(promo_price)
+            else:
+                promo_price_before_tax = promo_price
+            
+            original_total = original * quantity
+            if original_total > 0 and promo_price_before_tax < original_total:
+                discount_amount = original_total - promo_price_before_tax
+                percentage = (discount_amount / original_total) * 100
+                return {
+                    "discount_percentage": f"{round(percentage, 0)}%",
+                    "discount_value": discount_amount,
+                    "final_price": promo_price_before_tax
+                }
+        
+        return {"discount_percentage": "", "discount_value": "", "final_price": ""}
+        
+    except Exception:
+        return {"discount_percentage": "", "discount_value": "", "final_price": ""}
 
 # ========== دوال التصدير ==========
 @st.cache_data(show_spinner=False)
@@ -391,7 +501,7 @@ def generate_excel_download_files(df):
         
         if "اسم العرض الخاص" in df:
             unique_offers = df["اسم العرض الخاص"].dropna().unique()
-            for offer_type in unique_offers[:15]:
+            for offer_type in unique_offers[:12]:
                 if offer_type and offer_type.strip() != "":
                     type_df = df[df["اسم العرض الخاص"] == offer_type]
                     if len(type_df) > 0:
