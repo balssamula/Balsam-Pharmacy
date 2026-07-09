@@ -78,14 +78,9 @@ def build_custom_excel_sheet(ws, df):
     alt_row_fill = PatternFill(start_color="E6F3F5", end_color="E6F3F5", fill_type="solid")
     
     for _, row in df.iterrows():
-        # استخراج أسماء المنتجات لاستخدامها في التعليقات
-        base_name = str(row.get("اسم المنتج", "")).strip()
-        group_names = [n.strip() for n in str(row.get("اسم المنتج للمجموعة", "")).split("|") if n.strip()]
-        
-        # دمج اسم المنتج الأساسي مع أسماء المجموعة بالترتيب
-        row_names = []
-        if base_name and base_name != "nan": row_names.append(base_name)
-        row_names.extend(group_names)
+        # 🌟 التعديل هنا: استخراج أسماء العروض من العمود مباشرة وتقسيمها بناءً على الفاصل |
+        offer_val = str(row.get("اسم العرض الخاص", "")).strip()
+        offer_names_list = [o.strip() for o in offer_val.split("|") if o.strip() and o.strip() != "nan"]
         
         is_alt = (row_idx % 2 == 1)
         col_idx = 1
@@ -104,12 +99,12 @@ def build_custom_excel_sheet(ws, df):
             if is_alt:
                 cell.fill = alt_row_fill
                 
-            # 💡 إضافة التعليق (Hover Comment) إذا كان العمود مقسماً ويحتوي على قيمة
+            # 💡 إضافة التعليق (Hover Comment) متضمناً اسم العرض المقابل
             if col_splits[col] > 1 and cell_val != "":
-                # تحديد اسم المنتج المقابل بناءً على ترتيب التقسيم
-                product_name_for_comment = row_names[split_index] if split_index < len(row_names) else (row_names[-1] if row_names else base_name)
+                # تحديد اسم العرض المناسب بناءً على مؤشر التقسيم الحالي
+                offer_name_for_comment = offer_names_list[split_index] if split_index < len(offer_names_list) else (offer_names_list[-1] if offer_names_list else "عرض خاص")
                 
-                comment = Comment(f"📦 يخص المنتج:\n{product_name_for_comment}", "نظام بلسم")
+                comment = Comment(f"🏷️ اسم العرض:\n{offer_name_for_comment}", "نظام بلسم")
                 comment.width = 250
                 comment.height = 60
                 cell.comment = comment
@@ -127,9 +122,19 @@ def build_custom_excel_sheet(ws, df):
 def generate_excel_download_files(df):
     """توليد ملفات إكسيل التحميل وتطبيق التقسيمات الديناميكية وفصل الشيتات"""
     
-    # 1. فصل المنتجات المجمعة المختلفة (المفصولة بـ Dash)
-    mask_mixed_bundles = df["رقم المنتج للمجموعة"].astype(str).str.contains("-", regex=False) | df["رقم منتج العرض الخاص"].astype(str).str.contains("-", regex=False)
+    # 1. فلترة المنتجات المجمعة "المختلفة" التي تحتوي على (-) أو (+) في أرقام المنتجات
+    # نحدد أعمدة الـ SKU التي سنبحث بداخلها
+    sku_columns = ["رقم المنتج", "رقم المنتج للمجموعة", "رقم منتج العرض الخاص"]
     
+    # إنشاء قناع (Mask) مبدئي بـ False
+    mask_mixed_bundles = pd.Series(False, index=df.index)
+    
+    # البحث عن علامة + أو - في أي من أعمدة أرقام المنتجات
+    for col in sku_columns:
+        if col in df.columns:
+            mask_mixed_bundles |= df[col].astype(str).str.contains(r'[-+]', regex=True, na=False)
+    
+    # تقسيم البيانات بناءً على القناع
     df_mixed = df[mask_mixed_bundles].copy()
     df_regular = df[~mask_mixed_bundles].copy()
     
