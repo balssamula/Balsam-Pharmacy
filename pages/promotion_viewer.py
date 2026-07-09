@@ -577,6 +577,175 @@ def generate_excel_download_files(df):
     
     return final_bytes, final_bytes
 
+# ========== دوال التصدير ==========
+
+def build_custom_excel_sheet(ws, df):
+    """بناء الشيت وتطبيق الدمج والتعليقات والتنسيقات باستخدام openpyxl مباشرة"""
+    ws.views.sheetView[0].rightToLeft = True
+    
+    if df.empty:
+        return
+        
+    # 1. تحديد أقصى عدد من التقسيمات لكل عمود
+    col_splits = {}
+    for col in df.columns:
+        max_split = df[col].astype(str).apply(lambda x: len(str(x).split('|')) if pd.notna(x) and '|' in str(x) else 1).max()
+        col_splits[col] = max_split
+
+    # 2. بناء العناوين المدمجة
+    current_col = 1
+    header_mapping = []
+    
+    header_fill = PatternFill(start_color="1F7A8C", end_color="1F7A8C", fill_type="solid")
+    header_font = Font(name="Tajawal", size=11, bold=True, color="FFFFFF")
+    border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    align_center = Alignment(horizontal="center", vertical="center")
+
+    for col in df.columns:
+        splits = col_splits[col]
+        if splits > 1:
+            ws.merge_cells(start_row=1, start_column=current_col, end_row=1, end_column=current_col + splits - 1)
+            cell_main = ws.cell(row=1, column=current_col, value=col)
+            cell_main.fill = header_fill
+            cell_main.font = header_font
+            cell_main.alignment = align_center
+            cell_main.border = border
+            
+            for i in range(splits):
+                cell_sub = ws.cell(row=2, column=current_col + i, value=f"قيمة {i+1}")
+                cell_sub.fill = header_fill
+                cell_sub.font = header_font
+                cell_sub.alignment = align_center
+                cell_sub.border = border
+                ws.column_dimensions[get_column_letter(current_col + i)].width = 20
+                header_mapping.append((col, i))
+            
+            for i in range(1, splits):
+                ws.cell(row=1, column=current_col + i).border = border
+                
+            current_col += splits
+        else:
+            ws.merge_cells(start_row=1, start_column=current_col, end_row=2, end_column=current_col)
+            cell_main = ws.cell(row=1, column=current_col, value=col)
+            cell_main.fill = header_fill
+            cell_main.font = header_font
+            cell_main.alignment = align_center
+            cell_main.border = border
+            ws.cell(row=2, column=current_col).border = border
+            ws.column_dimensions[get_column_letter(current_col)].width = max(20, len(str(col)) + 5)
+            header_mapping.append((col, 0))
+            current_col += 1
+
+    # 3. كتابة البيانات وإضافة التعليقات
+    row_idx = 3
+    alt_row_fill = PatternFill(start_color="E6F3F5", end_color="E6F3F5", fill_type="solid")
+    
+    for _, row in df.iterrows():
+        offer_val = str(row.get("اسم العرض الخاص", "")).strip()
+        offer_names_list = [o.strip() for o in offer_val.split("|") if o.strip() and o.strip() != "nan"]
+        
+        is_alt = (row_idx % 2 == 1)
+        col_idx = 1
+        
+        for col, split_index in header_mapping:
+            val = str(row[col]) if pd.notna(row[col]) and str(row[col]) != "nan" else ""
+            val_parts = [p.strip() for p in val.split('|')]
+            
+            cell_val = val_parts[split_index] if split_index < len(val_parts) else ""
+            cell = ws.cell(row=row_idx, column=col_idx, value=cell_val)
+            
+            cell.border = border
+            cell.alignment = align_center
+            if is_alt:
+                cell.fill = alt_row_fill
+                
+            if col_splits[col] > 1 and cell_val != "":
+                offer_name_for_comment = offer_names_list[split_index] if split_index < len(offer_names_list) else (offer_names_list[-1] if offer_names_list else "عرض خاص")
+                comment = Comment(f"🏷️ اسم العرض:\n{offer_name_for_comment}", "نظام بلسم")
+                comment.width = 250
+                comment.height = 60
+                cell.comment = comment
+                
+            col_idx += 1
+        row_idx += 1
+
+    max_col_letter = get_column_letter(current_col - 1)
+    ws.auto_filter.ref = f"A2:{max_col_letter}{row_idx - 1}"
+    ws.freeze_panes = 'A3'
+
+
+@st.cache_data(show_spinner=False)
+def generate_excel_download_files(df):
+    """توليد ملفات إكسيل التحميل وتقسيم الصفوف التي تحتوي على مجموعات مختلطة وعادية"""
+    regular_rows = []
+    mixed_rows = []
+    
+    for _, row in df.iterrows():
+        base_sku = str(row.get("رقم المنتج", "")).strip()
+        is_base_mixed = bool(re.search(r'[-+]', base_sku))
+        
+        def split_clean(val):
+            if pd.isna(val) or str(val).strip() in ["", "nan"]: return []
+            return [x.strip() for x in str(val).split("|") if x.strip()]
+        
+        reg_skus = split_clean(row.get("رقم المنتج للمجموعة", ""))
+        mix_skus = split_clean(row.get("رقم منتج العرض الخاص", ""))
+        
+        num_reg = len(reg_skus)
+        num_mix = len(mix_skus)
+        
+        if is_base_mixed:
+            mixed_rows.append(row.to_dict())
+            continue
+            
+        if num_mix == 0:
+            regular_rows.append(row.to_dict())
+            continue
+            
+        # حالة وجود النوعين معاً: فصل البيانات
+        reg_dict = row.to_dict()
+        reg_dict["رقم منتج العرض الخاص"] = ""
+        
+        mix_dict = row.to_dict()
+        mix_dict["رقم المنتج للمجموعة"] = ""
+        mix_dict["اسم المنتج للمجموعة"] = ""
+        mix_dict["سعر المنتج للمجموعة"] = ""
+        mix_dict["عدد حبات المجموعة"] = ""
+        
+        shared_cols = ["سعر مخفض للمجموعة", "العنوان الترويجي للمجموعة", "تاريخ نهاية التخفيض للمجموعة", "نسبة الخصم", "عدد حبات العرض"]
+        for col in shared_cols:
+            vals = split_clean(row.get(col, ""))
+            if len(vals) >= (num_reg + num_mix) and len(vals) > 0:
+                reg_vals = vals[:num_reg]
+                mix_vals = vals[num_reg:]
+                reg_dict[col] = " | ".join(reg_vals) if any(reg_vals) else ""
+                mix_dict[col] = " | ".join(mix_vals) if any(mix_vals) else ""
+        
+        regular_rows.append(reg_dict)
+        mixed_rows.append(mix_dict)
+
+    df_regular = pd.DataFrame(regular_rows)
+    df_mixed = pd.DataFrame(mixed_rows)
+    
+    output = BytesIO()
+    wb = Workbook()
+    wb.remove(wb.active)
+    
+    if not df_regular.empty:
+        ws_regular = wb.create_sheet("المنتجات الأساسية والعروض")
+        build_custom_excel_sheet(ws_regular, df_regular)
+        
+    if not df_mixed.empty:
+        ws_mixed = wb.create_sheet("المنتجات المجمعة المختلفة")
+        build_custom_excel_sheet(ws_mixed, df_mixed)
+        
+    if len(wb.sheetnames) == 0:
+        wb.create_sheet("لا توجد بيانات")
+        
+    wb.save(output)
+    final_bytes = output.getvalue()
+    
+    return final_bytes, final_bytes
 # ========== دالة العرض الرئيسية ==========
 def show():
     st.markdown("""
