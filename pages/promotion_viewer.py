@@ -487,30 +487,93 @@ def extract_promo_details(promo_text, original_price, quantity=1, taxable=False)
 # ========== دوال التصدير ==========
 @st.cache_data(show_spinner=False)
 def generate_excel_download_files(df):
-    """توليد ملفات إكسيل التحميل"""
-    simple_output = BytesIO()
-    with pd.ExcelWriter(simple_output, engine='openpyxl') as writer:
-        df.to_excel(writer, sheet_name="العروض والمنتجات", index=False)
-        apply_excel_style(writer, "العروض والمنتجات", df)
-    simple_bytes = simple_output.getvalue()
-
-    detailed_output = BytesIO()
-    with pd.ExcelWriter(detailed_output, engine='openpyxl') as writer:
-        df.to_excel(writer, sheet_name="النتيجة النهائية", index=False)
-        apply_excel_style(writer, "النتيجة النهائية", df)
+    """توليد ملفات إكسيل التحميل وتقسيم الصفوف التي تحتوي على مجموعات مختلطة وعادية"""
+    regular_rows = []
+    mixed_rows = []
+    
+    for _, row in df.iterrows():
+        base_sku = str(row.get("رقم المنتج", "")).strip()
         
-        if "اسم العرض الخاص" in df:
-            unique_offers = df["اسم العرض الخاص"].dropna().unique()
-            for offer_type in unique_offers[:12]:
-                if offer_type and offer_type.strip() != "":
-                    type_df = df[df["اسم العرض الخاص"] == offer_type]
-                    if len(type_df) > 0:
-                        sheet_name = str(offer_type)[:30].replace("|", "-").replace(":", "-")
-                        type_df.to_excel(writer, sheet_name=sheet_name, index=False)
-                        apply_excel_style(writer, sheet_name, type_df)
-                        
-    detailed_bytes = detailed_output.getvalue()
-    return simple_bytes, detailed_bytes
+        # 1. إذا كان رقم المنتج الأساسي نفسه عبارة عن مجموعة مختلطة (سقطت من الفلتر)
+        is_base_mixed = bool(re.search(r'[-+]', base_sku))
+        
+        # دالة مساعدة لتنظيف وتقسيم الخلايا المدمجة بـ |
+        def split_clean(val):
+            if pd.isna(val) or str(val).strip() in ["", "nan"]: return []
+            return [x.strip() for x in str(val).split("|") if x.strip()]
+        
+        # استخراج المجموعات العادية (بها *) والمجموعات المختلفة (بها - أو +)
+        reg_skus = split_clean(row.get("رقم المنتج للمجموعة", ""))
+        mix_skus = split_clean(row.get("رقم منتج العرض الخاص", ""))
+        
+        num_reg = len(reg_skus)
+        num_mix = len(mix_skus)
+        
+        # 2. توجيه الصف بأكمله إذا كان المنتج الأساسي مختلطاً
+        if is_base_mixed:
+            mixed_rows.append(row.to_dict())
+            continue
+            
+        # 3. توجيه الصف بأكمله إذا لم يكن هناك أي مجموعات مختلفة
+        if num_mix == 0:
+            regular_rows.append(row.to_dict())
+            continue
+            
+        # 4. حالة وجود النوعين معاً: نقوم بإنشاء نسختين من الصف وفصل البيانات!
+        
+        # --- نسخة الشيت الأساسي ---
+        reg_dict = row.to_dict()
+        reg_dict["رقم منتج العرض الخاص"] = "" # تفريغ بيانات المجموعة المختلفة
+        
+        # --- نسخة شيت المجموعات المختلفة ---
+        mix_dict = row.to_dict()
+        mix_dict["رقم المنتج للمجموعة"] = "" # تفريغ بيانات المجموعة العادية
+        mix_dict["اسم المنتج للمجموعة"] = ""
+        mix_dict["سعر المنتج للمجموعة"] = ""
+        mix_dict["عدد حبات المجموعة"] = ""
+        
+        # تقسيم الأعمدة المشتركة (الأسعار المخفضة، العناوين، التواريخ)
+        shared_cols = ["سعر مخفض للمجموعة", "العنوان الترويجي للمجموعة", "تاريخ نهاية التخفيض للمجموعة"]
+        for col in shared_cols:
+            vals = split_clean(row.get(col, ""))
+            # التأكد من أن عدد القيم يتطابق لضمان سلامة الفصل
+            if len(vals) == (num_reg + num_mix) and len(vals) > 0:
+                reg_vals = vals[:num_reg]
+                mix_vals = vals[num_reg:]
+                reg_dict[col] = " | ".join(reg_vals) if any(reg_vals) else ""
+                mix_dict[col] = " | ".join(mix_vals) if any(mix_vals) else ""
+            else:
+                # في حال اختلال الترتيب (حماية من فقدان البيانات)، ننسخ القيمة في كلا الصفين
+                pass 
+        
+        # إضافتهم للقوائم النهائية
+        regular_rows.append(reg_dict)
+        mixed_rows.append(mix_dict)
+
+    # تحويل القوائم إلى DataFrames
+    df_regular = pd.DataFrame(regular_rows)
+    df_mixed = pd.DataFrame(mixed_rows)
+    
+    # بناء ملف الإكسيل
+    output = BytesIO()
+    wb = Workbook()
+    wb.remove(wb.active) # مسح الشيت الافتراضي
+    
+    if not df_regular.empty:
+        ws_regular = wb.create_sheet("المنتجات الأساسية والعروض")
+        build_custom_excel_sheet(ws_regular, df_regular)
+        
+    if not df_mixed.empty:
+        ws_mixed = wb.create_sheet("المنتجات المجمعة المختلفة")
+        build_custom_excel_sheet(ws_mixed, df_mixed)
+        
+    if len(wb.sheetnames) == 0:
+        wb.create_sheet("لا توجد بيانات")
+        
+    wb.save(output)
+    final_bytes = output.getvalue()
+    
+    return final_bytes, final_bytes
 
 # ========== دالة العرض الرئيسية ==========
 def show():
