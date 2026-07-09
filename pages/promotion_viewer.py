@@ -3,204 +3,43 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import openpyxl
-from openpyxl import Workbook
-from openpyxl.comments import Comment
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from io import BytesIO
 import re
 
-
 # ========== دوال التنسيق ==========
-def build_custom_excel_sheet(ws, df):
-    """بناء الشيت وتطبيق الدمج والتعليقات والتنسيقات باستخدام openpyxl مباشرة"""
-    ws.views.sheetView[0].rightToLeft = True
-    
-    if df.empty:
-        return
-        
-    # 1. تحديد أقصى عدد من التقسيمات لكل عمود
-    col_splits = {}
-    for col in df.columns:
-        max_split = df[col].astype(str).apply(lambda x: len(str(x).split('|')) if pd.notna(x) and '|' in str(x) else 1).max()
-        col_splits[col] = max_split
-
-    # 2. بناء العناوين المدمجة
-    current_col = 1
-    header_mapping = [] # حفظ خريطة الأعمدة لتوزيع البيانات لاحقاً
-    
-    header_fill = PatternFill(start_color="1F7A8C", end_color="1F7A8C", fill_type="solid")
-    header_font = Font(name="Tajawal", size=11, bold=True, color="FFFFFF")
-    border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-    align_center = Alignment(horizontal="center", vertical="center")
-
-    for col in df.columns:
-        splits = col_splits[col]
-        if splits > 1:
-            # دمج الخلايا للعنوان الرئيسي
-            ws.merge_cells(start_row=1, start_column=current_col, end_row=1, end_column=current_col + splits - 1)
-            cell_main = ws.cell(row=1, column=current_col, value=col)
-            cell_main.fill = header_fill
-            cell_main.font = header_font
-            cell_main.alignment = align_center
-            cell_main.border = border
-            
-            # كتابة العناوين الفرعية (قيمة 1، قيمة 2...)
-            for i in range(splits):
-                cell_sub = ws.cell(row=2, column=current_col + i, value=f"قيمة {i+1}")
-                cell_sub.fill = header_fill
-                cell_sub.font = header_font
-                cell_sub.alignment = align_center
-                cell_sub.border = border
-                ws.column_dimensions[get_column_letter(current_col + i)].width = 20
-                header_mapping.append((col, i))
-            
-            # رسم حدود الخلايا المدمجة الفارغة
-            for i in range(1, splits):
-                ws.cell(row=1, column=current_col + i).border = border
-                
-            current_col += splits
-        else:
-            # عمود عادي بدون دمج
-            ws.merge_cells(start_row=1, start_column=current_col, end_row=2, end_column=current_col)
-            cell_main = ws.cell(row=1, column=current_col, value=col)
-            cell_main.fill = header_fill
-            cell_main.font = header_font
-            cell_main.alignment = align_center
-            cell_main.border = border
-            ws.cell(row=2, column=current_col).border = border
-            ws.column_dimensions[get_column_letter(current_col)].width = max(20, len(str(col)) + 5)
-            header_mapping.append((col, 0))
-            current_col += 1
-
-    # 3. كتابة البيانات وإضافة التعليقات
-    row_idx = 3
-    alt_row_fill = PatternFill(start_color="E6F3F5", end_color="E6F3F5", fill_type="solid")
-    
-    for _, row in df.iterrows():
-        # 🌟 التعديل هنا: استخراج أسماء العروض من العمود مباشرة وتقسيمها بناءً على الفاصل |
-        offer_val = str(row.get("اسم العرض الخاص", "")).strip()
-        offer_names_list = [o.strip() for o in offer_val.split("|") if o.strip() and o.strip() != "nan"]
-        
-        is_alt = (row_idx % 2 == 1)
-        col_idx = 1
-        
-        for col, split_index in header_mapping:
-            val = str(row[col]) if pd.notna(row[col]) and str(row[col]) != "nan" else ""
-            val_parts = [p.strip() for p in val.split('|')]
-            
-            # تحديد القيمة للخلية الحالية
-            cell_val = val_parts[split_index] if split_index < len(val_parts) else ""
-            cell = ws.cell(row=row_idx, column=col_idx, value=cell_val)
-            
-            # التنسيق
-            cell.border = border
-            cell.alignment = align_center
-            if is_alt:
-                cell.fill = alt_row_fill
-                
-            # 💡 إضافة التعليق (Hover Comment) متضمناً اسم العرض المقابل
-            if col_splits[col] > 1 and cell_val != "":
-                # تحديد اسم العرض المناسب بناءً على مؤشر التقسيم الحالي
-                offer_name_for_comment = offer_names_list[split_index] if split_index < len(offer_names_list) else (offer_names_list[-1] if offer_names_list else "عرض خاص")
-                
-                comment = Comment(f"🏷️ اسم العرض:\n{offer_name_for_comment}", "نظام بلسم")
-                comment.width = 250
-                comment.height = 60
-                cell.comment = comment
-                
-            col_idx += 1
-        row_idx += 1
-
-    # 4. تفعيل الفلترة التلقائية وتجميد العناوين
-    max_col_letter = get_column_letter(current_col - 1)
-    ws.auto_filter.ref = f"A2:{max_col_letter}{row_idx - 1}"
-    ws.freeze_panes = 'A3'
-
-
-@st.cache_data(show_spinner=False)
-def generate_excel_download_files(df):
-    """توليد ملفات إكسيل التحميل وتطبيق التقسيمات الديناميكية وفصل الشيتات"""
-    
-    # 1. فلترة المنتجات المجمعة "المختلفة" التي تحتوي على (-) أو (+) في أرقام المنتجات
-    # نحدد أعمدة الـ SKU التي سنبحث بداخلها
-    sku_columns = ["رقم المنتج", "رقم المنتج للمجموعة", "رقم منتج العرض الخاص"]
-    
-    # إنشاء قناع (Mask) مبدئي بـ False
-    mask_mixed_bundles = pd.Series(False, index=df.index)
-    
-    # البحث عن علامة + أو - في أي من أعمدة أرقام المنتجات
-    for col in sku_columns:
-        if col in df.columns:
-            mask_mixed_bundles |= df[col].astype(str).str.contains(r'[-+]', regex=True, na=False)
-    
-    # تقسيم البيانات بناءً على القناع
-    df_mixed = df[mask_mixed_bundles].copy()
-    df_regular = df[~mask_mixed_bundles].copy()
-    
-    output = BytesIO()
-    wb = Workbook()
-    wb.remove(wb.active) # مسح الشيت الافتراضي
-    
-    # بناء شيت المنتجات العادية
-    if not df_regular.empty:
-        ws_regular = wb.create_sheet("المنتجات الأساسية والعروض")
-        build_custom_excel_sheet(ws_regular, df_regular)
-        
-    # بناء شيت المنتجات المجمعة المختلفة
-    if not df_mixed.empty:
-        ws_mixed = wb.create_sheet("المنتجات المجمعة المختلفة")
-        build_custom_excel_sheet(ws_mixed, df_mixed)
-        
-    # في حالة كان الملف فارغاً تماماً
-    if len(wb.sheetnames) == 0:
-        wb.create_sheet("لا توجد بيانات")
-        
-    wb.save(output)
-    final_bytes = output.getvalue()
-    
-    return final_bytes, final_bytes
-    
-def apply_excel_style(writer, sheet_name, df, is_multiindex=False):
-    """تطبيق التنسيقات الاحترافية وإضافة الفلاتر لملف Excel"""
+def apply_excel_style(writer, sheet_name, df):
+    """تطبيق التنسيقات الاحترافية على ملف Excel"""
     workbook = writer.book
     worksheet = workbook[sheet_name]
     
     header_fill = PatternFill(start_color="1F7A8C", end_color="1F7A8C", fill_type="solid")
-    header_font = Font(name="Tajawal", size=11, bold=True, color="FFFFFF")
+    header_font = Font(name="Tajawal", size=12, bold=True, color="FFFFFF")
     alt_row_fill = PatternFill(start_color="E6F3F5", end_color="E6F3F5", fill_type="solid")
     border = Border(
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin')
     )
     
-    # تحديد عدد صفوف العناوين (صفين إذا كان هناك دمج وتقسيم)
-    header_rows = 2 if is_multiindex else 1
+    for col_idx, col_name in enumerate(df.columns, 1):
+        cell = worksheet.cell(row=1, column=col_idx)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = border
+        worksheet.column_dimensions[get_column_letter(col_idx)].width = max(20, len(str(col_name)) + 5)
     
-    # تنسيق صفوف العناوين
-    for row_idx in range(1, header_rows + 1):
-        for col_idx in range(1, worksheet.max_column + 1):
-            cell = worksheet.cell(row=row_idx, column=col_idx)
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            cell.border = border
-            worksheet.column_dimensions[get_column_letter(col_idx)].width = 22
-    
-    # تنسيق البيانات
-    for row_idx in range(header_rows + 1, worksheet.max_row + 1):
-        is_alt = (row_idx - header_rows) % 2 == 1
-        for col_idx in range(1, worksheet.max_column + 1):
+    for row_idx in range(2, len(df) + 2):
+        is_alt = (row_idx - 2) % 2 == 1
+        for col_idx in range(1, len(df.columns) + 1):
             cell = worksheet.cell(row=row_idx, column=col_idx)
             cell.border = border
             cell.alignment = Alignment(horizontal="center", vertical="center")
             if is_alt:
                 cell.fill = alt_row_fill
     
-    worksheet.freeze_panes = f'A{header_rows + 1}'
-    
-    # ✅ إضافة الفلترة التلقائية للجدول
-    worksheet.auto_filter.ref = f"A{header_rows}:{get_column_letter(worksheet.max_column)}{worksheet.max_row}"
+    worksheet.freeze_panes = 'A2'
 
 @st.cache_data
 def generate_empty_template():
@@ -645,6 +484,34 @@ def extract_promo_details(promo_text, original_price, quantity=1, taxable=False)
     except Exception:
         return {"discount_percentage": "", "discount_value": "", "final_price": ""}
 
+# ========== دوال التصدير ==========
+@st.cache_data(show_spinner=False)
+def generate_excel_download_files(df):
+    """توليد ملفات إكسيل التحميل"""
+    simple_output = BytesIO()
+    with pd.ExcelWriter(simple_output, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name="العروض والمنتجات", index=False)
+        apply_excel_style(writer, "العروض والمنتجات", df)
+    simple_bytes = simple_output.getvalue()
+
+    detailed_output = BytesIO()
+    with pd.ExcelWriter(detailed_output, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name="النتيجة النهائية", index=False)
+        apply_excel_style(writer, "النتيجة النهائية", df)
+        
+        if "اسم العرض الخاص" in df:
+            unique_offers = df["اسم العرض الخاص"].dropna().unique()
+            for offer_type in unique_offers[:12]:
+                if offer_type and offer_type.strip() != "":
+                    type_df = df[df["اسم العرض الخاص"] == offer_type]
+                    if len(type_df) > 0:
+                        sheet_name = str(offer_type)[:30].replace("|", "-").replace(":", "-")
+                        type_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                        apply_excel_style(writer, sheet_name, type_df)
+                        
+    detailed_bytes = detailed_output.getvalue()
+    return simple_bytes, detailed_bytes
+
 # ========== دالة العرض الرئيسية ==========
 def show():
     st.markdown("""
@@ -768,19 +635,15 @@ def show():
             return f"{round(percentage, 0)}%", round(percentage, 0)
         
         def extract_discount_percentage_full(text, original_price=None, discounted_price=None, promo_text="", quantity=1, has_tax=False):
+            """
+            استخراج نسبة الخصم من جميع المصادر الممكنة مع مراعاة الضريبة والكميات
+            """
             text = str(text) if not pd.isna(text) else ""
             
-            # 🌟 إضافة جديدة: خصم على الحبة الثانية (يجب أن يكون في البداية)
-            match_second = re.search(r'خصم\s*(\d+)\s*%\s*على\s*(?:الحبة|القطعة)\s*الثانية', text)
-            if match_second:
-                discount_second = float(match_second.group(1))
-                # الخصم يقع على حبة واحدة من أصل حبتين، لذلك نقسم النسبة على 2
-                percentage = discount_second / 2
-                return f"{round(percentage, 0)}%", 2
-
-            # 1️⃣ خصم بنسبة مئوية مباشرة
+            # 1️⃣ خصم بنسبة مئوية مباشرة (حل مشكلة اختفاء عدد الحبات)
             match = re.search(r'خصم\s*(\d+)\s*%', text)
-            if match and not match_second:
+            if match:
+                # إرجاع الكمية الممررة بدلاً من 0
                 return f"{match.group(1)}%", quantity
             
             # 2️⃣ خصم بقيمة ريال (مثل خصم 17 ريال) - (حل مشكلة الحساب الخاطئ للضريبة والكمية)
@@ -849,16 +712,15 @@ def show():
                 except (ValueError, TypeError):
                     pass
             
-            # 5️⃣ عروض مجانية (تطبيق المنطق الرياضي السليم)
+            # 5️⃣ عروض مجانية (مثل 1+1 مجاناً، 2+1 مجاناً، إلخ)
             match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجاناً?', text)
             if match:
                 paid_qty = int(match.group(1))
                 free_qty = int(match.group(2))
                 total_qty = paid_qty + free_qty
                 
-                # حساب النسبة رياضياً: (عدد الحبات المجانية ÷ إجمالي الحبات)
-                percentage = (free_qty / total_qty) * 100
-                return f"{round(percentage, 0)}%", total_qty
+                # التعديل هنا: إرجاع نسبة 100% ثابتة كما طلبت، مع إجمالي عدد الحبات
+                return "100%", total_qty
             
             return "", 0
             
