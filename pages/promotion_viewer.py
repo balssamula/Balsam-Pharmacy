@@ -9,37 +9,78 @@ from io import BytesIO
 import re
 
 # ========== دوال التنسيق ==========
-def apply_excel_style(writer, sheet_name, df):
-    """تطبيق التنسيقات الاحترافية على ملف Excel"""
+def prepare_multiindex_df(df):
+    """تقسيم الأعمدة التي تحتوي على '|' إلى أعمدة فرعية بعناوين مدمجة"""
+    if df.empty: return df
+    
+    max_splits = {}
+    for col in df.columns:
+        # حساب أقصى عدد من التقسيمات لكل عمود
+        max_splits[col] = df[col].astype(str).apply(lambda x: len(str(x).split('|')) if pd.notna(x) and '|' in str(x) else 1).max()
+    
+    multi_cols = []
+    for col in df.columns:
+        if max_splits[col] > 1:
+            for i in range(1, max_splits[col] + 1):
+                multi_cols.append((col, f"قيمة {i}"))
+        else:
+            multi_cols.append((col, "")) # عمود عادي بدون تقسيم
+            
+    new_rows = []
+    for _, row in df.iterrows():
+        new_row = []
+        for col in df.columns:
+            val = str(row[col]) if pd.notna(row[col]) and str(row[col]) != "nan" else ""
+            if max_splits[col] > 1:
+                parts = [p.strip() for p in val.split('|')]
+                parts += [""] * (max_splits[col] - len(parts)) # إكمال الفراغات
+                new_row.extend(parts)
+            else:
+                new_row.append(val)
+        new_rows.append(new_row)
+        
+    return pd.DataFrame(new_rows, columns=pd.MultiIndex.from_tuples(multi_cols))
+    
+def apply_excel_style(writer, sheet_name, df, is_multiindex=False):
+    """تطبيق التنسيقات الاحترافية وإضافة الفلاتر لملف Excel"""
     workbook = writer.book
     worksheet = workbook[sheet_name]
     
     header_fill = PatternFill(start_color="1F7A8C", end_color="1F7A8C", fill_type="solid")
-    header_font = Font(name="Tajawal", size=12, bold=True, color="FFFFFF")
+    header_font = Font(name="Tajawal", size=11, bold=True, color="FFFFFF")
     alt_row_fill = PatternFill(start_color="E6F3F5", end_color="E6F3F5", fill_type="solid")
     border = Border(
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin')
     )
     
-    for col_idx, col_name in enumerate(df.columns, 1):
-        cell = worksheet.cell(row=1, column=col_idx)
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = border
-        worksheet.column_dimensions[get_column_letter(col_idx)].width = max(20, len(str(col_name)) + 5)
+    # تحديد عدد صفوف العناوين (صفين إذا كان هناك دمج وتقسيم)
+    header_rows = 2 if is_multiindex else 1
     
-    for row_idx in range(2, len(df) + 2):
-        is_alt = (row_idx - 2) % 2 == 1
-        for col_idx in range(1, len(df.columns) + 1):
+    # تنسيق صفوف العناوين
+    for row_idx in range(1, header_rows + 1):
+        for col_idx in range(1, worksheet.max_column + 1):
+            cell = worksheet.cell(row=row_idx, column=col_idx)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = border
+            worksheet.column_dimensions[get_column_letter(col_idx)].width = 22
+    
+    # تنسيق البيانات
+    for row_idx in range(header_rows + 1, worksheet.max_row + 1):
+        is_alt = (row_idx - header_rows) % 2 == 1
+        for col_idx in range(1, worksheet.max_column + 1):
             cell = worksheet.cell(row=row_idx, column=col_idx)
             cell.border = border
             cell.alignment = Alignment(horizontal="center", vertical="center")
             if is_alt:
                 cell.fill = alt_row_fill
     
-    worksheet.freeze_panes = 'A2'
+    worksheet.freeze_panes = f'A{header_rows + 1}'
+    
+    # ✅ إضافة الفلترة التلقائية للجدول
+    worksheet.auto_filter.ref = f"A{header_rows}:{get_column_letter(worksheet.max_column)}{worksheet.max_row}"
 
 @st.cache_data
 def generate_empty_template():
@@ -487,30 +528,35 @@ def extract_promo_details(promo_text, original_price, quantity=1, taxable=False)
 # ========== دوال التصدير ==========
 @st.cache_data(show_spinner=False)
 def generate_excel_download_files(df):
-    """توليد ملفات إكسيل التحميل"""
-    simple_output = BytesIO()
-    with pd.ExcelWriter(simple_output, engine='openpyxl') as writer:
-        df.to_excel(writer, sheet_name="العروض والمنتجات", index=False)
-        apply_excel_style(writer, "العروض والمنتجات", df)
-    simple_bytes = simple_output.getvalue()
-
-    detailed_output = BytesIO()
-    with pd.ExcelWriter(detailed_output, engine='openpyxl') as writer:
-        df.to_excel(writer, sheet_name="النتيجة النهائية", index=False)
-        apply_excel_style(writer, "النتيجة النهائية", df)
+    """توليد ملفات إكسيل التحميل وتطبيق التقسيمات الديناميكية"""
+    
+    # 1. فصل المنتجات المجمعة المختلفة (المفصولة بـ Dash)
+    mask_mixed_bundles = df["رقم المنتج للمجموعة"].astype(str).str.contains("-", regex=False) | df["رقم منتج العرض الخاص"].astype(str).str.contains("-", regex=False)
+    
+    df_mixed = df[mask_mixed_bundles].copy()
+    df_regular = df[~mask_mixed_bundles].copy()
+    
+    # 2. تحويل الأعمدة التي تحتوي على | إلى MultiIndex للدمج
+    df_regular_multi = prepare_multiindex_df(df_regular)
+    df_mixed_multi = prepare_multiindex_df(df_mixed)
+    
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
         
-        if "اسم العرض الخاص" in df:
-            unique_offers = df["اسم العرض الخاص"].dropna().unique()
-            for offer_type in unique_offers[:12]:
-                if offer_type and offer_type.strip() != "":
-                    type_df = df[df["اسم العرض الخاص"] == offer_type]
-                    if len(type_df) > 0:
-                        sheet_name = str(offer_type)[:30].replace("|", "-").replace(":", "-")
-                        type_df.to_excel(writer, sheet_name=sheet_name, index=False)
-                        apply_excel_style(writer, sheet_name, type_df)
-                        
-    detailed_bytes = detailed_output.getvalue()
-    return simple_bytes, detailed_bytes
+        # حفظ شيت المنتجات العادية
+        if not df_regular_multi.empty:
+            df_regular_multi.to_excel(writer, sheet_name="المنتجات الأساسية والعروض", index=False)
+            apply_excel_style(writer, "المنتجات الأساسية والعروض", df_regular_multi, is_multiindex=True)
+            
+        # حفظ شيت المنتجات المجمعة المختلفة
+        if not df_mixed_multi.empty:
+            df_mixed_multi.to_excel(writer, sheet_name="المنتجات المجمعة المختلفة", index=False)
+            apply_excel_style(writer, "المنتجات المجمعة المختلفة", df_mixed_multi, is_multiindex=True)
+            
+    final_bytes = output.getvalue()
+    
+    # إرجاع نفس الملف للزرين لمنع الأخطاء في استدعاء الدالة أسفل الكود
+    return final_bytes, final_bytes
 
 # ========== دالة العرض الرئيسية ==========
 def show():
@@ -635,15 +681,19 @@ def show():
             return f"{round(percentage, 0)}%", round(percentage, 0)
         
         def extract_discount_percentage_full(text, original_price=None, discounted_price=None, promo_text="", quantity=1, has_tax=False):
-            """
-            استخراج نسبة الخصم من جميع المصادر الممكنة مع مراعاة الضريبة والكميات
-            """
             text = str(text) if not pd.isna(text) else ""
             
-            # 1️⃣ خصم بنسبة مئوية مباشرة (حل مشكلة اختفاء عدد الحبات)
+            # 🌟 إضافة جديدة: خصم على الحبة الثانية (يجب أن يكون في البداية)
+            match_second = re.search(r'خصم\s*(\d+)\s*%\s*على\s*(?:الحبة|القطعة)\s*الثانية', text)
+            if match_second:
+                discount_second = float(match_second.group(1))
+                # الخصم يقع على حبة واحدة من أصل حبتين، لذلك نقسم النسبة على 2
+                percentage = discount_second / 2
+                return f"{round(percentage, 0)}%", 2
+
+            # 1️⃣ خصم بنسبة مئوية مباشرة
             match = re.search(r'خصم\s*(\d+)\s*%', text)
-            if match:
-                # إرجاع الكمية الممررة بدلاً من 0
+            if match and not match_second:
                 return f"{match.group(1)}%", quantity
             
             # 2️⃣ خصم بقيمة ريال (مثل خصم 17 ريال) - (حل مشكلة الحساب الخاطئ للضريبة والكمية)
@@ -712,15 +762,16 @@ def show():
                 except (ValueError, TypeError):
                     pass
             
-            # 5️⃣ عروض مجانية (مثل 1+1 مجاناً، 2+1 مجاناً، إلخ)
+            # 5️⃣ عروض مجانية (تطبيق المنطق الرياضي السليم)
             match = re.search(r'(\d+)\s*\+\s*(\d+)\s*مجاناً?', text)
             if match:
                 paid_qty = int(match.group(1))
                 free_qty = int(match.group(2))
                 total_qty = paid_qty + free_qty
                 
-                # التعديل هنا: إرجاع نسبة 100% ثابتة كما طلبت، مع إجمالي عدد الحبات
-                return "100%", total_qty
+                # حساب النسبة رياضياً: (عدد الحبات المجانية ÷ إجمالي الحبات)
+                percentage = (free_qty / total_qty) * 100
+                return f"{round(percentage, 0)}%", total_qty
             
             return "", 0
             
