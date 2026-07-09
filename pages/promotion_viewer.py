@@ -3,43 +3,158 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import openpyxl
+from openpyxl import Workbook
+from openpyxl.comments import Comment
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from io import BytesIO
 import re
 
+
 # ========== دوال التنسيق ==========
-def prepare_multiindex_df(df):
-    """تقسيم الأعمدة التي تحتوي على '|' إلى أعمدة فرعية بعناوين مدمجة"""
-    if df.empty: return df
+def build_custom_excel_sheet(ws, df):
+    """بناء الشيت وتطبيق الدمج والتعليقات والتنسيقات باستخدام openpyxl مباشرة"""
+    ws.views.sheetView[0].rightToLeft = True
     
-    max_splits = {}
-    for col in df.columns:
-        # حساب أقصى عدد من التقسيمات لكل عمود
-        max_splits[col] = df[col].astype(str).apply(lambda x: len(str(x).split('|')) if pd.notna(x) and '|' in str(x) else 1).max()
-    
-    multi_cols = []
-    for col in df.columns:
-        if max_splits[col] > 1:
-            for i in range(1, max_splits[col] + 1):
-                multi_cols.append((col, f"قيمة {i}"))
-        else:
-            multi_cols.append((col, "")) # عمود عادي بدون تقسيم
-            
-    new_rows = []
-    for _, row in df.iterrows():
-        new_row = []
-        for col in df.columns:
-            val = str(row[col]) if pd.notna(row[col]) and str(row[col]) != "nan" else ""
-            if max_splits[col] > 1:
-                parts = [p.strip() for p in val.split('|')]
-                parts += [""] * (max_splits[col] - len(parts)) # إكمال الفراغات
-                new_row.extend(parts)
-            else:
-                new_row.append(val)
-        new_rows.append(new_row)
+    if df.empty:
+        return
         
-    return pd.DataFrame(new_rows, columns=pd.MultiIndex.from_tuples(multi_cols))
+    # 1. تحديد أقصى عدد من التقسيمات لكل عمود
+    col_splits = {}
+    for col in df.columns:
+        max_split = df[col].astype(str).apply(lambda x: len(str(x).split('|')) if pd.notna(x) and '|' in str(x) else 1).max()
+        col_splits[col] = max_split
+
+    # 2. بناء العناوين المدمجة
+    current_col = 1
+    header_mapping = [] # حفظ خريطة الأعمدة لتوزيع البيانات لاحقاً
+    
+    header_fill = PatternFill(start_color="1F7A8C", end_color="1F7A8C", fill_type="solid")
+    header_font = Font(name="Tajawal", size=11, bold=True, color="FFFFFF")
+    border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    align_center = Alignment(horizontal="center", vertical="center")
+
+    for col in df.columns:
+        splits = col_splits[col]
+        if splits > 1:
+            # دمج الخلايا للعنوان الرئيسي
+            ws.merge_cells(start_row=1, start_column=current_col, end_row=1, end_column=current_col + splits - 1)
+            cell_main = ws.cell(row=1, column=current_col, value=col)
+            cell_main.fill = header_fill
+            cell_main.font = header_font
+            cell_main.alignment = align_center
+            cell_main.border = border
+            
+            # كتابة العناوين الفرعية (قيمة 1، قيمة 2...)
+            for i in range(splits):
+                cell_sub = ws.cell(row=2, column=current_col + i, value=f"قيمة {i+1}")
+                cell_sub.fill = header_fill
+                cell_sub.font = header_font
+                cell_sub.alignment = align_center
+                cell_sub.border = border
+                ws.column_dimensions[get_column_letter(current_col + i)].width = 20
+                header_mapping.append((col, i))
+            
+            # رسم حدود الخلايا المدمجة الفارغة
+            for i in range(1, splits):
+                ws.cell(row=1, column=current_col + i).border = border
+                
+            current_col += splits
+        else:
+            # عمود عادي بدون دمج
+            ws.merge_cells(start_row=1, start_column=current_col, end_row=2, end_column=current_col)
+            cell_main = ws.cell(row=1, column=current_col, value=col)
+            cell_main.fill = header_fill
+            cell_main.font = header_font
+            cell_main.alignment = align_center
+            cell_main.border = border
+            ws.cell(row=2, column=current_col).border = border
+            ws.column_dimensions[get_column_letter(current_col)].width = max(20, len(str(col)) + 5)
+            header_mapping.append((col, 0))
+            current_col += 1
+
+    # 3. كتابة البيانات وإضافة التعليقات
+    row_idx = 3
+    alt_row_fill = PatternFill(start_color="E6F3F5", end_color="E6F3F5", fill_type="solid")
+    
+    for _, row in df.iterrows():
+        # استخراج أسماء المنتجات لاستخدامها في التعليقات
+        base_name = str(row.get("اسم المنتج", "")).strip()
+        group_names = [n.strip() for n in str(row.get("اسم المنتج للمجموعة", "")).split("|") if n.strip()]
+        
+        # دمج اسم المنتج الأساسي مع أسماء المجموعة بالترتيب
+        row_names = []
+        if base_name and base_name != "nan": row_names.append(base_name)
+        row_names.extend(group_names)
+        
+        is_alt = (row_idx % 2 == 1)
+        col_idx = 1
+        
+        for col, split_index in header_mapping:
+            val = str(row[col]) if pd.notna(row[col]) and str(row[col]) != "nan" else ""
+            val_parts = [p.strip() for p in val.split('|')]
+            
+            # تحديد القيمة للخلية الحالية
+            cell_val = val_parts[split_index] if split_index < len(val_parts) else ""
+            cell = ws.cell(row=row_idx, column=col_idx, value=cell_val)
+            
+            # التنسيق
+            cell.border = border
+            cell.alignment = align_center
+            if is_alt:
+                cell.fill = alt_row_fill
+                
+            # 💡 إضافة التعليق (Hover Comment) إذا كان العمود مقسماً ويحتوي على قيمة
+            if col_splits[col] > 1 and cell_val != "":
+                # تحديد اسم المنتج المقابل بناءً على ترتيب التقسيم
+                product_name_for_comment = row_names[split_index] if split_index < len(row_names) else (row_names[-1] if row_names else base_name)
+                
+                comment = Comment(f"📦 يخص المنتج:\n{product_name_for_comment}", "نظام بلسم")
+                comment.width = 250
+                comment.height = 60
+                cell.comment = comment
+                
+            col_idx += 1
+        row_idx += 1
+
+    # 4. تفعيل الفلترة التلقائية وتجميد العناوين
+    max_col_letter = get_column_letter(current_col - 1)
+    ws.auto_filter.ref = f"A2:{max_col_letter}{row_idx - 1}"
+    ws.freeze_panes = 'A3'
+
+
+@st.cache_data(show_spinner=False)
+def generate_excel_download_files(df):
+    """توليد ملفات إكسيل التحميل وتطبيق التقسيمات الديناميكية وفصل الشيتات"""
+    
+    # 1. فصل المنتجات المجمعة المختلفة (المفصولة بـ Dash)
+    mask_mixed_bundles = df["رقم المنتج للمجموعة"].astype(str).str.contains("-", regex=False) | df["رقم منتج العرض الخاص"].astype(str).str.contains("-", regex=False)
+    
+    df_mixed = df[mask_mixed_bundles].copy()
+    df_regular = df[~mask_mixed_bundles].copy()
+    
+    output = BytesIO()
+    wb = Workbook()
+    wb.remove(wb.active) # مسح الشيت الافتراضي
+    
+    # بناء شيت المنتجات العادية
+    if not df_regular.empty:
+        ws_regular = wb.create_sheet("المنتجات الأساسية والعروض")
+        build_custom_excel_sheet(ws_regular, df_regular)
+        
+    # بناء شيت المنتجات المجمعة المختلفة
+    if not df_mixed.empty:
+        ws_mixed = wb.create_sheet("المنتجات المجمعة المختلفة")
+        build_custom_excel_sheet(ws_mixed, df_mixed)
+        
+    # في حالة كان الملف فارغاً تماماً
+    if len(wb.sheetnames) == 0:
+        wb.create_sheet("لا توجد بيانات")
+        
+    wb.save(output)
+    final_bytes = output.getvalue()
+    
+    return final_bytes, final_bytes
     
 def apply_excel_style(writer, sheet_name, df, is_multiindex=False):
     """تطبيق التنسيقات الاحترافية وإضافة الفلاتر لملف Excel"""
@@ -524,39 +639,6 @@ def extract_promo_details(promo_text, original_price, quantity=1, taxable=False)
         
     except Exception:
         return {"discount_percentage": "", "discount_value": "", "final_price": ""}
-
-# ========== دوال التصدير ==========
-@st.cache_data(show_spinner=False)
-def generate_excel_download_files(df):
-    """توليد ملفات إكسيل التحميل وتطبيق التقسيمات الديناميكية"""
-    
-    # 1. فصل المنتجات المجمعة المختلفة (المفصولة بـ Dash)
-    mask_mixed_bundles = df["رقم المنتج للمجموعة"].astype(str).str.contains("-", regex=False) | df["رقم منتج العرض الخاص"].astype(str).str.contains("-", regex=False)
-    
-    df_mixed = df[mask_mixed_bundles].copy()
-    df_regular = df[~mask_mixed_bundles].copy()
-    
-    # 2. تحويل الأعمدة التي تحتوي على | إلى MultiIndex للدمج
-    df_regular_multi = prepare_multiindex_df(df_regular)
-    df_mixed_multi = prepare_multiindex_df(df_mixed)
-    
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        
-        # حفظ شيت المنتجات العادية
-        if not df_regular_multi.empty:
-            df_regular_multi.to_excel(writer, sheet_name="المنتجات الأساسية والعروض", index=False)
-            apply_excel_style(writer, "المنتجات الأساسية والعروض", df_regular_multi, is_multiindex=True)
-            
-        # حفظ شيت المنتجات المجمعة المختلفة
-        if not df_mixed_multi.empty:
-            df_mixed_multi.to_excel(writer, sheet_name="المنتجات المجمعة المختلفة", index=False)
-            apply_excel_style(writer, "المنتجات المجمعة المختلفة", df_mixed_multi, is_multiindex=True)
-            
-    final_bytes = output.getvalue()
-    
-    # إرجاع نفس الملف للزرين لمنع الأخطاء في استدعاء الدالة أسفل الكود
-    return final_bytes, final_bytes
 
 # ========== دالة العرض الرئيسية ==========
 def show():
