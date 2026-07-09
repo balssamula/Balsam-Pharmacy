@@ -3,6 +3,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import openpyxl
+from openpyxl import Workbook  # 👈 هذا هو الاستدعاء الناقص لحل المشكلة
+from openpyxl.comments import Comment
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from io import BytesIO
