@@ -626,81 +626,43 @@ def build_flat_excel_sheet(ws, df, is_main_sheet=False):
 @st.cache_data(show_spinner=False)
 def generate_excel_download_files(df_regular, df_mixed, price_map_dict):
     """توليد الملف النهائي وتجهيز الشيت الثالث (بدون عروض)"""
-    def split_clean(val):
-        if pd.isna(val) or str(val).strip() in ["", "nan"]: return []
-        # 🌟 تنظيف وتقسيم بناءً على الفاصل الجديد
-        return [x.strip() for x in str(val).split("&") if x.strip()]
-        
-    regular_rows, mixed_rows = [], []
-    
-    for _, row in df_regular.iterrows():
-        base_sku = str(row.get("رقم المنتج", "")).strip()
-        is_base_mixed = bool(re.search(r'[-+]', base_sku))
-        
-        reg_skus = split_clean(row.get("رقم المنتج للمجموعة", ""))
-        mix_skus = split_clean(row.get("رقم منتج العرض الخاص", ""))
-        
-        num_reg, num_mix = len(reg_skus), len(mix_skus)
-        
-        if is_base_mixed:
-            mixed_rows.append(row.to_dict())
-            continue
-            
-        if num_mix == 0:
-            regular_rows.append(row.to_dict())
-            continue
-            
-        reg_dict = row.to_dict()
-        reg_dict["رقم منتج العرض الخاص"] = ""
-        
-        mix_dict = row.to_dict()
-        mix_dict["رقم المنتج للمجموعة"] = ""
-        mix_dict["اسم المنتج للمجموعة"] = ""
-        mix_dict["سعر المنتج للمجموعة"] = ""
-        mix_dict["عدد حبات المجموعة"] = ""
-        
-        shared_cols = [
-            "سعر مخفض للمجموعة", "العنوان الترويجي للمجموعة", "تاريخ نهاية التخفيض للمجموعة",
-            "نسبة الخصم للمجموعة", "عدد حبات العرض للمجموعة"
-        ]
-        
-        for col in shared_cols:
-            vals = split_clean(row.get(col, ""))
-            if len(vals) >= (num_reg + num_mix) and len(vals) > 0:
-                reg_vals = vals[:num_reg]
-                mix_vals = vals[num_reg:]
-                reg_dict[col] = " & ".join(reg_vals) if any(reg_vals) else ""
-                mix_dict[col] = " & ".join(mix_vals) if any(mix_vals) else ""
-        
-        regular_rows.append(reg_dict)
-        mixed_rows.append(mix_dict)
-
-    df_reg = pd.DataFrame(regular_rows)
-    df_mix = pd.DataFrame(mixed_rows)
-    
     output = BytesIO()
     wb = Workbook()
-    wb.remove(wb.active)
+    wb.remove(wb.active) # مسح الشيت الافتراضي
     
-    if not df_reg.empty:
-        df_flat = flatten_dataframe(df_reg)
+    # --- 1. بناء شيت العروض الأساسية (المنتجات والعروض الخاصة) ---
+    if not df_regular.empty:
+        df_flat = flatten_dataframe(df_regular)
         ws_regular = wb.create_sheet("المنتجات الأساسية والعروض")
         build_flat_excel_sheet(ws_regular, df_flat, is_main_sheet=True)
         
-    if not df_mix.empty:
+    # --- 2. بناء شيت سعر مخفض للمجموعات (خاص فقط بما جاء من شيت سعر مخفض) ---
+    if not df_mixed.empty:
         ws_mixed = wb.create_sheet("سعر مخفض للمجموعات")
-        build_flat_excel_sheet(ws_mixed, df_mix, is_main_sheet=False)
+        build_flat_excel_sheet(ws_mixed, df_mixed, is_main_sheet=False)
         
-    # بناء الشيت الثالث
+    # --- 3. بناء شيت المنتجات بدون عروض ---
     active_skus = set()
-    for _, row in df_reg.iterrows():
+    
+    # إضافة المنتجات من الشيت الأساسي
+    for _, row in df_regular.iterrows():
         active_skus.add(str(row.get("رقم المنتج", "")).strip())
         for col in ["رقم المنتج للمجموعة", "رقم منتج العرض الخاص"]:
-            for p in split_clean(row.get(col, "")): active_skus.add(p)
-                
-    for _, row in df_mix.iterrows():
-        active_skus.add(str(row.get("رقم المنتج المجمع", "")).strip())
+            val = str(row.get(col, ""))
+            if val and val != "nan":
+                for p in val.split('&'): # 🌟 استخدام الفاصل &
+                    active_skus.add(p.strip())
+                    
+    # إضافة المنتجات الفردية من داخل المجموعات المعزولة
+    for _, row in df_mixed.iterrows():
+        val = str(row.get("رقم المنتج المجمع", "")).strip()
+        if val and val != "nan":
+            # تفكيك الأرقام المجمعة (مثل 2746*2-14776) لمعرفة المنتجات الفردية
+            for p in re.split(r'[-+]', val):
+                m = re.match(r'^(\d+)', p.strip())
+                if m: active_skus.add(m.group(1))
 
+    # مطابقة المنتجات مع شيت الأسعار الأصلي
     no_offer_records = []
     for sku, info in price_map_dict.items():
         if sku not in active_skus:
@@ -716,6 +678,7 @@ def generate_excel_download_files(df_regular, df_mixed, price_map_dict):
         ws_no_offers = wb.create_sheet("منتجات بدون عروض")
         build_flat_excel_sheet(ws_no_offers, df_no_offers, is_main_sheet=False)
         
+    # حماية في حال كان الملف فارغاً تماماً
     if len(wb.sheetnames) == 0:
         wb.create_sheet("لا توجد بيانات")
         
