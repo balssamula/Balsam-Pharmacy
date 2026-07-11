@@ -497,44 +497,50 @@ def extract_promo_details(promo_text, original_price, quantity=1, taxable=False)
 
 # ========== دوال التصدير ==========
 def flatten_dataframe(df):
-    """تسطيح الجدول وتقسيم علامات & إلى أعمدة بأسماء ديناميكية مسطحة"""
+    """تسطيح الجدول وتقسيم علامات & إلى أعمدة بأسماء ديناميكية مسطحة ومنع تكرار الأسماء"""
     new_rows = []
     max_splits = {}
     for col in df.columns:
-        # 🌟 يعتمد التقسيم الآن على علامة & الآمنة
         max_splits[col] = df[col].astype(str).apply(lambda x: len(str(x).split('&')) if pd.notna(x) and '&' in str(x) else 1).max()
 
     custom_names = {
-        "اسم المنتج": "اسم (المنتج)",
-        "سعر المنتج": "سعر (المنتج)",
         "نسبة الخصم للمنتج": "نسبة الخصم (للمنتج)",
         "عدد حبات العرض للمنتج": "حبات العرض (للمنتج)",
         "سعر مخفض للمنتج": "سعر مخفض (للمنتج)",
         "العنوان الترويجي للمنتج": "ترويج (للمنتج)",
         "تاريخ نهاية التخفيض للمنتج": "نهاية تخفيض (للمنتج)",
         
-        "رقم المنتج للمجموعة": "رقم المنتج (للمجموعة {})",
-        "اسم المنتج للمجموعة": "اسم المجموعة ({})",
-        "سعر المنتج للمجموعة": "سعر المجموعة ({})",
-        "سعر مخفض للمجموعة": "سعر مخفض للمجموعة ({})",
-        "عدد حبات المجموعة": "حبات المجموعة ({})",
-        "العنوان الترويجي للمجموعة": "ترويج المجموعة ({})",
-        "تاريخ نهاية التخفيض للمجموعة": "نهاية تخفيض المجموعة ({})",
-        "نسبة الخصم للمجموعة": "نسبة الخصم للمجموعة ({})",
-        "عدد حبات العرض للمجموعة": "حبات العرض للمجموعة ({})"
+        "رقم المنتج للمجموعة": "رقم المنتج (للمجموعة)",
+        "اسم المنتج للمجموعة": "اسم المجموعة",
+        "سعر المنتج للمجموعة": "سعر المجموعة",
+        "سعر مخفض للمجموعة": "سعر مخفض للمجموعة",
+        "عدد حبات المجموعة": "حبات المجموعة",
+        "العنوان الترويجي للمجموعة": "ترويج المجموعة",
+        "تاريخ نهاية التخفيض للمجموعة": "نهاية تخفيض المجموعة",
+        "نسبة الخصم للمجموعة": "نسبة الخصم للمجموعة",
+        "عدد حبات العرض للمجموعة": "حبات العرض للمجموعة"
     }
 
     new_cols = []
     for col in df.columns:
         if col == "اسم المنتج":
             new_cols.append("اسم (المنتج)")
+        elif col == "سعر المنتج":
+            new_cols.append("سعر (المنتج)")
         elif col in custom_names:
+            base_name = custom_names[col]
             splits = max_splits[col]
             if splits == 1:
-                new_cols.append(custom_names[col].format(1))
+                new_cols.append(base_name)
             else:
+                # 🌟 التعديل الجذري: ترقيم الأعمدة المتكررة لحمايتها من المسح في الإكسيل
                 for i in range(1, splits + 1):
-                    new_cols.append(custom_names[col].format(i))
+                    if "(" in base_name:
+                        # مثال: "نسبة الخصم (للمنتج)" -> "نسبة الخصم (للمنتج 1)"
+                        new_cols.append(base_name.replace(")", f" {i})"))
+                    else:
+                        # مثال: "اسم المجموعة" -> "اسم المجموعة (1)"
+                        new_cols.append(f"{base_name} ({i})")
         else:
             splits = max_splits.get(col, 1)
             if splits == 1:
@@ -548,10 +554,9 @@ def flatten_dataframe(df):
         for col in df.columns:
             val = str(row[col]) if pd.notna(row[col]) and str(row[col]) != "nan" else ""
             splits = max_splits[col]
-            if col == "اسم المنتج":
+            if col in ["اسم المنتج", "سعر المنتج"]:
                 new_row.append(val)
             elif splits > 1:
-                # 🌟 التقسيم يتم بناءً على &
                 parts = [p.strip() for p in val.split('&')]
                 parts += [""] * (splits - len(parts))
                 new_row.extend(parts)
@@ -562,7 +567,7 @@ def flatten_dataframe(df):
     return pd.DataFrame(new_rows, columns=new_cols)
 
 def add_smart_comments(ws, df_flat):
-    """إضافة تعليقات Hover الذكية للأعمدة المقسمة"""
+    """إضافة تعليقات Hover الذكية للأعمدة المقسمة الخاصة بالمجموعات"""
     col_indices = {col: idx+1 for idx, col in enumerate(df_flat.columns)}
     
     for r_idx, row in enumerate(df_flat.to_dict('records'), start=2):
@@ -583,6 +588,9 @@ def add_smart_comments(ws, df_flat):
                 group_comments[i] = comment_text
                 
         for col_name, val in row.items():
+            # 🌟 منع وضع تعليقات المجموعات على أعمدة المنتج الفردي
+            if "للمنتج" in col_name: continue 
+            
             val_str = str(val).strip()
             if not val_str or val_str == "nan": continue
             
