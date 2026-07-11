@@ -236,7 +236,7 @@ def extract_numbers_from_text(text):
     if pd.isna(text):
         return []
     text = str(text)
-    # 🌟 إضافة علامة + للاستبعاد حتى لا تتداخل مع الأرقام الفردية
+    # 🌟 استبعاد السلاسل التي تحتوي على + أو - معاً
     text_clean = re.sub(r'\d{3,6}(?:[-+]\d{3,6})+', '', text)
     text_clean = re.sub(r'\d{3,6}\s*\*\s*\d+', '', text_clean)
     
@@ -245,6 +245,13 @@ def extract_numbers_from_text(text):
     matches = re.findall(pattern, text_clean)
     return [m for m in matches if m not in excluded_years and not m.startswith('20')]
 
+def clean_sku(val):
+    """تنظيف أرقام الـ SKU من الفواصل العشرية (لحل مشكلة اختفاء النسب)"""
+    if pd.isna(val): return ""
+    s = str(val).strip()
+    if s.endswith(".0"): s = s[:-2]
+    return s
+    
 def parse_composite_sku(sku):
     """تحليل الأرقام المركبة والسلاسل الطويلة (مع دعم + و -)"""
     sku = str(sku).strip().replace(" ", "")
@@ -762,7 +769,8 @@ def show():
             tax_col_choice = df_regular_prices.columns[tax_col_idx] if tax_col_idx < len(df_regular_prices.columns) else None
             
             for _, row in df_regular_prices.iterrows():
-                sku = str(row[sku_col_choice]).strip()
+                # 🌟 تطبيق دالة التنظيف هنا
+                sku = clean_sku(row[sku_col_choice])
                 if sku and sku != "nan":
                     price_map[sku] = {
                         "name": row[name_col_choice] if pd.notna(row[name_col_choice]) else "",
