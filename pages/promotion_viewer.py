@@ -245,13 +245,14 @@ def extract_numbers_from_text(text):
     return [m for m in matches if m not in excluded_years and not m.startswith('20')]
 
 def parse_composite_sku(sku):
-    """تحليل الأرقام المركبة والسلاسل الطويلة"""
+    """تحليل الأرقام المركبة والسلاسل الطويلة (مع دعم + و -)"""
     sku = str(sku).strip().replace(" ", "")
     if not sku or sku == "nan" or sku == "":
         return None, None, None, [], False, False
         
-    if '-' in sku:
-        parts = sku.split('-')
+    # 🌟 التعديل هنا: دعم الفواصل سواء كانت (-) أو (+)
+    if '-' in sku or '+' in sku:
+        parts = re.split(r'[-+]', sku)
         individual_skus = []
         for p in parts:
             if '*' in p:
@@ -487,98 +488,6 @@ def extract_promo_details(promo_text, original_price, quantity=1, taxable=False)
         return {"discount_percentage": "", "discount_value": "", "final_price": ""}
 
 # ========== دوال التصدير ==========
-@st.cache_data(show_spinner=False)
-def generate_excel_download_files(df):
-    """توليد ملفات إكسيل التحميل وتقسيم الصفوف التي تحتوي على مجموعات مختلطة وعادية"""
-    regular_rows = []
-    mixed_rows = []
-    
-    for _, row in df.iterrows():
-        base_sku = str(row.get("رقم المنتج", "")).strip()
-        
-        # 1. إذا كان رقم المنتج الأساسي نفسه عبارة عن مجموعة مختلطة (سقطت من الفلتر)
-        is_base_mixed = bool(re.search(r'[-+]', base_sku))
-        
-        # دالة مساعدة لتنظيف وتقسيم الخلايا المدمجة بـ |
-        def split_clean(val):
-            if pd.isna(val) or str(val).strip() in ["", "nan"]: return []
-            return [x.strip() for x in str(val).split("|") if x.strip()]
-        
-        # استخراج المجموعات العادية (بها *) والمجموعات المختلفة (بها - أو +)
-        reg_skus = split_clean(row.get("رقم المنتج للمجموعة", ""))
-        mix_skus = split_clean(row.get("رقم منتج العرض الخاص", ""))
-        
-        num_reg = len(reg_skus)
-        num_mix = len(mix_skus)
-        
-        # 2. توجيه الصف بأكمله إذا كان المنتج الأساسي مختلطاً
-        if is_base_mixed:
-            mixed_rows.append(row.to_dict())
-            continue
-            
-        # 3. توجيه الصف بأكمله إذا لم يكن هناك أي مجموعات مختلفة
-        if num_mix == 0:
-            regular_rows.append(row.to_dict())
-            continue
-            
-        # 4. حالة وجود النوعين معاً: نقوم بإنشاء نسختين من الصف وفصل البيانات!
-        
-        # --- نسخة الشيت الأساسي ---
-        reg_dict = row.to_dict()
-        reg_dict["رقم منتج العرض الخاص"] = "" # تفريغ بيانات المجموعة المختلفة
-        
-        # --- نسخة شيت المجموعات المختلفة ---
-        mix_dict = row.to_dict()
-        mix_dict["رقم المنتج للمجموعة"] = "" # تفريغ بيانات المجموعة العادية
-        mix_dict["اسم المنتج للمجموعة"] = ""
-        mix_dict["سعر المنتج للمجموعة"] = ""
-        mix_dict["عدد حبات المجموعة"] = ""
-        
-        # تقسيم الأعمدة المشتركة (الأسعار المخفضة، العناوين، التواريخ)
-        shared_cols = ["سعر مخفض للمجموعة", "العنوان الترويجي للمجموعة", "تاريخ نهاية التخفيض للمجموعة"]
-        for col in shared_cols:
-            vals = split_clean(row.get(col, ""))
-            # التأكد من أن عدد القيم يتطابق لضمان سلامة الفصل
-            if len(vals) == (num_reg + num_mix) and len(vals) > 0:
-                reg_vals = vals[:num_reg]
-                mix_vals = vals[num_reg:]
-                reg_dict[col] = " | ".join(reg_vals) if any(reg_vals) else ""
-                mix_dict[col] = " | ".join(mix_vals) if any(mix_vals) else ""
-            else:
-                # في حال اختلال الترتيب (حماية من فقدان البيانات)، ننسخ القيمة في كلا الصفين
-                pass 
-        
-        # إضافتهم للقوائم النهائية
-        regular_rows.append(reg_dict)
-        mixed_rows.append(mix_dict)
-
-    # تحويل القوائم إلى DataFrames
-    df_regular = pd.DataFrame(regular_rows)
-    df_mixed = pd.DataFrame(mixed_rows)
-    
-    # بناء ملف الإكسيل
-    output = BytesIO()
-    wb = Workbook()
-    wb.remove(wb.active) # مسح الشيت الافتراضي
-    
-    if not df_regular.empty:
-        ws_regular = wb.create_sheet("المنتجات الأساسية والعروض")
-        build_custom_excel_sheet(ws_regular, df_regular)
-        
-    if not df_mixed.empty:
-        ws_mixed = wb.create_sheet("المنتجات المجمعة المختلفة")
-        build_custom_excel_sheet(ws_mixed, df_mixed)
-        
-    if len(wb.sheetnames) == 0:
-        wb.create_sheet("لا توجد بيانات")
-        
-    wb.save(output)
-    final_bytes = output.getvalue()
-    
-    return final_bytes, final_bytes
-
-# ========== دوال التصدير ==========
-
 def build_custom_excel_sheet(ws, df):
     """بناء الشيت وتطبيق الدمج والتعليقات والتنسيقات باستخدام openpyxl مباشرة"""
     ws.views.sheetView[0].rightToLeft = True
@@ -675,68 +584,18 @@ def build_custom_excel_sheet(ws, df):
 
 
 @st.cache_data(show_spinner=False)
-def generate_excel_download_files(df):
-    """توليد ملفات إكسيل التحميل وتقسيم الصفوف التي تحتوي على مجموعات مختلطة وعادية"""
-    regular_rows = []
-    mixed_rows = []
-    
-    for _, row in df.iterrows():
-        base_sku = str(row.get("رقم المنتج", "")).strip()
-        is_base_mixed = bool(re.search(r'[-+]', base_sku))
-        
-        def split_clean(val):
-            if pd.isna(val) or str(val).strip() in ["", "nan"]: return []
-            return [x.strip() for x in str(val).split("|") if x.strip()]
-        
-        reg_skus = split_clean(row.get("رقم المنتج للمجموعة", ""))
-        mix_skus = split_clean(row.get("رقم منتج العرض الخاص", ""))
-        
-        num_reg = len(reg_skus)
-        num_mix = len(mix_skus)
-        
-        if is_base_mixed:
-            mixed_rows.append(row.to_dict())
-            continue
-            
-        if num_mix == 0:
-            regular_rows.append(row.to_dict())
-            continue
-            
-        # حالة وجود النوعين معاً: فصل البيانات
-        reg_dict = row.to_dict()
-        reg_dict["رقم منتج العرض الخاص"] = ""
-        
-        mix_dict = row.to_dict()
-        mix_dict["رقم المنتج للمجموعة"] = ""
-        mix_dict["اسم المنتج للمجموعة"] = ""
-        mix_dict["سعر المنتج للمجموعة"] = ""
-        mix_dict["عدد حبات المجموعة"] = ""
-        
-        shared_cols = ["سعر مخفض للمجموعة", "العنوان الترويجي للمجموعة", "تاريخ نهاية التخفيض للمجموعة", "نسبة الخصم", "عدد حبات العرض"]
-        for col in shared_cols:
-            vals = split_clean(row.get(col, ""))
-            if len(vals) >= (num_reg + num_mix) and len(vals) > 0:
-                reg_vals = vals[:num_reg]
-                mix_vals = vals[num_reg:]
-                reg_dict[col] = " | ".join(reg_vals) if any(reg_vals) else ""
-                mix_dict[col] = " | ".join(mix_vals) if any(mix_vals) else ""
-        
-        regular_rows.append(reg_dict)
-        mixed_rows.append(mix_dict)
-
-    df_regular = pd.DataFrame(regular_rows)
-    df_mixed = pd.DataFrame(mixed_rows)
-    
+def generate_excel_download_files(df_regular, df_mixed):
+    """توليد ملفات إكسيل التحميل بالشيتات المعزولة والمستقلة"""
     output = BytesIO()
     wb = Workbook()
-    wb.remove(wb.active)
+    wb.remove(wb.active) # مسح الشيت الافتراضي
     
     if not df_regular.empty:
         ws_regular = wb.create_sheet("المنتجات الأساسية والعروض")
         build_custom_excel_sheet(ws_regular, df_regular)
         
     if not df_mixed.empty:
-        ws_mixed = wb.create_sheet("المنتجات المجمعة المختلفة")
+        ws_mixed = wb.create_sheet("سعر مخفض للمجموعات")
         build_custom_excel_sheet(ws_mixed, df_mixed)
         
     if len(wb.sheetnames) == 0:
@@ -746,6 +605,7 @@ def generate_excel_download_files(df):
     final_bytes = output.getvalue()
     
     return final_bytes, final_bytes
+    
 # ========== دالة العرض الرئيسية ==========
 def show():
     st.markdown("""
@@ -1015,6 +875,7 @@ def show():
         individual_discount_map = {}
         group_discount_map = {}
         sku_master = {}
+        complex_discount_records = [] # 🌟 قائمة جديدة لعزل منتجات شيت السعر المخفض المجمعة
         
         # تعريف المتغيرات مسبقاً
         disc_sku_col = None
@@ -1041,30 +902,10 @@ def show():
             default_end_col = df_discounted.columns[disc_end_idx] if disc_end_idx < len(df_discounted.columns) else "لا يوجد"
             default_promo_col = df_discounted.columns[disc_promo_idx] if disc_promo_idx < len(df_discounted.columns) else "لا يوجد"
             
-            with c1:
-                disc_sku_col = st.selectbox(
-                    "عمود معرف المنتج (SKU)", 
-                    options=list(df_discounted.columns), 
-                    index=list(df_discounted.columns).index(default_sku_col)
-                )
-            with c2:
-                disc_price_col = st.selectbox(
-                    "عمود السعر المخفض", 
-                    options=list(df_discounted.columns), 
-                    index=list(df_discounted.columns).index(default_price_col)
-                )
-            with c3:
-                disc_end_col = st.selectbox(
-                    "عمود نهاية التخفيض (اختياري)", 
-                    options=discounted_options, 
-                    index=discounted_options.index(default_end_col)
-                )
-            with c4:
-                disc_promo_col = st.selectbox(
-                    "عمود العنوان الترويجي (اختياري)", 
-                    options=discounted_options, 
-                    index=discounted_options.index(default_promo_col)
-                )
+            with c1: disc_sku_col = st.selectbox("عمود معرف المنتج (SKU)", options=list(df_discounted.columns), index=list(df_discounted.columns).index(default_sku_col))
+            with c2: disc_price_col = st.selectbox("عمود السعر المخفض", options=list(df_discounted.columns), index=list(df_discounted.columns).index(default_price_col))
+            with c3: disc_end_col = st.selectbox("عمود نهاية التخفيض", options=discounted_options, index=discounted_options.index(default_end_col))
+            with c4: disc_promo_col = st.selectbox("عمود العنوان الترويجي", options=discounted_options, index=discounted_options.index(default_promo_col))
             
             if disc_sku_col is None:
                 st.warning("⚠️ لم يتم العثور على عمود معرف المنتج (SKU) في شيت 'سعر مخفض'")
@@ -1079,57 +920,52 @@ def show():
                     end_val = row[disc_end_col] if disc_end_col and disc_end_col != "لا يوجد" and disc_end_col in row and pd.notna(row[disc_end_col]) else ""
                     promo_val = row[disc_promo_col] if disc_promo_col and disc_promo_col != "لا يوجد" and disc_promo_col in row and pd.notna(row[disc_promo_col]) else ""
                     
-                    # جلب معلومات المنتج من price_map
                     product_info = price_map.get(base_sku, {})
                     original_price = product_info.get("price", "")
                     has_tax = product_info.get("has_tax", False)
                     
-                    # استخراج الكمية من النص الترويجي أو من الرقم المركب
                     quantity = 1
                     if is_star and group_qty:
                         quantity = group_qty
                     else:
-                        # محاولة استخراج الكمية من النص الترويجي
                         qty_match = re.search(r'(\d+)\s*حبات?\s*ب', promo_val)
                         if not qty_match:
                             qty_match = re.search(r'(\d+)\s*حبة\s*بسعر', promo_val)
                         if qty_match:
                             quantity = int(qty_match.group(1))
                     
-                    # حساب نسبة الخصم
                     discount_percentage, extracted_qty = extract_discount_percentage_full(
-                        text=promo_val,
-                        original_price=original_price,
-                        discounted_price=price_val,
-                        promo_text=promo_val,
-                        quantity=quantity,
-                        has_tax=has_tax
+                        text=promo_val, original_price=original_price, discounted_price=price_val,
+                        promo_text=promo_val, quantity=quantity, has_tax=has_tax
                     )
                     
-                    # إذا تم استخراج كمية من النص الترويجي، نستخدمها
-                    if extracted_qty > 0:
-                        quantity = extracted_qty
+                    if extracted_qty > 0: quantity = extracted_qty
                     
-                    # استخراج عدد حبات العرض
                     offer_quantity = extract_offer_quantity_advanced(promo_val)
-                    if is_star and group_qty:
-                        offer_quantity = str(group_qty)
+                    if is_star and group_qty: offer_quantity = str(group_qty)
                     
                     disc_payload = {
-                        "discounted_price": price_val,
-                        "end_date": end_val,
-                        "promo_title": promo_val,
-                        "discount_percentage": discount_percentage,
+                        "discounted_price": price_val, "end_date": end_val,
+                        "promo_title": promo_val, "discount_percentage": discount_percentage,
                         "offer_quantity": offer_quantity
                     }
                     
-                    if is_star or is_dash:
+                    # 🌟 التعديل الجذري: العزل المباشر للمنتجات المجمعة في شيت السعر المخفض فقط
+                    if is_dash:
+                        complex_discount_records.append({
+                            "رقم المنتج المجمع": sku_raw,
+                            "السعر المخفض": price_val,
+                            "العنوان الترويجي": promo_val,
+                            "تاريخ نهاية التخفيض": end_val,
+                            "نسبة الخصم": discount_percentage,
+                            "عدد حبات العرض": offer_quantity
+                        })
+                    elif is_star:
                         group_discount_map[group_sku] = disc_payload
                         for ind_sku in individual_skus:
                             if ind_sku not in sku_master:
                                 sku_master[ind_sku] = {"groups": set(), "special_offer_skus": set(), "offers": []}
-                            if is_star: sku_master[ind_sku]["groups"].add(group_sku)
-                            if is_dash: sku_master[ind_sku]["special_offer_skus"].add(group_sku)
+                            sku_master[ind_sku]["groups"].add(group_sku)
                     else:
                         individual_discount_map[base_sku] = disc_payload
                         if base_sku not in sku_master:
@@ -1391,8 +1227,17 @@ def show():
         
         # ========== خيارات التحميل ==========
         st.subheader("💾 استخراج وحفظ التقارير")
+        
+        # تحويل القائمة المعزولة إلى DataFrame وإظهارها في شاشة النظام (اختياري)
+        df_complex_discounts = pd.DataFrame(complex_discount_records)
+        if not df_complex_discounts.empty:
+            with st.expander("📦 استعراض المجموعات المعزولة (سعر مخفض)", expanded=False):
+                st.dataframe(df_complex_discounts, use_container_width=True)
+                
         col_dl1, col_dl2 = st.columns(2)
-        simple_bytes, detailed_bytes = generate_excel_download_files(df_final)
+        
+        # تمرير الجدول الأساسي وجدول المجموعات المعزولة לדالة التصدير
+        simple_bytes, detailed_bytes = generate_excel_download_files(df_final, df_complex_discounts)
         
         with col_dl1:
             st.download_button(
