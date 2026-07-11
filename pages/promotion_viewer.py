@@ -824,18 +824,18 @@ def show():
             """
             text = str(text) if not pd.isna(text) else ""
             
-            # 🌟 إضافة جديدة: خصم على الحبة/القطعة الثانية (تطبيق المنطق السليم: الخصم يُقسم على حبتين)
+            # 🌟 خصم على الحبة/القطعة الثانية
             match_second = re.search(r'خصم\s*(\d+)\s*(?:%|بالمائة)\s*على\s*(?:الحبة|القطعة)\s*الثانية', text)
             if not match_second:
                 match_second = re.search(r'خصم\s*(\d+)\s*%\s*على\s*القطعة', text)
                 
             if match_second:
                 discount_second = float(match_second.group(1))
-                percentage = discount_second / 2  # الخصم الكلي هو نصف الخصم المعلن لأنك تشتري حبتين
+                percentage = discount_second / 2 
                 return f"{round(percentage, 0)}%", 2
 
-            # 1️⃣ خصم بنسبة مئوية مباشرة
-            match = re.search(r'خصم\s*(\d+)\s*%', text)
+            # 1️⃣ خصم بنسبة مئوية مباشرة (دعم كلمة خصم أو الرقم المئوي مباشرة)
+            match = re.search(r'(?:خصم)?\s*(\d+)\s*%', text)
             if match and not match_second:
                 return f"{match.group(1)}%", quantity
             
@@ -880,7 +880,7 @@ def show():
                 except (ValueError, TypeError):
                     pass
             
-            # 4️⃣ حساب النسبة من السعر الأصلي والمخفض مباشرة (من الأعمدة وليس النص)
+            # 4️⃣ حساب النسبة من السعر الأصلي والمخفض مباشرة
             if original_price and discounted_price:
                 try:
                     original = float(str(original_price).replace(',', '').strip())
@@ -892,7 +892,8 @@ def show():
                     if total_original > 0 and discounted > 0 and total_original > discounted:
                         discount_amount = total_original - discounted
                         percentage = (discount_amount / total_original) * 100
-                        return f"{round(percentage, 0)}%", 0
+                        # 🌟 التعديل هنا: إرجاع كمية العرض الصحيحة بدلاً من إرجاع صفر
+                        return f"{round(percentage, 0)}%", quantity
                 except (ValueError, TypeError):
                     pass
             
@@ -902,8 +903,6 @@ def show():
                 paid_qty = int(match.group(1))
                 free_qty = int(match.group(2))
                 total_qty = paid_qty + free_qty
-                
-                # حساب النسبة بناءً على: الحبات المجانية ÷ إجمالي الحبات
                 percentage = (free_qty / total_qty) * 100
                 return f"{round(percentage, 0)}%", total_qty
             
@@ -1001,7 +1000,8 @@ def show():
                 st.warning("⚠️ لم يتم العثور على عمود معرف المنتج (SKU) في شيت 'سعر مخفض'")
             else:
                 for _, row in df_discounted.iterrows():
-                    sku_raw = str(row[disc_sku_col]).strip()
+                    # 🌟 تنظيف رقم المنتج لضمان سحب السعر الأصلي بنجاح
+                    sku_raw = clean_sku(row[disc_sku_col])
                     if not sku_raw or sku_raw == "nan": continue
                     
                     base_sku, group_sku, group_qty, individual_skus, is_star, is_dash = parse_composite_sku(sku_raw)
