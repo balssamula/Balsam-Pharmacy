@@ -488,115 +488,188 @@ def extract_promo_details(promo_text, original_price, quantity=1, taxable=False)
         return {"discount_percentage": "", "discount_value": "", "final_price": ""}
 
 # ========== دوال التصدير ==========
-def build_custom_excel_sheet(ws, df):
-    """بناء الشيت وتطبيق الدمج والتعليقات والتنسيقات باستخدام openpyxl مباشرة"""
-    ws.views.sheetView[0].rightToLeft = True
-    
-    if df.empty:
-        return
-        
-    # 1. تحديد أقصى عدد من التقسيمات لكل عمود
-    col_splits = {}
+def flatten_dataframe(df):
+    """تسطيح الجدول وتقسيم علامات | إلى أعمدة بأسماء ديناميكية مسطحة"""
+    new_rows = []
+    max_splits = {}
     for col in df.columns:
-        max_split = df[col].astype(str).apply(lambda x: len(str(x).split('|')) if pd.notna(x) and '|' in str(x) else 1).max()
-        col_splits[col] = max_split
+        max_splits[col] = df[col].astype(str).apply(lambda x: len(str(x).split('|')) if pd.notna(x) and '|' in str(x) else 1).max()
 
-    # 2. بناء العناوين المدمجة
-    current_col = 1
-    header_mapping = []
+    # خريطة إعادة التسمية الدقيقة كما طلبت
+    custom_names = {
+        "اسم المنتج": "اسم (المنتج)",
+        "رقم المنتج للمجموعة": "رقم المنتج (للمجموعة {})",
+        "اسم المنتج للمجموعة": "اسم المجموعة ({})",
+        "سعر المنتج للمجموعة": "سعر المجموعة ({})",
+        "سعر مخفض للمجموعة": "سعر مخفض للمجموعة ({})",
+        "عدد حبات المجموعة": "حبات المجموعة ({})",
+        "العنوان الترويجي للمجموعة": "ترويج المجموعة ({})",
+        "تاريخ نهاية التخفيض للمجموعة": "نهاية تخفيض المجموعة ({})",
+        "نسبة الخصم": "نسبة الخصم ({})",
+        "عدد حبات العرض": "حبات العرض ({})"
+    }
+
+    new_cols = []
+    for col in df.columns:
+        if col == "اسم المنتج":
+            new_cols.append("اسم (المنتج)")
+        elif col in custom_names:
+            splits = max_splits[col]
+            if splits == 1:
+                new_cols.append(custom_names[col].format(1))
+            else:
+                for i in range(1, splits + 1):
+                    new_cols.append(custom_names[col].format(i))
+        else:
+            splits = max_splits.get(col, 1)
+            if splits == 1:
+                new_cols.append(col)
+            else:
+                for i in range(1, splits + 1):
+                    new_cols.append(f"{col} ({i})")
+
+    for _, row in df.iterrows():
+        new_row = []
+        for col in df.columns:
+            val = str(row[col]) if pd.notna(row[col]) and str(row[col]) != "nan" else ""
+            splits = max_splits[col]
+            if col == "اسم المنتج":
+                new_row.append(val)
+            elif splits > 1:
+                parts = [p.strip() for p in val.split('|')]
+                parts += [""] * (splits - len(parts))
+                new_row.extend(parts)
+            else:
+                new_row.append(val)
+        new_rows.append(new_row)
+
+    return pd.DataFrame(new_rows, columns=new_cols)
+
+def add_smart_comments(ws, df_flat):
+    """إضافة تعليقات Hover الذكية للأعمدة المقسمة"""
+    col_indices = {col: idx+1 for idx, col in enumerate(df_flat.columns)}
     
+    for r_idx, row in enumerate(df_flat.to_dict('records'), start=2):
+        group_comments = {}
+        # استخراج بيانات المجموعات لتكوين نص التعليق لكل مجموعة
+        for i in range(1, 21): # يدعم حتى 20 مجموعة في نفس الصف
+            sku_col = f"رقم المنتج (للمجموعة {i})"
+            if sku_col in row and row[sku_col]:
+                sku = str(row[sku_col]).strip()
+                name = str(row.get(f"اسم المجموعة ({i})", "")).strip()
+                qty = str(row.get(f"حبات المجموعة ({i})", "")).strip()
+                
+                # إذا لم نجد كمية، نستخرجها من الرمز (مثال: 14390*6)
+                if not qty:
+                    m = re.search(r'\*(\d+)', sku)
+                    qty = m.group(1) if m else "1"
+                    
+                # استخراج الكلمة الأولى من الاسم (مثال: كرتون، باقة...)
+                first_word = name.split()[0] if name else "منتج"
+                comment_text = f"{first_word} - {qty}حبة - {sku}"
+                group_comments[i] = comment_text
+                
+        # وضع التعليق على أي خلية تخص هذه المجموعة
+        for col_name, val in row.items():
+            val_str = str(val).strip()
+            if not val_str or val_str == "nan": continue
+            
+            # التقاط رقم المجموعة من اسم العمود (مثل: سعر المجموعة (2) -> 2)
+            m = re.search(r'\(.*?(\d+)\)$', col_name)
+            if m:
+                g_idx = int(m.group(1))
+                if g_idx in group_comments:
+                    c_idx = col_indices[col_name]
+                    cell = ws.cell(row=r_idx, column=c_idx)
+                    comment = Comment(group_comments[g_idx], "نظام بلسم")
+                    comment.width = 200
+                    comment.height = 40
+                    cell.comment = comment
+
+def build_flat_excel_sheet(ws, df, is_main_sheet=False):
+    """بناء الشيت بصف عناوين واحد وتطبيق الفلاتر والتعليقات"""
+    ws.views.sheetView[0].rightToLeft = True
+    if df.empty: return
+
     header_fill = PatternFill(start_color="1F7A8C", end_color="1F7A8C", fill_type="solid")
     header_font = Font(name="Tajawal", size=11, bold=True, color="FFFFFF")
     border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
     align_center = Alignment(horizontal="center", vertical="center")
 
-    for col in df.columns:
-        splits = col_splits[col]
-        if splits > 1:
-            ws.merge_cells(start_row=1, start_column=current_col, end_row=1, end_column=current_col + splits - 1)
-            cell_main = ws.cell(row=1, column=current_col, value=col)
-            cell_main.fill = header_fill
-            cell_main.font = header_font
-            cell_main.alignment = align_center
-            cell_main.border = border
-            
-            for i in range(splits):
-                cell_sub = ws.cell(row=2, column=current_col + i, value=f"قيمة {i+1}")
-                cell_sub.fill = header_fill
-                cell_sub.font = header_font
-                cell_sub.alignment = align_center
-                cell_sub.border = border
-                ws.column_dimensions[get_column_letter(current_col + i)].width = 20
-                header_mapping.append((col, i))
-            
-            for i in range(1, splits):
-                ws.cell(row=1, column=current_col + i).border = border
-                
-            current_col += splits
-        else:
-            ws.merge_cells(start_row=1, start_column=current_col, end_row=2, end_column=current_col)
-            cell_main = ws.cell(row=1, column=current_col, value=col)
-            cell_main.fill = header_fill
-            cell_main.font = header_font
-            cell_main.alignment = align_center
-            cell_main.border = border
-            ws.cell(row=2, column=current_col).border = border
-            ws.column_dimensions[get_column_letter(current_col)].width = max(20, len(str(col)) + 5)
-            header_mapping.append((col, 0))
-            current_col += 1
+    # كتابة العناوين في صف واحد
+    for c_idx, col_name in enumerate(df.columns, 1):
+        cell = ws.cell(row=1, column=c_idx, value=col_name)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = align_center
+        cell.border = border
+        ws.column_dimensions[get_column_letter(c_idx)].width = max(20, len(str(col_name)) + 5)
 
-    # 3. كتابة البيانات وإضافة التعليقات
-    row_idx = 3
+    # كتابة البيانات
     alt_row_fill = PatternFill(start_color="E6F3F5", end_color="E6F3F5", fill_type="solid")
-    
-    for _, row in df.iterrows():
-        offer_val = str(row.get("اسم العرض الخاص", "")).strip()
-        offer_names_list = [o.strip() for o in offer_val.split("|") if o.strip() and o.strip() != "nan"]
-        
-        is_alt = (row_idx % 2 == 1)
-        col_idx = 1
-        
-        for col, split_index in header_mapping:
-            val = str(row[col]) if pd.notna(row[col]) and str(row[col]) != "nan" else ""
-            val_parts = [p.strip() for p in val.split('|')]
-            
-            cell_val = val_parts[split_index] if split_index < len(val_parts) else ""
-            cell = ws.cell(row=row_idx, column=col_idx, value=cell_val)
-            
+    for r_idx, row in enumerate(df.to_dict('records'), 2):
+        is_alt = (r_idx % 2 == 1)
+        for c_idx, col_name in enumerate(df.columns, 1):
+            val = row[col_name]
+            cell = ws.cell(row=r_idx, column=c_idx, value=val)
             cell.border = border
             cell.alignment = align_center
-            if is_alt:
-                cell.fill = alt_row_fill
-                
-            if col_splits[col] > 1 and cell_val != "":
-                offer_name_for_comment = offer_names_list[split_index] if split_index < len(offer_names_list) else (offer_names_list[-1] if offer_names_list else "عرض خاص")
-                comment = Comment(f"🏷️ اسم العرض:\n{offer_name_for_comment}", "نظام بلسم")
-                comment.width = 250
-                comment.height = 60
-                cell.comment = comment
-                
-            col_idx += 1
-        row_idx += 1
+            if is_alt: cell.fill = alt_row_fill
 
-    max_col_letter = get_column_letter(current_col - 1)
-    ws.auto_filter.ref = f"A2:{max_col_letter}{row_idx - 1}"
-    ws.freeze_panes = 'A3'
+    # إضافة التعليقات إذا كان الشيت الرئيسي
+    if is_main_sheet:
+        add_smart_comments(ws, df)
 
+    # تفعيل الفلترة وتجميد الصف الأول
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(df.columns))}{len(df) + 1}"
+    ws.freeze_panes = 'A2'
 
 @st.cache_data(show_spinner=False)
-def generate_excel_download_files(df_regular, df_mixed):
-    """توليد ملفات إكسيل التحميل بالشيتات المعزولة والمستقلة"""
+def generate_excel_download_files(df_regular, df_mixed, price_map_dict):
+    """توليد الملف النهائي وتجهيز الشيت الثالث (بدون عروض)"""
     output = BytesIO()
     wb = Workbook()
     wb.remove(wb.active) # مسح الشيت الافتراضي
     
+    # --- 1. بناء شيت العروض الأساسية (بعد التسطيح) ---
     if not df_regular.empty:
+        df_flat = flatten_dataframe(df_regular)
         ws_regular = wb.create_sheet("المنتجات الأساسية والعروض")
-        build_custom_excel_sheet(ws_regular, df_regular)
+        build_flat_excel_sheet(ws_regular, df_flat, is_main_sheet=True)
         
+    # --- 2. بناء شيت المجموعات المختلفة ---
     if not df_mixed.empty:
         ws_mixed = wb.create_sheet("سعر مخفض للمجموعات")
-        build_custom_excel_sheet(ws_mixed, df_mixed)
+        build_flat_excel_sheet(ws_mixed, df_mixed, is_main_sheet=False)
+        
+    # --- 3. بناء شيت المنتجات بدون عروض ---
+    # استخراج جميع المنتجات الفعالة في العروض
+    active_skus = set()
+    for _, row in df_regular.iterrows():
+        active_skus.add(str(row.get("رقم المنتج", "")).strip())
+        for col in ["رقم المنتج للمجموعة", "رقم منتج العرض الخاص"]:
+            val = str(row.get(col, ""))
+            if val and val != "nan":
+                for p in val.split('|'): active_skus.add(p.strip())
+                
+    for _, row in df_mixed.iterrows():
+        active_skus.add(str(row.get("رقم المنتج المجمع", "")).strip())
+
+    # مقارنة السعر الأصلي وعزل من ليس له عروض
+    no_offer_records = []
+    for sku, info in price_map_dict.items():
+        if sku not in active_skus:
+            no_offer_records.append({
+                "رقم المنتج": sku,
+                "اسم المنتج": info["name"],
+                "سعر المنتج": info["price"],
+                "خاضع للضريبة": "نعم" if info["has_tax"] else "لا"
+            })
+            
+    df_no_offers = pd.DataFrame(no_offer_records)
+    if not df_no_offers.empty:
+        ws_no_offers = wb.create_sheet("منتجات بدون عروض")
+        build_flat_excel_sheet(ws_no_offers, df_no_offers, is_main_sheet=False)
         
     if len(wb.sheetnames) == 0:
         wb.create_sheet("لا توجد بيانات")
@@ -1228,7 +1301,6 @@ def show():
         # ========== خيارات التحميل ==========
         st.subheader("💾 استخراج وحفظ التقارير")
         
-        # تحويل القائمة المعزولة إلى DataFrame وإظهارها في شاشة النظام (اختياري)
         df_complex_discounts = pd.DataFrame(complex_discount_records)
         if not df_complex_discounts.empty:
             with st.expander("📦 استعراض المجموعات المعزولة (سعر مخفض)", expanded=False):
@@ -1236,8 +1308,8 @@ def show():
                 
         col_dl1, col_dl2 = st.columns(2)
         
-        # تمرير الجدول الأساسي وجدول المجموعات المعزولة לדالة التصدير
-        simple_bytes, detailed_bytes = generate_excel_download_files(df_final, df_complex_discounts)
+        # تمرير الجداول الثلاثة (بما فيها price_map) לדالة التصدير 🌟
+        simple_bytes, detailed_bytes = generate_excel_download_files(df_final, df_complex_discounts, price_map)
         
         with col_dl1:
             st.download_button(
