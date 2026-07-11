@@ -1286,8 +1286,16 @@ def show():
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1: st.metric("📦 إجمالي المنتجات", f"{len(df_final):,}")
         with col2: st.metric("🏷️ مع عروض", f"{(df_final['اسم العرض الخاص'].astype(str).str.strip().str.len().gt(0)).sum():,}")
-        with col3: st.metric("💰 نسبة الخصم", f"{df_final['نسبة الخصم'].astype(str).str.strip().str.len().gt(0).sum():,}")
-        with col4: st.metric("🎯 عدد حبات العرض", f"{df_final['عدد حبات العرض'].astype(str).str.strip().str.len().gt(0).sum():,}")
+        
+        # 🌟 التعديل هنا: فحص الأعمدة الجديدة المخصصة للمنتج والمجموعة معاً
+        discount_mask = (df_final['نسبة الخصم للمنتج'].astype(str).str.strip().str.len().gt(0)) | \
+                        (df_final['نسبة الخصم للمجموعة'].astype(str).str.strip().str.len().gt(0))
+        with col3: st.metric("💰 نسبة الخصم", f"{discount_mask.sum():,}")
+        
+        qty_mask = (df_final['عدد حبات العرض للمنتج'].astype(str).str.strip().str.len().gt(0)) | \
+                   (df_final['عدد حبات العرض للمجموعة'].astype(str).str.strip().str.len().gt(0))
+        with col4: st.metric("🎯 عدد حبات العرض", f"{qty_mask.sum():,}")
+        
         with col5: st.metric("📊 أنواع العروض", f"{df_final['اسم العرض الخاص'].nunique():,}")
         
         # ========== تصفية ==========
