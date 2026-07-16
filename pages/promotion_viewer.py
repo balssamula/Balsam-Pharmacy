@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import openpyxl
-from openpyxl import Workbook  # 👈 هذا هو الاستدعاء الناقص لحل المشكلة
+from openpyxl import Workbook
 from openpyxl.comments import Comment
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -606,18 +606,28 @@ def add_smart_comments(ws, df_flat):
                     cell.comment = comment
 
 def build_flat_excel_sheet(ws, df, is_main_sheet=False):
-    """بناء الشيت بصف عناوين واحد وتطبيق الفلاتر والتعليقات"""
+    """بناء الشيت بصف عناوين واحد وتطبيق الفلاتر والتعليقات والعمود المميز"""
     ws.views.sheetView[0].rightToLeft = True
     if df.empty: return
 
     header_fill = PatternFill(start_color="1F7A8C", end_color="1F7A8C", fill_type="solid")
     header_font = Font(name="Tajawal", size=11, bold=True, color="FFFFFF")
+    
+    # 🌟 ألوان العمود الأخير المميز (تنبيهي)
+    special_header_fill = PatternFill(start_color="E26D5C", end_color="E26D5C", fill_type="solid") # برتقالي محمر
+    special_col_fill = PatternFill(start_color="FDF3F1", end_color="FDF3F1", fill_type="solid")
+    special_alt_col_fill = PatternFill(start_color="F9E4E0", end_color="F9E4E0", fill_type="solid")
+    
     border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
     align_center = Alignment(horizontal="center", vertical="center")
 
     for c_idx, col_name in enumerate(df.columns, 1):
         cell = ws.cell(row=1, column=c_idx, value=col_name)
-        cell.fill = header_fill
+        # 🌟 تطبيق اللون المميز على عنوان العمود
+        if col_name == "مجموعات بدون عروض":
+            cell.fill = special_header_fill
+        else:
+            cell.fill = header_fill
         cell.font = header_font
         cell.alignment = align_center
         cell.border = border
@@ -631,7 +641,12 @@ def build_flat_excel_sheet(ws, df, is_main_sheet=False):
             cell = ws.cell(row=r_idx, column=c_idx, value=val)
             cell.border = border
             cell.alignment = align_center
-            if is_alt: cell.fill = alt_row_fill
+            
+            # 🌟 تطبيق اللون المميز على خلايا العمود
+            if col_name == "مجموعات بدون عروض":
+                cell.fill = special_alt_col_fill if is_alt else special_col_fill
+            else:
+                if is_alt: cell.fill = alt_row_fill
 
     if is_main_sheet:
         add_smart_comments(ws, df)
@@ -1181,14 +1196,12 @@ def show():
                 disc_promo_item = ind_disc.get("promo_title", "")
                 disc_end_item = ind_disc.get("end_date", "")
                 
-                # دمج العروض المتعددة للمنتج
                 unique_offers = {}
                 for o in data["offers"]:
                     key = o["name"]
                     if key not in unique_offers:
                         unique_offers[key] = o
                 
-                # 🌟 استبدال | بالعلامة الآمنة &
                 offer_names = " & ".join([o["name"] for o in unique_offers.values()])
                 offer_starts = " & ".join([o["start"] for o in unique_offers.values() if o["start"]])
                 offer_ends = " & ".join([o["end"] for o in unique_offers.values() if o["end"]])
@@ -1206,12 +1219,10 @@ def show():
                 if ind_disc.get("discount_percentage"): discount_percentages.append(ind_disc["discount_percentage"])
                 if ind_disc.get("offer_quantity"): offer_quantities.append(ind_disc["offer_quantity"])
                 
-                # نسب الخصم الخاصة بالمنتج الأساسي فقط
                 discount_percentage_str = " & ".join(list(dict.fromkeys([str(x) for x in discount_percentages if x])))
                 offer_quantity_str = " & ".join(list(dict.fromkeys([str(x) for x in offer_quantities if x])))
                 special_offer_sku_str = " & ".join(list(dict.fromkeys([str(x) for x in special_offer_skus if x])))
                 
-                # معالجة المجموعات
                 g_skus_list, g_names_list, g_prices_list, g_qtys_list = [], [], [], []
                 g_disc_prices_list, g_promos_list, g_ends_list = [], [], []
                 g_discount_percentages, g_offer_quantities = [], []
@@ -1244,7 +1255,6 @@ def show():
                     g_discount_percentages.append(str(g_disc.get("discount_percentage", "")))
                     g_offer_quantities.append(str(g_disc.get("offer_quantity", "")))
                 
-                # 🌟 استخدام الفاصل & لجميع بيانات المجموعات
                 group_sku_str = " & ".join(g_skus_list) if g_skus_list else ""
                 group_name_str = " & ".join(g_names_list) if any(x != "" for x in g_names_list) else ""
                 group_price_str = " & ".join(g_prices_list) if any(x != "" for x in g_prices_list) else ""
@@ -1255,6 +1265,14 @@ def show():
                 group_discount_percentage_str = " & ".join([x for x in g_discount_percentages if x != ""]) if g_discount_percentages else ""
                 group_offer_quantity_str = " & ".join([x for x in g_offer_quantities if x != ""]) if g_offer_quantities else ""
                 
+                # 🌟 الكشاف: البحث عن المجموعات التي ليس لها عروض
+                unoffered_groups = []
+                prefix = f"{base_sku}*"
+                for p_sku in price_map.keys():
+                    if str(p_sku).startswith(prefix) and str(p_sku) not in data["groups"]:
+                        unoffered_groups.append(str(p_sku))
+                unoffered_groups_str = " ، ".join(unoffered_groups)
+                
                 final_results.append({
                     "رقم المنتج": base_sku,
                     "رقم المنتج للمجموعة": group_sku_str,
@@ -1264,10 +1282,10 @@ def show():
                     "اسم المنتج للمجموعة": group_name_str,
                     "سعر المنتج للمجموعة": group_price_str,
                     "اسم العرض الخاص": offer_names,
-                    "نسبة الخصم للمنتج": discount_percentage_str,          # 👈 مفصول
-                    "عدد حبات العرض للمنتج": offer_quantity_str,           # 👈 مفصول
-                    "نسبة الخصم للمجموعة": group_discount_percentage_str,  # 👈 مفصول
-                    "عدد حبات العرض للمجموعة": group_offer_quantity_str,   # 👈 مفصول
+                    "نسبة الخصم للمنتج": discount_percentage_str,          
+                    "عدد حبات العرض للمنتج": offer_quantity_str,           
+                    "نسبة الخصم للمجموعة": group_discount_percentage_str,  
+                    "عدد حبات العرض للمجموعة": group_offer_quantity_str,   
                     "بداية العرض": offer_starts,
                     "نهاية العرض": offer_ends,
                     "سعر مخفض للمنتج": disc_price_item,
@@ -1277,7 +1295,8 @@ def show():
                     "العنوان الترويجي للمجموعة": group_promo_str,
                     "تاريخ نهاية التخفيض للمنتج": disc_end_item,
                     "تاريخ نهاية التخفيض للمجموعة": group_end_str,
-                    "صفقة اليوم": is_daily
+                    "صفقة اليوم": is_daily,
+                    "مجموعات بدون عروض": unoffered_groups_str # 👈 العمود الجديد
                 })
             
             df_final = pd.DataFrame(final_results)
@@ -1289,13 +1308,14 @@ def show():
                 "رقم المنتج", "رقم المنتج للمجموعة", "رقم منتج العرض الخاص",
                 "اسم المنتج", "سعر المنتج", "اسم المنتج للمجموعة", "سعر المنتج للمجموعة",
                 "اسم العرض الخاص", 
-                "نسبة الخصم للمنتج", "عدد حبات العرض للمنتج",           # 👈
-                "نسبة الخصم للمجموعة", "عدد حبات العرض للمجموعة",       # 👈
+                "نسبة الخصم للمنتج", "عدد حبات العرض للمنتج",           
+                "نسبة الخصم للمجموعة", "عدد حبات العرض للمجموعة",       
                 "بداية العرض", "نهاية العرض",
                 "سعر مخفض للمنتج", "سعر مخفض للمجموعة", "عدد حبات المجموعة",
                 "العنوان الترويجي للمنتج", "العنوان الترويجي للمجموعة",
                 "تاريخ نهاية التخفيض للمنتج", "تاريخ نهاية التخفيض للمجموعة",
-                "صفقة اليوم"
+                "صفقة اليوم",
+                "مجموعات بدون عروض" # 👈 تم وضعه في نهاية الترتيب
             ]
             df_final = df_final[[col for col in column_order if col in df_final.columns]]
             
