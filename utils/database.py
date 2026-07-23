@@ -11,17 +11,14 @@ DB_PATH = os.path.join(DB_DIR, "pharmacy_reconciliation.db")
 PHARMACY_COUNT = 17
 
 def get_client_ip():
-    """الحصول على عنوان IP الخاص بالجهاز"""
     try:
-        response = requests.get('https://api.ipify.org', timeout=5)
-        if response.status_code == 200:
-            return response.text
-    except:
-        pass
-    
-    try:
-        hostname = socket.gethostname()
-        return socket.gethostbyname(hostname)
+        import streamlit as st
+        # جلب الـ IP الحقيقي للمستخدم من المتصفح مباشرة
+        if hasattr(st, "context") and hasattr(st.context, "headers"):
+            headers = st.context.headers
+            if "X-Forwarded-For" in headers:
+                return headers["X-Forwarded-For"].split(",")[0].strip()
+        return "غير معروف"
     except:
         return "غير معروف"
 
