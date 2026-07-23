@@ -254,7 +254,8 @@ def show():
                     result_df = result_df.groupby(group_cols, as_index=False).agg({
                         'الكمية': 'sum',
                         'الإجمالي': 'sum',
-                        'سعر الوحدة': 'first' # للحفاظ على السعر
+                        'سعر الوحدة': 'first',
+                        'النوع': 'first' # 💡 إضافة هذا السطر لحل مشكلة الخطأ
                     })
 
                     if 'تاريخ الطلب' in result_df.columns:
