@@ -379,7 +379,6 @@ def get_all_users():
     return df
 
 def update_last_access(pharmacy_name: str, pharmacist_name: str, ip_address: str = None):
-    """تحديث آخر دخول للصيدلية مع IP"""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     current_time = now_str()
@@ -403,11 +402,11 @@ def update_last_access(pharmacy_name: str, pharmacist_name: str, ip_address: str
         (pharmacy_name, current_time, pharmacist_name),
     )
     
-    # تسجيل في سجل الدخول
+    # تسجيل في سجل الدخول 💡 (حفظ اسم الصيدلي في حقل user_agent)
     cur.execute("""
-        INSERT INTO login_history (username, role, ip_address, login_time)
-        VALUES (?, 'pharmacy', ?, ?)
-    """, (pharmacy_name, current_ip, current_time))
+        INSERT INTO login_history (username, role, ip_address, login_time, user_agent)
+        VALUES (?, 'pharmacy', ?, ?, ?)
+    """, (pharmacy_name, current_ip, current_time, pharmacist_name))
     
     conn.commit()
     conn.close()
