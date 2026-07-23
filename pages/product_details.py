@@ -123,23 +123,35 @@ def show():
                                 quantity = 0
                                 unit_price = 0
                                 product_name = ""
-                                
-                                for pos in range(len(item)):
-                                    val = str(item[pos]) if item[pos] is not None else ""
-                                    if re.match(r'^[\d\*\-]+$', val) and len(val) > 2:
-                                        combined_sku = val
-                                        break
-                                
-                                if not combined_sku and len(item) > 2:
-                                    combined_sku = str(item[2]) if item[2] else ""
-                                
-                                for pos in range(len(item)):
-                                    val = item[pos]
-                                    if isinstance(val, (int, float)) and val > 0 and val < 10000:
-                                        if quantity == 0:
-                                            quantity = float(val)
-                                        elif unit_price == 0 and val != quantity:
-                                            unit_price = float(val)
+            
+                                # 1. استخراج الـ SKU بأمان (الاعتماد على الموقع الافتراضي أولاً وهو الدليل رقم 2)
+                                if len(item) > 2 and item[2] and str(item[2]).replace('*', '').replace('-', '').isdigit():
+                                    combined_sku = str(item[2]).strip()
+                                else:
+                                    # إذا لم يكن في الموقع 2، نبحث في باقي المواقع مع استثناء الموقع 1 (لأنه دائما للكمية)
+                                    for pos in range(len(item)):
+                                        if pos == 1: continue # تخطي موقع الكمية
+                                        val = str(item[pos]) if item[pos] is not None else ""
+                                        if re.match(r'^[\d\*\-]+$', val) and len(val) > 2:
+                                            combined_sku = val
+                                            break
+            
+                                # 2. استخراج الكمية والسعر بشكل صريح وصحيح
+                                if len(item) > 1 and isinstance(item[1], (int, float)):
+                                    quantity = float(item[1])
+                
+                                if len(item) > 3 and isinstance(item[3], (int, float)):
+                                    unit_price = float(item[3])
+            
+                                # كخطة بديلة إذا كانت المصفوفة غير مرتبة
+                                if quantity == 0 or unit_price == 0:
+                                    for pos in range(len(item)):
+                                        val = item[pos]
+                                        if isinstance(val, (int, float)) and val > 0:
+                                            if quantity == 0:
+                                                quantity = float(val)
+                                            elif unit_price == 0 and val != quantity:
+                                                unit_price = float(val)
                                 
                                 if quantity == 0 and len(item) > 3 and isinstance(item[3], (int, float)):
                                     quantity = float(item[3])
