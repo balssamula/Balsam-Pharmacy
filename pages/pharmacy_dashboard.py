@@ -333,9 +333,10 @@ def show():
     allow_actions = not is_locked
 
     active_mask = ~df["order_status"].apply(is_cancelled_or_returned_status)
+    payment_mask = df["order_status"].apply(is_pending_payment_status)
     active_df = df[active_mask].copy()
 
-    branch_add_df = df[df['case_type'].isin(['addition', 'orphan_salla']) & active_mask].copy()
+    branch_add_df = df[df['case_type'].isin(['addition', 'orphan_salla']) & active_mask & ~payment_mask].copy()
     total_additions_merged = len(branch_add_df)
     completed_additions_merged = len(branch_add_df[branch_add_df["status"] == "تم"])
     
