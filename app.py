@@ -131,9 +131,14 @@ with st.sidebar:
                     st.success("✅ تم حفظ الاسم")
                     st.rerun()
         if st.session_state.user_role == "pharmacy":
-            from utils.database import update_last_access
-            ip = update_last_access(st.session_state.username, st.session_state.pharmacist_name)
-            st.success(f"✅ تم تسجيل الدخول من IP: {ip}")
+            # التحقق من عدم تسجيل الدخول مسبقاً في هذه الجلسة لمنع التكرار
+            if not st.session_state.get('login_recorded'):
+                from utils.database import update_last_access
+                ip = update_last_access(st.session_state.username, st.session_state.pharmacist_name)
+                st.session_state.login_recorded = True
+                st.session_state.current_ip = ip
+            
+            st.success(f"✅ تم تسجيل الدخول من IP: {st.session_state.get('current_ip', 'غير معروف')}")
         
         # قائمة الأدوات حسب الصلاحيات
         if st.session_state.user_role in ["admin", "manager"]:
