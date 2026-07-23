@@ -305,7 +305,7 @@ def show():
     # جلب وعرض سجل الدخول
     conn = sqlite3.connect(DB_PATH)
     history_df = pd.read_sql_query(
-        "SELECT login_time as 'وقت الدخول', ip_address as 'IP الجهاز' FROM login_history WHERE username = ? ORDER BY login_time DESC LIMIT 5", 
+        "SELECT login_time as 'وقت الدخول', user_agent as 'اسم الصيدلي', ip_address as 'IP الجهاز' FROM login_history WHERE username = ? ORDER BY login_time DESC LIMIT 5", 
         conn, params=(pharmacy_name,)
     )
     conn.close()
