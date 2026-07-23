@@ -69,11 +69,13 @@ def normalize_order_status(status_text: str) -> str:
     return status
     
 def is_gift_or_promotion(customer_name: str) -> bool:
-    name = normalize_text(customer_name)
-    gift_keywords = ["هدية", "دعاية", "gift", "promotion", "free", "sample", "اختبار", "test"]
-    for keyword in gift_keywords:
-        if keyword in name.lower():
-            return True
+    name = normalize_text(customer_name).lower()
+    # استخدام حد الكلمة \b لمنع الخطأ مع كلمات مثل Botesta
+    if re.search(r'\b(gift|promotion|free|sample|test)\b', name):
+        return True
+    # البحث عن كلمات الهدايا العربية بوضوح لمنع الخطأ في الأسماء كاسم "هدية"
+    if "طلب هدية" in name or "طلب دعاية" in name:
+        return True
     return False
 
 def cancel_status_label(status_text: str) -> str:
