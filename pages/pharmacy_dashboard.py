@@ -302,6 +302,17 @@ def show():
     </div>
     """, unsafe_allow_html=True)
 
+    # جلب وعرض سجل الدخول
+    conn = sqlite3.connect(DB_PATH)
+    history_df = pd.read_sql_query(
+        "SELECT login_time as 'وقت الدخول', ip_address as 'IP الجهاز' FROM login_history WHERE username = ? ORDER BY login_time DESC LIMIT 5", 
+        conn, params=(pharmacy_name,)
+    )
+    conn.close()
+
+    st.markdown("### 🕒 سجل الدخول الخاص بالصيدلية")
+    st.dataframe(history_df, use_container_width=True)
+
     col1, col2, col3 = st.columns([1, 1.2, 1.5])
     with col1:
         if st.button("🔄 تحديث الصفحة", use_container_width=True): st.rerun()
@@ -372,7 +383,13 @@ def show():
         excel_data_brief = export_to_excel_brief(excel_sheets_brief)
         st.download_button(label="📊 تحميل ملف Excel المختصر", data=excel_data_brief, file_name=f"Brief_Report_{pharmacy_name}.xlsx", use_container_width=True, type="primary")
         st.session_state.show_export_brief_pharmacy = False
-        
+
+    st.markdown("""
+    <div style="background-color: #ffeb3b; padding: 15px; border-radius: 10px; text-align: center; margin-bottom: 20px; border: 2px solid #fbc02d;">
+        <h2 style="color: #d32f2f; margin: 0; font-weight: bold;">رجاء الإرجاع أولاً لتوفير الرصيد اللازم .. ثم البدء في الإضافات</h2>
+    </div>
+    """, unsafe_allow_html=True)
+    
     tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed = st.tabs([
         f"📥 الإضافات والطلبات ({completed_additions_merged}/{total_additions_merged})",
         f"📤 الإرجاعات والزيادات ({completed_returns_merged}/{total_returns_merged})",
