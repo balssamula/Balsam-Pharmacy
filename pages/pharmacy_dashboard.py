@@ -85,14 +85,15 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
     return output.getvalue()
 
 def export_to_excel_brief(dataframes_dict: dict) -> bytes:
-    """تصدير ملف إكسيل مختصر مقتصراً فقط وحصرياً على التبويبات الثلاثة الأساسية"""
+    """تصدير ملف إكسيل مختصر"""
     output = BytesIO()
-    allowed_tabs = ["الاضافات والطلبات المفقودة", "الارجاعات والزيادات", "فواتير معلقة بين الفروع"]
+    allowed_tabs = ["الاضافات والطلبات المفقودة", "الارجاعات والزيادات", "فواتير معلقة بين الفروع", "بانتظار الدفع"]
     
     tab_colors = {
         "الاضافات والطلبات المفقودة": "4472C4",
         "الارجاعات والزيادات": "ED7D31",
-        "فواتير معلقة بين الفروع": "9B59B6"
+        "فواتير معلقة بين الفروع": "9B59B6",
+        "بانتظار الدفع": "3498DB"
     }
     
     target_columns = {
@@ -379,7 +380,8 @@ def show():
         excel_sheets_brief = {
             "الاضافات والطلبات المفقودة": branch_add_df,
             "الارجاعات والزيادات": branch_ret_df,
-            "فواتير معلقة بين الفروع": conflicts_df
+            "فواتير معلقة بين الفروع": conflicts_df,
+            "بانتظار الدفع": payment_df
         }
         excel_data_brief = export_to_excel_brief(excel_sheets_brief)
         st.download_button(label="📊 تحميل ملف Excel المختصر", data=excel_data_brief, file_name=f"Brief_Report_{pharmacy_name}.xlsx", use_container_width=True, type="primary")
