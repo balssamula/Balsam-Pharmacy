@@ -243,21 +243,20 @@ def show():
                     result_df = result_df[result_df['المنتج'].notna()]
                     result_df = result_df[result_df['المنتج'] != ""]
                     result_df = result_df[result_df['الكمية'] > 0]
-                    
-                    # 💡 الإصلاح الجذري: تجميع الكميات والإجماليات للأصناف المتطابقة بدلاً من حذفها وتضييع الكميات الفرعية
+
+                    # الكود المعدل لعملية التجميع (الـ Grouping)
                     group_cols = [
-                        'رقم الطلب', 'المنتج', 'SKU فردي', 'SKU مجمع (للمراجعة)', 'النوع', 
-                        'سعر الوحدة', 'الخصم', 'تكلفة الشحن', 'طريقة الدفع', 'الضريبة', 
+                        'رقم الطلب', 'المنتج', 'SKU فردي', 
+                        'الخصم', 'تكلفة الشحن', 'طريقة الدفع', 'الضريبة', 
                         'تاريخ الطلب', 'قيمة خصم الكوبون', 'قيمة خصم العروض الخاصة'
                     ]
-                    # تأمين إضافي لضمان وجود الأعمدة في الفريم قبل التجميع
-                    group_cols = [col for col in group_cols if col in result_df.columns]
-                    
+
                     result_df = result_df.groupby(group_cols, as_index=False).agg({
                         'الكمية': 'sum',
-                        'الإجمالي': 'sum'
+                        'الإجمالي': 'sum',
+                        'سعر الوحدة': 'first' # للحفاظ على السعر
                     })
-                    
+
                     if 'تاريخ الطلب' in result_df.columns:
                         result_df['تاريخ الطلب'] = pd.to_datetime(result_df['تاريخ الطلب'], errors='coerce')
                     
