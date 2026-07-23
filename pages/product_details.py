@@ -189,7 +189,7 @@ def show():
                                             sub_name = product_map[sub_single_sku]
                                         
                                         # حساب الكمية الحقيقية = كمية المنتج الفرعي × كمية المجموعة الأساسية
-                                        actual_sub_qty = sub_quantity * quantity
+                                        actual_sub_qty = sub_quantity
                                         
                                         if sub_combined_sku and sub_quantity > 0:
                                             raw_rows.append({
