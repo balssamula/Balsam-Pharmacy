@@ -162,7 +162,13 @@ def show():
                                 base_main_name = product_name if product_name else combined_sku
                                 main_sku_label = single_sku if single_sku else combined_sku
                                 
-                                total = quantity * unit_price if quantity and unit_price else 0
+                                # 3. استخراج الإجمالي الحقيقي المباشر من العنصر (الموقع 4 في المصفوفة)
+                                if len(item) > 4 and isinstance(item[4], (int, float)):
+                                    total = float(item[4])
+                                else:
+                                    total = quantity * unit_price
+
+                                # الشرط الحقيقي للمكافأة بناءً على الإجمالي الحقيقي أو سعر الوحدة
                                 is_reward_main = (total == 0) or (unit_price == 0)
                                 
                                 final_main_name = f"مكافأة - {base_main_name}" if is_reward_main else base_main_name
