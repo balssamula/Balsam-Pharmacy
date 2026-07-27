@@ -20,7 +20,6 @@ def extract_single_sku(combined_sku):
     if '+' in sku_str:
         sku_str = sku_str.split('+')[0].strip()
     
-    # إزالة أي أحرف غير رقمية
     if sku_str.replace('.', '').isdigit():
         sku_str = re.sub(r'[^0-9]', '', sku_str)
     return sku_str
@@ -106,7 +105,7 @@ def show():
                             'قيمة خصم العروض الخاصة': safe_float_convert(row.get('قيمة خصم العروض الخاصة', 0))
                         }
                     
-                    raw_rows = []
+                    final_rows = []
                     processed_orders = 0
                     failed_orders = 0
                     
@@ -124,26 +123,22 @@ def show():
                                 unit_price = 0
                                 product_name = ""
             
-                                # 1. استخراج الـ SKU بأمان (الاعتماد على الموقع الافتراضي أولاً وهو الدليل رقم 2)
                                 if len(item) > 2 and item[2] and str(item[2]).replace('*', '').replace('-', '').isdigit():
                                     combined_sku = str(item[2]).strip()
                                 else:
-                                    # إذا لم يكن في الموقع 2، نبحث في باقي المواقع مع استثناء الموقع 1 (لأنه دائما للكمية)
                                     for pos in range(len(item)):
-                                        if pos == 1: continue # تخطي موقع الكمية
+                                        if pos == 1: continue 
                                         val = str(item[pos]) if item[pos] is not None else ""
                                         if re.match(r'^[\d\*\-]+$', val) and len(val) > 2:
                                             combined_sku = val
                                             break
             
-                                # 2. استخراج الكمية والسعر بشكل صريح وصحيح
                                 if len(item) > 1 and isinstance(item[1], (int, float)):
                                     quantity = float(item[1])
                 
                                 if len(item) > 3 and isinstance(item[3], (int, float)):
                                     unit_price = float(item[3])
             
-                                # كخطة بديلة إذا كانت المصفوفة غير مرتبة
                                 if quantity == 0 or unit_price == 0:
                                     for pos in range(len(item)):
                                         val = item[pos]
@@ -170,10 +165,7 @@ def show():
                                 total = quantity * unit_price if quantity and unit_price else 0
                                 is_reward_main = (total == 0) or (unit_price == 0)
                                 
-                                # تعديل اسم الصنف بإضافة "مكافأة -" إذا كان مكافأة
                                 final_main_name = f"مكافأة - {base_main_name}" if is_reward_main else base_main_name
-                                
-                                # تعديل رقم الصنف ليصبح (رقم الصنف متبوعاً بـ @) إذا كان مكافأة
                                 final_main_sku = f"{main_sku_label}@" if is_reward_main and main_sku_label else main_sku_label
                                 
                                 if combined_sku:
@@ -181,7 +173,7 @@ def show():
                                         'رقم الطلب': order_id,
                                         'المنتج': final_main_name,
                                         'الكمية': quantity,
-                                        'SKU فردي': final_main_sku, # تم تطبيق التعديل هنا
+                                        'SKU فردي': final_main_sku,
                                         'SKU مجمع (للمراجعة)': combined_sku,
                                         'سعر الوحدة': unit_price,
                                         'الإجمالي': total,
@@ -226,29 +218,29 @@ def show():
                                         
                                         if sub_combined_sku and sub_quantity > 0:
                                             final_rows.append({
-                                        'رقم الطلب': order_id,
-                                        'المنتج': final_sub_name,
-                                        'الكمية': actual_sub_qty,
-                                        'SKU فردي': final_sub_sku, # تم تطبيق التعديل هنا أيضاً
-                                        'SKU مجمع (للمراجعة)': sub_combined_sku,
-                                        'سعر الوحدة': sub_unit_price,
-                                        'الإجمالي': sub_total * quantity,
-                                        'النوع': 'فرعي',
-                                        'الخصم': order_info.get('الخصم', 0),
-                                        'تكلفة الشحن': order_info.get('تكلفة الشحن', 0),
-                                        'طريقة الدفع': order_info.get('طريقة الدفع', 'غير محدد'),
-                                        'الضريبة': order_info.get('الضريبة', 0),
-                                        'تاريخ الطلب': order_info.get('تاريخ الطلب', ''),
-                                        'قيمة خصم الكوبون': order_info.get('قيمة خصم الكوبون', 0),
-                                        'قيمة خصم العروض الخاصة': order_info.get('قيمة خصم العروض الخاصة', 0)
-                                    })
+                                                'رقم الطلب': order_id,
+                                                'المنتج': final_sub_name,
+                                                'الكمية': actual_sub_qty,
+                                                'SKU فردي': final_sub_sku,
+                                                'SKU مجمع (للمراجعة)': sub_combined_sku,
+                                                'سعر الوحدة': sub_unit_price,
+                                                'الإجمالي': sub_total * quantity,
+                                                'النوع': 'فرعي',
+                                                'الخصم': order_info.get('الخصم', 0),
+                                                'تكلفة الشحن': order_info.get('تكلفة الشحن', 0),
+                                                'طريقة الدفع': order_info.get('طريقة الدفع', 'غير محدد'),
+                                                'الضريبة': order_info.get('الضريبة', 0),
+                                                'تاريخ الطلب': order_info.get('تاريخ الطلب', ''),
+                                                'قيمة خصم الكوبون': order_info.get('قيمة خصم الكوبون', 0),
+                                                'قيمة خصم العروض الخاصة': order_info.get('قيمة خصم العروض الخاصة', 0)
+                                            })
                             processed_orders += 1
                         except Exception as e:
                             failed_orders += 1
                             continue
                     
-                    # إنشاء DataFrame النهائي
-                    result_df = pd.DataFrame(raw_rows)
+                    # إنشاء DataFrame النهائي من final_rows الصحيحة
+                    result_df = pd.DataFrame(final_rows)
                     
                     numeric_cols = ['الكمية', 'سعر الوحدة', 'الإجمالي', 'الخصم', 'تكلفة الشحن', 'الضريبة', 'قيمة خصم الكوبون', 'قيمة خصم العروض الخاصة']
                     for col in numeric_cols:
@@ -256,27 +248,23 @@ def show():
                     
                     result_df = result_df[result_df['المنتج'].notna() & (result_df['المنتج'] != "") & (result_df['الكمية'] > 0)]
                     
-                    # 💡 المنطق الذكي للتجميع: يتم الدمج بناءً على الـ SKU الفردي ورقم الطلب، 
-                    # لكن المنتجات التي نوعها "أساسي (مجموعة)" ستبقى مفصولة لأن الـ SKU الفردي لها يحتوي على (*) 
                     group_cols = [
                         'رقم الطلب', 'SKU فردي', 'الخصم', 'تكلفة الشحن', 'طريقة الدفع', 
                         'الضريبة', 'تاريخ الطلب', 'قيمة خصم الكوبون', 'قيمة خصم العروض الخاصة'
                     ]
                     
-                    # تجميع وحفظ أول قيمة للمنتج والسعر والمجمع
                     result_df = result_df.groupby(group_cols, as_index=False).agg({
                         'الكمية': 'sum',
                         'الإجمالي': 'sum',
                         'المنتج': 'first',
                         'سعر الوحدة': 'first',
                         'SKU مجمع (للمراجعة)': 'first',
-                        'النوع': 'first' # للحفاظ على التصنيف
+                        'النوع': 'first'
                     })
                     
                     if 'تاريخ الطلب' in result_df.columns:
                         result_df['تاريخ الطلب'] = pd.to_datetime(result_df['تاريخ الطلب'], errors='coerce')
                         
-                    # ترتيب الأعمدة ليكون شكلها منطقي
                     columns_order = [
                         'رقم الطلب', 'المنتج', 'الكمية', 'SKU فردي', 'SKU مجمع (للمراجعة)', 
                         'سعر الوحدة', 'الإجمالي', 'النوع', 'الخصم', 'تكلفة الشحن', 'طريقة الدفع', 
@@ -288,7 +276,6 @@ def show():
                     st.info(f"📊 الإحصائيات: {processed_orders} طلب تمت معالجتها، {failed_orders} طلب فشل")
                     st.info(f"📦 عدد الصفوف المنتجة: {len(result_df)}")
                     
-                    # ========== التبويبات المتقدمة ==========
                     tab1, tab2, tab3, tab4, tab5 = st.tabs([
                         "📋 جدول البيانات التفصيلي",
                         "📊 إحصائيات وتحليلات",
