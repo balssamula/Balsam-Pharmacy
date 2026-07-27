@@ -159,22 +159,33 @@ def show():
                                 if len(item) > 0 and isinstance(item[0], str) and not re.match(r'^[\d\*\-]+$', item[0]):
                                     product_name = item[0]
                                 
+                                # --- 1. معالجة المنتج الأساسي ---
                                 single_sku = extract_single_sku(combined_sku)
                                 if single_sku and single_sku in product_map:
                                     product_name = product_map[single_sku]
                                 
+                                base_main_name = product_name if product_name else combined_sku
+                                main_sku_label = single_sku if single_sku else combined_sku
+                                
                                 total = quantity * unit_price if quantity and unit_price else 0
+                                is_reward_main = (total == 0) or (unit_price == 0)
+                                
+                                # تعديل اسم الصنف بإضافة "مكافأة -" إذا كان مكافأة
+                                final_main_name = f"مكافأة - {base_main_name}" if is_reward_main else base_main_name
+                                
+                                # تعديل رقم الصنف ليصبح (رقم الصنف متبوعاً بـ @) إذا كان مكافأة
+                                final_main_sku = f"{main_sku_label}@" if is_reward_main and main_sku_label else main_sku_label
                                 
                                 if combined_sku:
-                                    raw_rows.append({
+                                    final_rows.append({
                                         'رقم الطلب': order_id,
-                                        'المنتج': product_name if product_name else combined_sku,
+                                        'المنتج': final_main_name,
                                         'الكمية': quantity,
-                                        'SKU فردي': combined_sku, # نحتفظ بالاس كيو يو المجمع كفردي هنا لكي لا يُدمج
+                                        'SKU فردي': final_main_sku, # تم تطبيق التعديل هنا
                                         'SKU مجمع (للمراجعة)': combined_sku,
                                         'سعر الوحدة': unit_price,
                                         'الإجمالي': total,
-                                        'النوع': 'أساسي (مجموعة)' if '*' in combined_sku or '-' in combined_sku else 'أساسي',
+                                        'النوع': 'أساسي',
                                         'الخصم': order_info.get('الخصم', 0),
                                         'تكلفة الشحن': order_info.get('تكلفة الشحن', 0),
                                         'طريقة الدفع': order_info.get('طريقة الدفع', 'غير محدد'),
@@ -184,10 +195,13 @@ def show():
                                         'قيمة خصم العروض الخاصة': order_info.get('قيمة خصم العروض الخاصة', 0)
                                     })
                                 
-                                # معالجة المنتجات الفرعية (المفككة)
+                                # --- 2. معالجة المنتجات الفرعية (المفككة) ---
                                 if len(item) > 5 and isinstance(item[5], list):
-                                    for sub in item[5]:
-                                        if not isinstance(sub, list) or len(sub) < 3: continue
+                                    sub_items_list = item[5]
+                                    
+                                    for sub_idx, sub in enumerate(sub_items_list):
+                                        if not isinstance(sub, list) or len(sub) < 3:
+                                            continue
                                         
                                         sub_combined_sku = str(sub[2]) if len(sub) > 2 else ""
                                         sub_quantity = sub[1] if len(sub) > 1 and isinstance(sub[1], (int, float)) else 0
@@ -199,28 +213,35 @@ def show():
                                         
                                         if sub_single_sku and sub_single_sku in product_map:
                                             sub_name = product_map[sub_single_sku]
+                                            
+                                        sub_base_name = sub_name if sub_name else sub_combined_sku
+                                        sub_sku_label = sub_single_sku if sub_single_sku else sub_combined_sku
                                         
-                                        # حساب الكمية الحقيقية = كمية المنتج الفرعي × كمية المجموعة الأساسية
-                                        actual_sub_qty = sub_quantity
+                                        is_reward_sub = (sub_total == 0) or (sub_unit_price == 0)
+                                        
+                                        final_sub_name = f"مكافأة - {sub_base_name}" if is_reward_sub else sub_base_name
+                                        final_sub_sku = f"{sub_sku_label}@" if is_reward_sub and sub_sku_label else sub_sku_label
+                                        
+                                        actual_sub_qty = sub_quantity * quantity
                                         
                                         if sub_combined_sku and sub_quantity > 0:
-                                            raw_rows.append({
-                                                'رقم الطلب': order_id,
-                                                'المنتج': sub_name if sub_name else sub_combined_sku,
-                                                'الكمية': actual_sub_qty,
-                                                'SKU فردي': sub_single_sku, # هذا سيُدمج مع الأساسي
-                                                'SKU مجمع (للمراجعة)': sub_combined_sku,
-                                                'سعر الوحدة': sub_unit_price,
-                                                'الإجمالي': sub_total * quantity, # ضرب الاجمالي في كمية المجموعة
-                                                'النوع': 'فرعي (مفكك)',
-                                                'الخصم': order_info.get('الخصم', 0),
-                                                'تكلفة الشحن': order_info.get('تكلفة الشحن', 0),
-                                                'طريقة الدفع': order_info.get('طريقة الدفع', 'غير محدد'),
-                                                'الضريبة': order_info.get('الضريبة', 0),
-                                                'تاريخ الطلب': order_info.get('تاريخ الطلب', ''),
-                                                'قيمة خصم الكوبون': order_info.get('قيمة خصم الكوبون', 0),
-                                                'قيمة خصم العروض الخاصة': order_info.get('قيمة خصم العروض الخاصة', 0)
-                                            })
+                                            final_rows.append({
+                                        'رقم الطلب': order_id,
+                                        'المنتج': final_sub_name,
+                                        'الكمية': actual_sub_qty,
+                                        'SKU فردي': final_sub_sku, # تم تطبيق التعديل هنا أيضاً
+                                        'SKU مجمع (للمراجعة)': sub_combined_sku,
+                                        'سعر الوحدة': sub_unit_price,
+                                        'الإجمالي': sub_total * quantity,
+                                        'النوع': 'فرعي',
+                                        'الخصم': order_info.get('الخصم', 0),
+                                        'تكلفة الشحن': order_info.get('تكلفة الشحن', 0),
+                                        'طريقة الدفع': order_info.get('طريقة الدفع', 'غير محدد'),
+                                        'الضريبة': order_info.get('الضريبة', 0),
+                                        'تاريخ الطلب': order_info.get('تاريخ الطلب', ''),
+                                        'قيمة خصم الكوبون': order_info.get('قيمة خصم الكوبون', 0),
+                                        'قيمة خصم العروض الخاصة': order_info.get('قيمة خصم العروض الخاصة', 0)
+                                    })
                             processed_orders += 1
                         except Exception as e:
                             failed_orders += 1
