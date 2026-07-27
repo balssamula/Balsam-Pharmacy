@@ -195,8 +195,11 @@ def show():
                                 
                                 # --- 2. معالجة المنتجات الفرعية (المفككة) ---
                                 if len(item) > 5 and isinstance(item[5], list):
-                                    for sub in item[5]:
-                                        if not isinstance(sub, list) or len(sub) < 3: continue
+                                    sub_items_list = item[5]
+                                    
+                                    for sub_idx, sub in enumerate(sub_items_list):
+                                        if not isinstance(sub, list) or len(sub) < 3:
+                                            continue
                                         
                                         sub_combined_sku = str(sub[2]) if len(sub) > 2 else ""
                                         sub_quantity = sub[1] if len(sub) > 1 and isinstance(sub[1], (int, float)) else 0
@@ -208,20 +211,27 @@ def show():
                                         
                                         if sub_single_sku and sub_single_sku in product_map:
                                             sub_name = product_map[sub_single_sku]
+                                            
+                                        sub_base_name = sub_name if sub_name else sub_combined_sku
+                                        sub_sku_label = sub_single_sku if sub_single_sku else sub_combined_sku
                                         
-                                        # حساب الكمية الحقيقية = كمية المنتج الفرعي × كمية المجموعة الأساسية
-                                        actual_sub_qty = sub_quantity
+                                        is_reward_sub = (sub_total == 0) or (sub_unit_price == 0)
+                                        
+                                        final_sub_name = f"مكافأة - {sub_base_name}" if is_reward_sub else sub_base_name
+                                        final_sub_sku = f"{sub_sku_label}@" if is_reward_sub and sub_sku_label else sub_sku_label
+                                        
+                                        actual_sub_qty = sub_quantity * quantity
                                         
                                         if sub_combined_sku and sub_quantity > 0:
-                                            raw_rows.append({
+                                            final_rows.append({
                                                 'رقم الطلب': order_id,
-                                                'المنتج': sub_name if sub_name else sub_combined_sku,
+                                                'المنتج': final_sub_name,
                                                 'الكمية': actual_sub_qty,
-                                                'SKU فردي': sub_single_sku, # هذا سيُدمج مع الأساسي
+                                                'SKU فردي': final_sub_sku,
                                                 'SKU مجمع (للمراجعة)': sub_combined_sku,
                                                 'سعر الوحدة': sub_unit_price,
-                                                'الإجمالي': sub_total * quantity, # ضرب الاجمالي في كمية المجموعة
-                                                'النوع': 'فرعي (مفكك)',
+                                                'الإجمالي': sub_total * quantity,
+                                                'النوع': 'فرعي',
                                                 'الخصم': order_info.get('الخصم', 0),
                                                 'تكلفة الشحن': order_info.get('تكلفة الشحن', 0),
                                                 'طريقة الدفع': order_info.get('طريقة الدفع', 'غير محدد'),
