@@ -143,20 +143,15 @@ with st.sidebar:
         # قائمة الأدوات حسب الصلاحيات
         if st.session_state.user_role in ["admin", "manager"]:
             st.markdown("---")
-            st.markdown("### 📂 الأدوات")
+            st.markdown("### 📂 أدوات المطابقة والتعديلات")
             
             permissions = get_user_permissions(st.session_state.username)
             
             if permissions and permissions.get("can_view_dashboard"):
-                if st.button("📊 لوحة التحكم الرئيسية", use_container_width=True):
+                if st.button("📊 لوحة تحكم المطابقات ورفع الملفات", use_container_width=True):
                     st.session_state.page = "dashboard"
                     st.rerun()
-            
-            if permissions and permissions.get("can_view_balances"):
-                if st.button("🔄 تحديث الأرصدة", use_container_width=True):
-                    st.session_state.page = "balances"
-                    st.rerun()
-            
+                      
             if permissions and permissions.get("can_view_monitoring"):
                 if st.button("👥 مراقبة التعديلات", use_container_width=True):
                     st.session_state.page = "monitoring"
@@ -174,21 +169,27 @@ with st.sidebar:
                 st.session_state.page = "product_details"
                 st.rerun()
 
+            if st.button("🔄 تحديث الأرصدة", use_container_width=True):
+                st.session_state.page = "balances"
+                st.rerun()
+                    
             # 💡 إضافة زر تحليل المبيعات
             if st.button("📊 تحليل مبيعات الشهور", use_container_width=True):
                 st.session_state.page = "sales_analysis"
                 st.rerun()
 
-            # ✨ [تعديل 1]: إضافة زر التوجيه لحاسبة العروض الجديدة هنا في السايدبار
-            if st.button("🏷️ حاسبة العروض الترويجية", use_container_width=True):
-                st.session_state.page = "promotions"
-                st.rerun()
+
                 
         st.markdown("---")
         st.markdown("### 🛍️ العروض")
 
         if st.button("🛍️ العروض الحالية الفعالة بالمتجر", use_container_width=True):
             st.session_state.page = "promotion_viewer"
+            st.rerun()
+
+        # ✨ [تعديل 1]: إضافة زر التوجيه لحاسبة العروض الجديدة هنا في السايدبار
+        if st.button("🏷️ حاسبة العروض الترويجية", use_container_width=True):
+            st.session_state.page = "promotions"
             st.rerun()
                 
         st.markdown("---")
@@ -242,9 +243,6 @@ else:  # admin or manager
     if page == "users" and permissions and permissions.get("can_manage_users"):
         from pages import users_management
         users_management.show()
-    elif page == "balances" and permissions and permissions.get("can_view_balances"):
-        from pages import balances_updater
-        balances_updater.show()
     elif page == "monitoring" and permissions and permissions.get("can_view_monitoring"):
         from pages import monitoring
         monitoring.show()
@@ -253,6 +251,10 @@ else:  # admin or manager
         from pages import product_details
         product_details.show()
 
+    elif page == "balances" and permissions and st.session_state.user_role in ["admin", "manager"]:
+        from pages import balances_updater
+        balances_updater.show()
+        
     # 💡 توجيه صفحة تحليل مبيعات الشهور
     elif page == "sales_analysis" and st.session_state.user_role in ["admin", "manager"]:
         from pages import sales_analysis
