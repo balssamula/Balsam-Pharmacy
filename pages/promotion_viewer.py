@@ -1083,7 +1083,38 @@ def show():
                         individual_discount_map[base_sku] = disc_payload
                         if base_sku not in sku_master:
                             sku_master[base_sku] = {"groups": set(), "special_offer_skus": set(), "offers": []}
-        
+
+        def expand_ranges_to_individuals(text):
+            """توسيع النطاقات (مثل 1000:1020) وتحويل السلاسل المرتبطة بها إلى أرقام فردية"""
+            if pd.isna(text): return ""
+            text_str = str(text)
+            
+            def replace_complex_list(match):
+                block = match.group(0)
+                if ':' in block:
+                    # فصل السلسلة بناءً على الشرطات
+                    parts = re.split(r'-', block)
+                    res = []
+                    for p in parts:
+                        if ':' in p:
+                            sub_parts = p.split(':')
+                            if len(sub_parts) == 2 and sub_parts[0].strip().isdigit() and sub_parts[1].strip().isdigit():
+                                start, end = int(sub_parts[0].strip()), int(sub_parts[1].strip())
+                                # توليد جميع الأرقام بين البداية والنهاية
+                                if start < end and (end - start) <= 5000:
+                                    res.extend([str(i) for i in range(start, end + 1)])
+                                else:
+                                    res.append(p)
+                        else:
+                            res.append(p)
+                    # إرجاع الأرقام كقائمة مفصولة بمسافات ليتعرف عليها النظام كمنتجات فردية
+                    return " " + " ".join(res) + " "
+                return block
+                
+            # البحث عن الكتل التي تحتوي على أرقام ونقطتين وشرطات (مثل 18822:18860-18889)
+            expanded_text = re.sub(r'(?:\d{3,6}[:-])+\d{3,6}', replace_complex_list, text_str)
+            return expanded_text
+    
         # ========== معالجة العروض ==========
         with st.spinner("🧠 جاري معالجة العروض..."):
             offers_col = df_raw.columns[0]
@@ -1092,33 +1123,35 @@ def show():
                 text = str(row[offers_col]).strip()
                 if not text or text == "nan": continue
                 
+                # جلب اسم العرض والبيانات بناءً على النص الأصلي للحفاظ على شكل العنوان الترويجي
                 offer_name = extract_offer_name(text)
                 start_date, end_date = extract_dates(text)
                 is_daily_deal = "صفقة اليوم" in text
                 special_offer_sku = extract_special_offer_sku(text)
                 
-                # 1. استخراج عروض المجموعات (مثل 16265*6) وتوجيهها لقاموس المجموعات بشكل سليم
-                groups_star = re.findall(r'(\d{3,6})\s*\*\s*(\d+)', text)
+                # 🌟 تطبيق دالة التوسيع الذكية لفك النطاقات
+                text_expanded = expand_ranges_to_individuals(text)
+                
+                # 1. استخراج عروض المجموعات
+                groups_star = re.findall(r'(\d{3,6})\s*\*\s*(\d+)', text_expanded)
                 for base_sku, qty in groups_star:
                     group_sku = f"{base_sku}*{qty.strip()}"
                     
-                    # 🌟 جلب السعر الأصلي للمجموعة لاحتساب الخصم بشكل صحيح
                     g_original = price_map.get(group_sku, {}).get("price", "")
                     g_tax = price_map.get(group_sku, {}).get("has_tax", False)
                     
                     g_discount_percentage, _ = extract_discount_percentage_full(
-                        text=text, original_price=g_original, has_tax=g_tax
+                        text=text_expanded, original_price=g_original, has_tax=g_tax
                     )
-                    g_offer_quantity = extract_offer_quantity_advanced(text)
+                    g_offer_quantity = extract_offer_quantity_advanced(text_expanded)
                     if not g_discount_percentage:
-                        match = re.search(r'خصم\s*(\d+)\s*%', text)
+                        match = re.search(r'خصم\s*(\d+)\s*%', text_expanded)
                         if match: g_discount_percentage = f"{match.group(1)}%"
                         
                     if base_sku not in sku_master:
                         sku_master[base_sku] = {"groups": set(), "special_offer_skus": set(), "offers": []}
                     sku_master[base_sku]["groups"].add(group_sku)
                     
-                    # 🌟 توجيه خصم المجموعة إلى أعمدة المجموعة بدلاً من أعمدة المنتج الفردي
                     if group_sku not in group_discount_map:
                         group_discount_map[group_sku] = {
                             "promo_title": offer_name, "discount_percentage": g_discount_percentage,
@@ -1134,14 +1167,14 @@ def show():
                             g_disc["offer_quantity"] = g_offer_quantity
                 
                 # 2. استخراج السلاسل المفصولة بـ - أو + (العروض الخاصة المجمعة)
-                groups_dash = re.findall(r'(\d{3,6}(?:[-+]\d{3,6})+)', text)
+                groups_dash = re.findall(r'(\d{3,6}(?:[-+]\d{3,6})+)', text_expanded)
                 for d_seq in groups_dash:
                     individual_skus = re.split(r'[-+]', d_seq)
-                    g_discount_percentage, _ = extract_discount_percentage_full(text=text)
-                    g_offer_quantity = extract_offer_quantity_advanced(text)
+                    g_discount_percentage, _ = extract_discount_percentage_full(text=text_expanded)
+                    g_offer_quantity = extract_offer_quantity_advanced(text_expanded)
                     
                     if not g_discount_percentage:
-                        match = re.search(r'خصم\s*(\d+)\s*%', text)
+                        match = re.search(r'خصم\s*(\d+)\s*%', text_expanded)
                         if match: g_discount_percentage = f"{match.group(1)}%"
                         
                     if d_seq not in group_discount_map:
@@ -1156,22 +1189,21 @@ def show():
                         sku_master[sku]["special_offer_skus"].add(d_seq)
                 
                 # 3. استخراج الأرقام الفردية للمنتج وتوجيهها لأعمدة المنتج الفردي 
-                numbers = extract_numbers_from_text(text)
+                numbers = extract_numbers_from_text(text_expanded)
                 for sku in numbers:
-                    # 🌟 جلب السعر الأصلي للمنتج الفردي لاحتساب الخصم بشكل صحيح
                     original_price = price_map.get(sku, {}).get("price", "")
                     has_tax = price_map.get(sku, {}).get("has_tax", False)
                     
                     discount_percentage, _ = extract_discount_percentage_full(
-                        text=text, original_price=original_price, has_tax=has_tax
+                        text=text_expanded, original_price=original_price, has_tax=has_tax
                     )
-                    offer_quantity = extract_offer_quantity_advanced(text)
+                    offer_quantity = extract_offer_quantity_advanced(text_expanded)
                     if not discount_percentage:
-                        match = re.search(r'خصم\s*(\d+)\s*%', text)
+                        match = re.search(r'خصم\s*(\d+)\s*%', text_expanded)
                         if match: discount_percentage = f"{match.group(1)}%"
                     
                     offer_payload = {
-                        "name": offer_name,
+                        "name": offer_name, # يتم وضع الاسم الأصلي هنا
                         "start": start_date,
                         "end": end_date,
                         "is_daily_deal": is_daily_deal,
