@@ -774,7 +774,7 @@ def show():
         offers_sheet = None
         discounted_sheet = None
         prices_sheet = None
-        special_offers_sheet = None
+        special_offers_sheet = None  # 🌟 تعريف الشيت الرابع
         
         for sheet in sheet_names:
             if "وضع خاص" in sheet:
@@ -791,7 +791,8 @@ def show():
         df_discounted = pd.read_excel(uploaded_file, sheet_name=discounted_sheet) if discounted_sheet else pd.DataFrame()
         df_regular_prices = pd.read_excel(uploaded_file, sheet_name=prices_sheet) if prices_sheet else pd.DataFrame()
         
-        # 🌟 الدمج التلقائي: قراءة شيت "الوضع الخاص" ولحمه بآخر شيت العروض العادية
+        # 🌟 قراءة شيت "الوضع الخاص" ليتم معالجته لاحقاً بقواعد الأعمدة A و D و E
+        df_special = pd.DataFrame()
         if special_offers_sheet:
             df_special = pd.read_excel(uploaded_file, sheet_name=special_offers_sheet, header=None)
             if not df_special.empty:
