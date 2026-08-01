@@ -92,6 +92,17 @@ def generate_empty_template():
         ws3.column_dimensions[get_column_letter(col_idx)].width = 24
     ws3.row_dimensions[1].height = 18
     ws3.row_dimensions[2].height = 24
+    
+    # 🌟 إضافة الشيت الرابع: عروض لها وضع خاص
+    ws4 = wb.create_sheet(title="عروض لها وضع خاص")
+    ws4.views.sheetView[0].rightToLeft = True
+    cell_4 = ws4.cell(row=1, column=1, value="  عروض لها وضع خاص  ")
+    cell_4.fill = header_fill
+    cell_4.font = font_headers
+    cell_4.alignment = align_center
+    cell_4.border = border_thin
+    ws4.column_dimensions['A'].width = 60
+    ws4.row_dimensions[1].height = 24
         
     wb.save(output)
     return output.getvalue()
@@ -765,11 +776,26 @@ def show():
         prices_sheet = None
         
         for sheet in sheet_names:
-            if "عرض خاص" in sheet or "عروض" in sheet: offers_sheet = sheet
+            if "وضع خاص" in sheet:
+                special_offers_sheet = sheet
+            elif "عرض خاص" in sheet or "عروض" in sheet:
+                if "وضع خاص" not in sheet:  # لمنع التداخل
+                    offers_sheet = sheet
             if "سعر مخفض" in sheet or "مخفض" in sheet: discounted_sheet = sheet
             if "اسعار المنتجات" in sheet or "سعر المنتج" in sheet or "أسعار المنتجات" in sheet: prices_sheet = sheet
         
         if not offers_sheet: offers_sheet = sheet_names[0]
+        
+        df_raw = pd.read_excel(uploaded_file, sheet_name=offers_sheet, header=None)
+        df_discounted = pd.read_excel(uploaded_file, sheet_name=discounted_sheet) if discounted_sheet else pd.DataFrame()
+        df_regular_prices = pd.read_excel(uploaded_file, sheet_name=prices_sheet) if prices_sheet else pd.DataFrame()
+        
+        # 🌟 الدمج التلقائي: قراءة شيت "الوضع الخاص" ولحمه بآخر شيت العروض العادية
+        if special_offers_sheet:
+            df_special = pd.read_excel(uploaded_file, sheet_name=special_offers_sheet, header=None)
+            if not df_special.empty:
+                # نأخذ العمود الأول فقط لضمان دقة الدمج
+                df_raw = pd.concat([df_raw.iloc[:, :1], df_special.iloc[:, :1]], ignore_index=True)
         
         df_raw = pd.read_excel(uploaded_file, sheet_name=offers_sheet, header=None)
         df_discounted = pd.read_excel(uploaded_file, sheet_name=discounted_sheet) if discounted_sheet else pd.DataFrame()
