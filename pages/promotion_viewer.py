@@ -774,6 +774,7 @@ def show():
         offers_sheet = None
         discounted_sheet = None
         prices_sheet = None
+        special_offers_sheet = None
         
         for sheet in sheet_names:
             if "وضع خاص" in sheet:
@@ -1049,15 +1050,22 @@ def show():
                 st.warning("⚠️ لم يتم العثور على عمود معرف المنتج (SKU) في شيت 'سعر مخفض'")
             else:
                 for _, row in df_discounted.iterrows():
-                    # 🌟 تنظيف رقم المنتج لضمان سحب السعر الأصلي بنجاح
+                    # تنظيف رقم المنتج
                     sku_raw = clean_sku(row[disc_sku_col])
                     if not sku_raw or sku_raw == "nan": continue
                     
-                    base_sku, group_sku, group_qty, individual_skus, is_star, is_dash = parse_composite_sku(sku_raw)
-                    
                     price_val = row[disc_price_col] if disc_price_col and disc_price_col in row and pd.notna(row[disc_price_col]) else ""
-                    end_val = row[disc_end_col] if disc_end_col and disc_end_col != "لا يوجد" and disc_end_col in row and pd.notna(row[disc_end_col]) else ""
                     promo_val = row[disc_promo_col] if disc_promo_col and disc_promo_col != "لا يوجد" and disc_promo_col in row and pd.notna(row[disc_promo_col]) else ""
+                    
+                    # 🌟 التصفية الذكية: إذا كان السعر المخفض فارغاً والعنوان الترويجي فارغاً، تجاهل هذا المنتج تماماً لتسريع النظام
+                    p_str = str(price_val).strip()
+                    pr_str = str(promo_val).strip()
+                    if (not p_str or p_str == "nan") and (not pr_str or pr_str == "nan"):
+                        continue
+                    
+                    end_val = row[disc_end_col] if disc_end_col and disc_end_col != "لا يوجد" and disc_end_col in row and pd.notna(row[disc_end_col]) else ""
+                    
+                    base_sku, group_sku, group_qty, individual_skus, is_star, is_dash = parse_composite_sku(sku_raw)
                     
                     product_info = price_map.get(base_sku, {})
                     original_price = product_info.get("price", "")
