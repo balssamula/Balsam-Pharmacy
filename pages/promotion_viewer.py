@@ -1162,9 +1162,9 @@ def show():
                     sku_val = str(row[0]).strip()
                     # تجاهل العناوين أو الخلايا الفارغة
                     if not sku_val or sku_val == "nan" or "رقم" in sku_val or "sku" in sku_val.lower(): continue
-                    
-                    offer_logic = str(row[3]).strip() if pd.notna(row[3]) else ""
-                    promo_title = str(row[4]).strip() if len(row) > 4 and pd.notna(row[4]) else ""
+
+                    promo_title = str(row[3]).strip() if len(row) > 3 and pd.notna(row[3]) else ""
+                    offer_logic = str(row[4]).strip() if pd.notna(row[4]) else ""
                     
                     # إذا كان العنوان الترويجي فارغاً، نعوضه بمنطق العرض
                     if not promo_title or promo_title == "nan":
