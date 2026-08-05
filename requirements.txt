@@ -6,3 +6,6 @@ plotly
 xlsxwriter
 matplotlib
 scikit-learn
+fastapi
+starlette
+tornado
