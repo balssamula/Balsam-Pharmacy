@@ -172,7 +172,12 @@ with st.sidebar:
             if st.button("🔄 تحديث الأرصدة", use_container_width=True):
                 st.session_state.page = "balances"
                 st.rerun()
-                    
+
+            # 💡 إضافة زر تحليل الصيدليات الشامل
+            if st.button("📈 تحليل الصيدليات الشامل", use_container_width=True):
+                st.session_state.page = "comprehensive_analysis"
+                st.rerun()
+                
             # 💡 إضافة زر تحليل المبيعات
             if st.button("📊 تحليل مبيعات الشهور", use_container_width=True):
                 st.session_state.page = "sales_analysis"
@@ -254,7 +259,11 @@ else:  # admin or manager
     elif page == "balances" and permissions and st.session_state.user_role in ["admin", "manager"]:
         from pages import balances_updater
         balances_updater.show()
-        
+
+    elif page == "comprehensive_analysis" and st.session_state.user_role in ["admin", "manager"]:
+        from pages import comprehensive_analysis
+        comprehensive_analysis.show()
+
     # 💡 توجيه صفحة تحليل مبيعات الشهور
     elif page == "sales_analysis" and st.session_state.user_role in ["admin", "manager"]:
         from pages import sales_analysis
