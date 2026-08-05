@@ -154,7 +154,6 @@ def show():
                                 if len(item) > 0 and isinstance(item[0], str) and not re.match(r'^[\d\*\-]+$', item[0]):
                                     product_name = item[0]
                                 
-                                # --- 1. معالجة المنتج الأساسي ---
                                 single_sku = extract_single_sku(combined_sku)
                                 if single_sku and single_sku in product_map:
                                     product_name = product_map[single_sku]
@@ -162,13 +161,11 @@ def show():
                                 base_main_name = product_name if product_name else combined_sku
                                 main_sku_label = single_sku if single_sku else combined_sku
                                 
-                                # 3. استخراج الإجمالي الحقيقي المباشر من العنصر (الموقع 4 في المصفوفة)
                                 if len(item) > 4 and isinstance(item[4], (int, float)):
                                     total = float(item[4])
                                 else:
                                     total = quantity * unit_price
-
-                                # الشرط الحقيقي للمكافأة بناءً على الإجمالي الحقيقي أو سعر الوحدة
+                                    
                                 is_reward_main = (total == 0) or (unit_price == 0)
                                 
                                 final_main_name = f"مكافأة - {base_main_name}" if is_reward_main else base_main_name
@@ -193,7 +190,6 @@ def show():
                                         'قيمة خصم العروض الخاصة': order_info.get('قيمة خصم العروض الخاصة', 0)
                                     })
                                 
-                                # --- 2. معالجة المنتجات الفرعية (المفككة) ---
                                 if len(item) > 5 and isinstance(item[5], list):
                                     sub_items_list = item[5]
                                     
@@ -220,9 +216,10 @@ def show():
                                         final_sub_name = f"مكافأة - {sub_base_name}" if is_reward_sub else sub_base_name
                                         final_sub_sku = f"{sub_sku_label}@" if is_reward_sub and sub_sku_label else sub_sku_label
                                         
-                                        actual_sub_qty = sub_quantity * quantity
+                                        # 💡 التعديل هنا: نأخذ sub_quantity مباشرة لأنها مضروبة وجاهزة من المصدر
+                                        actual_sub_qty = sub_quantity
                                         
-                                        if sub_combined_sku and sub_quantity > 0:
+                                        if sub_combined_sku and actual_sub_qty > 0:
                                             final_rows.append({
                                                 'رقم الطلب': order_id,
                                                 'المنتج': final_sub_name,
@@ -230,7 +227,7 @@ def show():
                                                 'SKU فردي': final_sub_sku,
                                                 'SKU مجمع (للمراجعة)': sub_combined_sku,
                                                 'سعر الوحدة': sub_unit_price,
-                                                'الإجمالي': sub_total * quantity,
+                                                'الإجمالي': sub_total, # نأخذ الإجمالي مباشرة لأن الكمية محسوبة وجاهزة
                                                 'النوع': 'فرعي',
                                                 'الخصم': order_info.get('الخصم', 0),
                                                 'تكلفة الشحن': order_info.get('تكلفة الشحن', 0),
@@ -245,7 +242,6 @@ def show():
                             failed_orders += 1
                             continue
                     
-                    # إنشاء DataFrame النهائي من final_rows الصحيحة
                     result_df = pd.DataFrame(final_rows)
                     
                     numeric_cols = ['الكمية', 'سعر الوحدة', 'الإجمالي', 'الخصم', 'تكلفة الشحن', 'الضريبة', 'قيمة خصم الكوبون', 'قيمة خصم العروض الخاصة']
