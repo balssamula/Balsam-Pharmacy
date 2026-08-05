@@ -1,4 +1,4 @@
-streamlit
+streamlit>=1.35.0
 pandas
 openpyxl
 numpy
@@ -6,6 +6,3 @@ plotly
 xlsxwriter
 matplotlib
 scikit-learn
-fastapi
-starlette
-tornado
