@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import timedelta
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
@@ -11,65 +10,90 @@ def show():
     st.markdown("""
     <div class="hero">
         <h1>📈 التحليل الشامل والتنبؤات للصيدليات</h1>
-        <p>تحليل المبيعات، المشتريات، والمصروفات مع نماذج الذكاء الاصطناعي للتنبؤ بالمستقبل والمخزون</p>
+        <p>تحليل المبيعات، المشتريات، والمصروفات مع نماذج الذكاء الاصطناعي</p>
     </div>
     """, unsafe_allow_html=True)
 
-    uploaded_file = st.file_uploader("📂 ارفع ملف Excel (يحتوي على شيتات: المبيعات، المشتريات، المصروفات)", type=["xlsx", "xls"])
+    uploaded_file = st.file_uploader("📂 ارفع ملف Excel (المبيعات، المشتريات، المصروفات)", type=["xlsx", "xls"])
 
     if uploaded_file:
         try:
-            with st.spinner("جاري قراءة البيانات وبناء النماذج التنبؤية..."):
-                # قراءة الشيتات الثلاثة
-                xls = pd.ExcelFile(uploaded_file)
-                sheet_names = xls.sheet_names
+            xls = pd.ExcelFile(uploaded_file)
+            sheet_names = xls.sheet_names
+            
+            # 💡 [قراءة ذكية]: التحقق مما إذا كانت العناوين في الصف الثاني (مثل ملفات سلة)
+            df_sales = pd.read_excel(xls, sheet_name=sheet_names[0])
+            if any(str(c).startswith("Unnamed") for c in df_sales.columns[:3]):
+                df_sales = pd.read_excel(xls, sheet_name=sheet_names[0], header=1)
                 
-                # افتراض ترتيب الشيتات كما ذكرت
-                df_sales = pd.read_excel(xls, sheet_name=sheet_names[0])
-                df_purchases = pd.read_excel(xls, sheet_name=sheet_names[1])
-                df_expenses = pd.read_excel(xls, sheet_name=sheet_names[2])
+            df_purchases = pd.read_excel(xls, sheet_name=sheet_names[1])
+            if any(str(c).startswith("Unnamed") for c in df_purchases.columns[:3]):
+                df_purchases = pd.read_excel(xls, sheet_name=sheet_names[1], header=1)
 
-                # تسمية أعمدة المصروفات حسب طلبك
-                df_expenses.columns = ["المبلغ", "بيان المصروف", "مركز التكلفة"]
-                
-                # دوال مساعدة لتوحيد أسماء الأعمدة المتوقعة (بناءً على أمثلة سلة وABC المعتادة)
-                def get_col(df, possible_names):
-                    for name in possible_names:
-                        if name in df.columns: return name
-                    return df.columns[0] # احتياطي
-                
-                # تحديد الأعمدة الأساسية للمبيعات
-                date_col = get_col(df_sales, ['التاريخ', 'تاريخ الطلب', 'Date', 'تاريخ'])
-                time_col = get_col(df_sales, ['الوقت', 'وقت الطلب', 'Time'])
-                product_col = get_col(df_sales, ['المنتج', 'اسم المنتج', 'الصنف', 'Product'])
-                branch_col = get_col(df_sales, ['الفرع', 'الصيدلية', 'Branch'])
-                user_col = get_col(df_sales, ['المستخدم', 'الصيدلي', 'الكاشير', 'البائع', 'User'])
-                qty_col = get_col(df_sales, ['الكمية', 'العدد', 'Qty'])
-                total_col = get_col(df_sales, ['الإجمالي', 'المبلغ', 'Total'])
-                category_col = get_col(df_sales, ['التصنيف', 'القسم', 'الكاتيجوري', 'Category'])
+            df_expenses = pd.read_excel(xls, sheet_name=sheet_names[2])
+            if any(str(c).startswith("Unnamed") for c in df_expenses.columns[:3]):
+                df_expenses = pd.read_excel(xls, sheet_name=sheet_names[2], header=1)
 
-                # تنظيف وتحضير التواريخ والأوقات
+            # تنظيف أسماء الأعمدة
+            df_sales.columns = df_sales.columns.astype(str).str.strip()
+            df_purchases.columns = df_purchases.columns.astype(str).str.strip()
+            
+            # 💡 تأمين شيت المصروفات لأول 3 أعمدة فقط لمنع الانهيار إذا كان الملف يحتوي أعمدة فارغة
+            df_expenses = df_expenses.iloc[:, :3]
+            df_expenses.columns = ["المبلغ", "بيان المصروف", "مركز التكلفة"]
+
+            # دالة مساعدة للبحث عن الأعمدة
+            def guess_col(cols_list, possible_names):
+                for name in possible_names:
+                    for c in cols_list:
+                        if name in str(c): return cols_list.index(c)
+                return 0 # الافتراضي
+
+            cols_sales = list(df_sales.columns)
+
+            # 💡 [الواجهة الذكية]: السماح للمستخدم بتصحيح الأعمدة إذا كان الرسم البياني غير منطقي
+            with st.expander("⚙️ إعدادات مطابقة الأعمدة (افتح هنا للتأكد من دقة البيانات)", expanded=True):
+                st.info("حاول النظام التعرف على الأعمدة تلقائياً. إذا وجدت الرسوم البيانية غير دقيقة، يرجى اختيار الأعمدة الصحيحة من هنا:")
+                
+                c1, c2, c3 = st.columns(3)
+                date_col = c1.selectbox("عمود التاريخ:", cols_sales, index=guess_col(cols_sales, ['التاريخ', 'تاريخ', 'Date']))
+                total_col = c2.selectbox("عمود إجمالي المبيعات:", cols_sales, index=guess_col(cols_sales, ['الإجمالي', 'المبلغ', 'Total', 'الاجمالي']))
+                qty_col = c3.selectbox("عمود الكمية:", cols_sales, index=guess_col(cols_sales, ['الكمية', 'العدد', 'Qty']))
+                
+                c4, c5, c6 = st.columns(3)
+                product_col = c4.selectbox("عمود اسم المنتج:", cols_sales, index=guess_col(cols_sales, ['المنتج', 'الصنف', 'Product']))
+                branch_col = c5.selectbox("عمود الفرع/الصيدلية:", cols_sales, index=guess_col(cols_sales, ['الفرع', 'الصيدلية', 'Branch']))
+                user_col = c6.selectbox("عمود الصيدلي/المستخدم:", cols_sales, index=guess_col(cols_sales, ['المستخدم', 'الصيدلي', 'الكاشير', 'User']))
+                
+                time_col = st.selectbox("عمود الوقت (اختياري، اتركه إذا كان مدمجاً مع التاريخ):", ["غير موجود"] + cols_sales, index=0)
+
+            with st.spinner("جاري معالجة البيانات وبناء النماذج التنبؤية..."):
+                # --- معالجة التواريخ والأوقات ---
                 df_sales[date_col] = pd.to_datetime(df_sales[date_col], errors='coerce')
                 
-                # استخراج الساعة وتحديد الليل والنهار
-                if time_col in df_sales.columns:
-                    # إذا كان الوقت مفصولاً
-                    df_sales['Hour'] = pd.to_datetime(df_sales[time_col], format='%H:%M:%S', errors='coerce').dt.hour
+                if time_col != "غير موجود":
+                    df_sales['Hour'] = pd.to_datetime(df_sales[time_col], errors='coerce').dt.hour
                 else:
-                    # إذا كان الوقت مدمجاً مع التاريخ
                     df_sales['Hour'] = df_sales[date_col].dt.hour
 
                 df_sales['Hour'] = df_sales['Hour'].fillna(12).astype(int)
                 df_sales['فترة البيع'] = df_sales['Hour'].apply(lambda x: 'نهاراً ☀️' if 6 <= x < 18 else 'ليلاً 🌙')
 
-                # تحويل القيم الرقمية
-                df_sales[total_col] = pd.to_numeric(df_sales[total_col], errors='coerce').fillna(0)
-                df_sales[qty_col] = pd.to_numeric(df_sales[qty_col], errors='coerce').fillna(1)
+                # --- معالجة الأرقام وتحويلها بشكل آمن (لمنع ظهور أرقام مشوهة) ---
+                df_sales[total_col] = pd.to_numeric(df_sales[total_col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                df_sales[qty_col] = pd.to_numeric(df_sales[qty_col].astype(str).str.replace(',', ''), errors='coerce').fillna(1)
                 
-                pur_qty_col = get_col(df_purchases, ['الكمية', 'العدد', 'Qty'])
-                pur_product_col = get_col(df_purchases, ['المنتج', 'اسم المنتج', 'الصنف', 'Product'])
-                df_purchases[pur_qty_col] = pd.to_numeric(df_purchases[pur_qty_col], errors='coerce').fillna(0)
-                df_expenses["المبلغ"] = pd.to_numeric(df_expenses["المبلغ"], errors='coerce').fillna(0)
+                pur_cols = list(df_purchases.columns)
+                pur_qty_col = pur_cols[guess_col(pur_cols, ['الكمية', 'العدد', 'Qty'])]
+                pur_product_col = pur_cols[guess_col(pur_cols, ['المنتج', 'الصنف', 'Product'])]
+                pur_total_col = pur_cols[guess_col(pur_cols, ['الإجمالي', 'المبلغ', 'Total'])]
+
+                df_purchases[pur_qty_col] = pd.to_numeric(df_purchases[pur_qty_col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                df_purchases[pur_total_col] = pd.to_numeric(df_purchases[pur_total_col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                df_expenses["المبلغ"] = pd.to_numeric(df_expenses["المبلغ"].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+
+                # إزالة الصفوف الفارغة للحفاظ على جودة التحليل
+                df_sales = df_sales.dropna(subset=[date_col, product_col])
 
                 # ================= واجهة التبويبات =================
                 tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -80,13 +104,11 @@ def show():
                     "📦 تقديرات المخزون والطلبيات"
                 ])
 
-                # ---------------- التبويب الأول: مؤشرات الأداء ----------------
                 with tab1:
                     st.markdown("### 📈 ملخص الأداء المالي")
                     total_sales = df_sales[total_col].sum()
                     total_expenses = df_expenses["المبلغ"].sum()
-                    pur_total_col = get_col(df_purchases, ['الإجمالي', 'المبلغ', 'Total'])
-                    total_purchases = pd.to_numeric(df_purchases[pur_total_col], errors='coerce').fillna(0).sum()
+                    total_purchases = df_purchases[pur_total_col].sum()
                     net_profit = total_sales - total_purchases - total_expenses
 
                     c1, c2, c3, c4 = st.columns(4)
@@ -97,11 +119,13 @@ def show():
 
                     st.markdown("---")
                     st.markdown("### 💸 تحليل المصروفات حسب مركز التكلفة")
-                    exp_summary = df_expenses.groupby("مركز التكلفة")["المبلغ"].sum().reset_index()
-                    fig_exp = px.pie(exp_summary, values='المبلغ', names='مركز التكلفة', hole=0.4, title="توزيع المصروفات")
-                    st.plotly_chart(fig_exp, use_container_width=True)
+                    if not df_expenses.empty and df_expenses["المبلغ"].sum() > 0:
+                        exp_summary = df_expenses.groupby("مركز التكلفة")["المبلغ"].sum().reset_index()
+                        fig_exp = px.pie(exp_summary, values='المبلغ', names='مركز التكلفة', hole=0.4, title="توزيع المصروفات")
+                        st.plotly_chart(fig_exp, use_container_width=True)
+                    else:
+                        st.info("لا توجد مصروفات مسجلة في الشيت المرفق.")
 
-                # ---------------- التبويب الثاني: تحليل الأوقات ----------------
                 with tab2:
                     st.markdown("### ⏰ تحليل أوقات البيع (الليل vs النهار)")
                     c1, c2 = st.columns(2)
@@ -126,53 +150,37 @@ def show():
                     prod_time_matrix = df_top_prod.pivot_table(index=product_col, columns='فترة البيع', values=total_col, aggfunc='sum').fillna(0)
                     st.dataframe(prod_time_matrix.style.background_gradient(cmap='Blues'), use_container_width=True)
 
-                # ---------------- التبويب الثالث: الفروع والمستخدمين ----------------
                 with tab3:
-                    st.markdown("### 🏢 تحليل المنتج مع الفرع")
+                    st.markdown("### 🏢 تحليل المنتج مع الفرع (أفضل 15 منتج)")
                     branch_prod = df_sales.pivot_table(index=product_col, columns=branch_col, values=total_col, aggfunc='sum').fillna(0)
-                    # عرض أعلى 15 منتج مبيعاً لتسهيل القراءة
                     branch_prod['الإجمالي'] = branch_prod.sum(axis=1)
                     branch_prod = branch_prod.sort_values(by='الإجمالي', ascending=False).head(15).drop(columns=['الإجمالي'])
-                    fig_bp = px.imshow(branch_prod, aspect="auto", color_continuous_scale='Viridis', title="خريطة حرارية: أفضل المنتجات لكل فرع")
+                    fig_bp = px.imshow(branch_prod, aspect="auto", color_continuous_scale='Viridis')
                     st.plotly_chart(fig_bp, use_container_width=True)
 
                     st.markdown("---")
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.markdown("### 👤 تحليل المنتج مع المستخدم (الصيدلي)")
-                        user_prod = df_sales.groupby([user_col, product_col])[total_col].sum().reset_index()
-                        top_user_prod = user_prod.sort_values(total_col, ascending=False).groupby(user_col).head(3)
-                        st.dataframe(top_user_prod, use_container_width=True)
-                    
-                    with c2:
-                        st.markdown("### 🏷️ تحليل مبيعات المستخدم مع الكاتيجوري")
-                        if category_col in df_sales.columns:
-                            user_cat = df_sales.pivot_table(index=user_col, columns=category_col, values=total_col, aggfunc='sum').fillna(0)
-                            st.dataframe(user_cat.style.background_gradient(cmap='Greens'), use_container_width=True)
-                        else:
-                            st.info("عمود التصنيف/الكاتيجوري غير موجود في بيانات المبيعات المرفوعة.")
+                    st.markdown("### 👤 أفضل مبيعات المنتجات لكل صيدلي")
+                    user_prod = df_sales.groupby([user_col, product_col])[total_col].sum().reset_index()
+                    top_user_prod = user_prod.sort_values(total_col, ascending=False).groupby(user_col).head(3)
+                    st.dataframe(top_user_prod, use_container_width=True)
 
-                # ---------------- التبويب الرابع: التنبؤات (Machine Learning) ----------------
                 with tab4:
-                    st.markdown("### 🤖 نماذج التنبؤ بالمبيعات والعوائد (Forecasting Models)")
-                    st.info("تستخدم هذه النماذج خوارزميات Scikit-Learn (Linear Regression & Random Forest) لتحليل الاتجاهات التاريخية والتنبؤ بالـ 30 يوماً القادمة.")
+                    st.markdown("### 🤖 نماذج التنبؤ بالمبيعات والعوائد (Machine Learning)")
                     
-                    # تجهيز السلسلة الزمنية
-                    daily_sales = df_sales.groupby(date_col)[total_col].sum().reset_index()
+                    # 💡 الحل الجذري لمنع خطأ Unnamed: 0 عند عمل التجميع
+                    daily_sales = df_sales.groupby(date_col)[total_col].sum().to_frame(name='المبيعات_اليومية').reset_index()
                     daily_sales = daily_sales.sort_values(date_col)
                     
-                    if len(daily_sales) > 5: # نحتاج بيانات كافية للتدريب
+                    if len(daily_sales) > 5:
                         daily_sales['Days_Since_Start'] = (daily_sales[date_col] - daily_sales[date_col].min()).dt.days
                         daily_sales['Day_of_Week'] = daily_sales[date_col].dt.dayofweek
                         
                         X = daily_sales[['Days_Since_Start', 'Day_of_Week']]
-                        y = daily_sales[total_col]
+                        y = daily_sales['المبيعات_اليومية']
                         
-                        # تدريب النموذج
                         model = RandomForestRegressor(n_estimators=100, random_state=42)
                         model.fit(X, y)
                         
-                        # التنبؤ بـ 30 يوم قادمة
                         last_date = daily_sales[date_col].max()
                         future_dates = [last_date + timedelta(days=x) for x in range(1, 31)]
                         future_days_since = [(d - daily_sales[date_col].min()).days for d in future_dates]
@@ -181,29 +189,17 @@ def show():
                         X_future = pd.DataFrame({'Days_Since_Start': future_days_since, 'Day_of_Week': future_dow})
                         predictions = model.predict(X_future)
                         
-                        future_df = pd.DataFrame({
-                            'التاريخ': future_dates,
-                            'المبيعات المتوقعة': predictions,
-                            'النوع': 'تنبؤ (مستقبل)'
-                        })
-                        
-                        historical_df = pd.DataFrame({
-                            'التاريخ': daily_sales[date_col],
-                            'المبيعات المتوقعة': daily_sales[total_col],
-                            'النوع': 'بيانات فعلية (تاريخي)'
-                        })
+                        future_df = pd.DataFrame({'التاريخ': future_dates, 'المبيعات': predictions, 'النوع': 'تنبؤ (مستقبل)'})
+                        historical_df = pd.DataFrame({'التاريخ': daily_sales[date_col], 'المبيعات': daily_sales['المبيعات_اليومية'], 'النوع': 'بيانات فعلية'})
                         
                         forecast_plot_df = pd.concat([historical_df, future_df])
-                        
-                        fig_forecast = px.line(forecast_plot_df, x='التاريخ', y='المبيعات المتوقعة', color='النوع',
+                        fig_forecast = px.line(forecast_plot_df, x='التاريخ', y='المبيعات', color='النوع',
                                                title="📈 التنبؤ بإجمالي العوائد للـ 30 يوماً القادمة",
-                                               color_discrete_map={'بيانات فعلية (تاريخي)':'#2980b9', 'تنبؤ (مستقبل)':'#e74c3c'})
+                                               color_discrete_map={'بيانات فعلية':'#2980b9', 'تنبؤ (مستقبل)':'#e74c3c'})
                         st.plotly_chart(fig_forecast, use_container_width=True)
-                        
                         st.success(f"💰 إجمالي العائد المتوقع للـ 30 يوماً القادمة: **{predictions.sum():,.2f} ريال**")
                         
-                        st.markdown("### 🔮 التنبؤ بأداء الفروع القادم")
-                        # نموذج مبسط انحدار خطي لكل فرع
+                        st.markdown("### 🔮 التنبؤ بأداء الفروع القادم (المتوسط اليومي المتوقع)")
                         branch_forecast = []
                         for branch in df_sales[branch_col].unique():
                             b_sales = df_sales[df_sales[branch_col] == branch].groupby(date_col)[total_col].sum().reset_index()
@@ -211,53 +207,38 @@ def show():
                                 b_sales['d'] = (b_sales[date_col] - b_sales[date_col].min()).dt.days
                                 lr = LinearRegression()
                                 lr.fit(b_sales[['d']], b_sales[total_col])
-                                future_d = np.array([[b_sales['d'].max() + 15]]) # التنبؤ لمنتصف الشهر القادم
-                                expected_daily = lr.predict(future_d)[0]
-                                branch_forecast.append({"الفرع": branch, "المتوسط اليومي المتوقع": max(0, expected_daily)})
-                        
+                                expected_daily = lr.predict(np.array([[b_sales['d'].max() + 15]]))[0]
+                                branch_forecast.append({"الفرع": branch, "المتوسط اليومي": max(0, expected_daily)})
                         if branch_forecast:
-                            st.dataframe(pd.DataFrame(branch_forecast).style.format({"المتوسط اليومي المتوقع": "{:.2f}"}), use_container_width=True)
+                            st.dataframe(pd.DataFrame(branch_forecast).style.format({"المتوسط اليومي": "{:.2f}"}), use_container_width=True)
                     else:
                         st.warning("البيانات الزمنية المتاحة غير كافية لبناء نموذج تنبؤ موثوق (نحتاج أكثر من 5 أيام).")
 
-                # ---------------- التبويب الخامس: المخزون والطلبيات ----------------
                 with tab5:
-                    st.markdown("### 📦 وضع تقديرات للمخزون وطلبيات النواقص")
-                    st.info("يقوم النظام بدمج المشتريات السابقة مطروحاً منها المبيعات لمعرفة (المخزون الدفتري)، ثم حساب معدل الحرق اليومي (Run Rate) للتنبؤ بالكميات المطلوبة لـ 30 يوماً.")
+                    st.markdown("### 📦 تقديرات المخزون والطلبيات")
+                    st.info("يقوم النظام بدمج المشتريات وطرح المبيعات لمعرفة (المخزون الدفتري)، ثم يتنبأ بالكمية المطلوبة لـ 30 يوماً بناءً على معدل البيع.")
                     
-                    # تجميع المبيعات الكلية لكل منتج
-                    sales_qty = df_sales.groupby(product_col)[qty_col].sum().reset_index().rename(columns={qty_col: 'إجمالي المباع'})
+                    sales_qty_df = df_sales.groupby(product_col)[qty_col].sum().reset_index().rename(columns={qty_col: 'إجمالي المباع'})
+                    purchases_qty_df = df_purchases.groupby(pur_product_col)[pur_qty_col].sum().reset_index().rename(columns={pur_product_col: product_col, pur_qty_col: 'إجمالي المشتريات'})
                     
-                    # تجميع المشتريات الكلية لكل منتج
-                    purchases_qty = df_purchases.groupby(pur_product_col)[pur_qty_col].sum().reset_index().rename(columns={pur_product_col: product_col, pur_qty_col: 'إجمالي المشتريات'})
+                    inventory_df = pd.merge(purchases_qty_df, sales_qty_df, on=product_col, how='outer').fillna(0)
+                    inventory_df['المخزون الحالي'] = inventory_df['إجمالي المشتريات'] - inventory_df['إجمالي المباع']
                     
-                    # دمج المخزون
-                    inventory_df = pd.merge(purchases_qty, sales_qty, on=product_col, how='outer').fillna(0)
-                    inventory_df['المخزون الحالي (التقديري)'] = inventory_df['إجمالي المشتريات'] - inventory_df['إجمالي المباع']
-                    
-                    # حساب معدل البيع اليومي (افتراض فترة البيانات 90 يوم من المثال)
                     days_in_data = max((df_sales[date_col].max() - df_sales[date_col].min()).days, 1)
-                    inventory_df['معدل البيع اليومي'] = inventory_df['إجمالي المباع'] / days_in_data
+                    inventory_df['الاحتياج لـ 30 يوم'] = np.ceil((inventory_df['إجمالي المباع'] / days_in_data) * 30)
                     
-                    # الكمية المطلوبة لتغطية 30 يوم
-                    inventory_df['الاحتياج لـ 30 يوم'] = np.ceil(inventory_df['معدل البيع اليومي'] * 30)
-                    
-                    # تحديد الطلبية: الاحتياج - المخزون الحالي (إذا كان الناتج موجباً)
                     inventory_df['الكمية المقترح طلبها'] = np.where(
-                        inventory_df['الاحتياج لـ 30 يوم'] > inventory_df['المخزون الحالي (التقديري)'],
-                        inventory_df['الاحتياج لـ 30 يوم'] - inventory_df['المخزون الحالي (التقديري)'],
-                        0
-                    )
+                        inventory_df['الاحتياج لـ 30 يوم'] > inventory_df['المخزون الحالي'],
+                        inventory_df['الاحتياج لـ 30 يوم'] - inventory_df['المخزون الحالي'], 0)
                     
-                    # تصفية المنتجات التي تحتاج لطلب
                     reorder_df = inventory_df[inventory_df['الكمية المقترح طلبها'] > 0].sort_values('الكمية المقترح طلبها', ascending=False)
                     
                     c1, c2 = st.columns(2)
-                    c1.metric("عدد الأصناف التي تحتاج إعادة طلب", f"{len(reorder_df)} صنف")
+                    c1.metric("أصناف تحتاج إعادة طلب", f"{len(reorder_df)} صنف")
                     if len(reorder_df) > 0:
-                        st.dataframe(reorder_df[[product_col, 'المخزون الحالي (التقديري)', 'الاحتياج لـ 30 يوم', 'الكمية المقترح طلبها']].style.background_gradient(subset=['الكمية المقترح طلبها'], cmap='Reds'), use_container_width=True)
+                        st.dataframe(reorder_df[[product_col, 'المخزون الحالي', 'الاحتياج لـ 30 يوم', 'الكمية المقترح طلبها']].style.background_gradient(subset=['الكمية المقترح طلبها'], cmap='Reds'), use_container_width=True)
                     else:
                         st.success("المخزون الحالي كافٍ لجميع المنتجات للفترة القادمة.")
 
         except Exception as e:
-            st.error(f"حدث خطأ أثناء معالجة الملف. يرجى التأكد من أن الأعمدة متوافقة: {e}")
+            st.error(f"حدث خطأ أثناء معالجة الملف: {e}")
