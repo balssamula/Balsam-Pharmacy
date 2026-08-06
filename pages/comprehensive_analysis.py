@@ -171,6 +171,13 @@ def show():
                     
                     historical_df = pd.DataFrame({'التاريخ': daily_sales[date_col], 'المبيعات_المتوقعة': daily_sales['المبيعات'], 'النوع': 'بيانات فعلية'})
                     forecast_plot_df = pd.concat([historical_df, df_forecast])
+
+                    forecast_plot_df = pd.concat([historical_df, future_df])
+                    fig_forecast = px.line(forecast_plot_df, x='التاريخ', y='المبيعات', color='النوع',
+                                            title="📈 التنبؤ بإجمالي العوائد للـ 30 يوماً القادمة",
+                                            color_discrete_map={'بيانات فعلية':'#2980b9', 'تنبؤ (مستقبل)':'#e74c3c'})
+                    st.plotly_chart(fig_forecast, use_container_width=True)
+                    st.success(f"💰 إجمالي العائد المتوقع للـ 30 يوماً القادمة: **{predictions.sum():,.2f} ريال**")
                     
                     b_forecast_list = []
                     for branch in df_sales[branch_col].unique():
