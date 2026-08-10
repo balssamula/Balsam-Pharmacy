@@ -199,7 +199,7 @@ def init_database():
         cur.execute("""
             INSERT INTO users (username, password, role, pharmacist_name, can_view_dashboard, 
                                can_view_balances, can_view_monitoring, can_manage_users, can_view_pharmacy_actions, is_active)
-            VALUES ('admin', 'admin123', 'admin', 'مدير النظام', 1, 1, 1, 1, 1, 1)
+            VALUES ('admin', 'admin129', 'admin', 'مدير النظام', 1, 1, 1, 1, 1, 1)
         """)
 
     # إدراج المدير العام الافتراضي بأمان
