@@ -547,6 +547,9 @@ def delete_session(upload_batch_id: str):
     cur.execute("DELETE FROM reconciliation_items WHERE upload_batch_id = ?", (upload_batch_id,))
     conn.commit()
     conn.close()
+    
+    # 💡 تسجيل عملية حذف الجلسة
+    log_action("الإدارة", "admin", "النظام", "حذف جلسة", "متعدد", "حذف ملف", f"تم حذف الجلسة {upload_batch_id}")
 
 def get_completed_items(pharmacy_name: str = None) -> pd.DataFrame:
     conn = sqlite3.connect(DB_PATH)
@@ -635,8 +638,11 @@ def save_case_note(order_number: str, sku: str, pharmacy_name: str, case_type: s
         WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
     """, (note, order_number, sku, pharmacy_name, case_type))
     conn.commit()
-    log_action("الصيدلية/الإدارة", "user", pharmacy_name, order_number, sku, "إضافة ملحوظة", f"الملاحظة: {note}")
     conn.close()
+    
+    # 💡 إضافة الشرط هنا: لا تسجل الحركة إلا إذا كانت الملحوظة تحتوي على نص
+    if note and str(note).strip():
+        log_action("الصيدلية/الإدارة", "user", pharmacy_name, order_number, sku, "إضافة ملحوظة", f"الملاحظة: {note}")
 
 def mark_case_done(order_number: str, sku: str, pharmacy_name: str, case_type: str, performed_by: str):
     conn = sqlite3.connect(DB_PATH)
