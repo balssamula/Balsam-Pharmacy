@@ -383,7 +383,8 @@ def show():
             "الاضافات والطلبات المفقودة": branch_add_df,
             "الارجاعات والزيادات": branch_ret_df,
             "فواتير معلقة بين الفروع": conflicts_df,
-            "بانتظار الدفع": payment_df
+            "بانتظار الدفع": payment_df,
+            "تم الانتهاء": completed_df
         }
         excel_data_brief = export_to_excel_brief(excel_sheets_brief)
         st.download_button(label="📊 تحميل ملف Excel المختصر", data=excel_data_brief, file_name=f"Brief_Report_{pharmacy_name}.xlsx", use_container_width=True, type="primary")
