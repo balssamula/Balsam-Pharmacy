@@ -11,14 +11,29 @@ DB_PATH = os.path.join(DB_DIR, "pharmacy_reconciliation.db")
 PHARMACY_COUNT = 17
 
 def get_client_ip():
+    """الحصول على عنوان IP الحقيقي والدقيق للجهاز"""
     try:
         import streamlit as st
-        # جلب الـ IP الحقيقي للمستخدم من المتصفح مباشرة
         if hasattr(st, "context") and hasattr(st.context, "headers"):
             headers = st.context.headers
-            if "X-Forwarded-For" in headers:
-                return headers["X-Forwarded-For"].split(",")[0].strip()
-        return "غير معروف"
+            
+            # 💡 الترتيب مهم: نبدأ بأقوى الهيدرز التي تكشف الـ IP الحقيقي خلف Cloudflare أو Proxies
+            ip_headers = ["CF-Connecting-IP", "True-Client-IP", "X-Real-IP", "X-Forwarded-For"]
+            
+            for header in ip_headers:
+                if header in headers and headers[header]:
+                    # قد يكون هناك قائمة IPs مفصولة بفاصلة، نأخذ الأول لأنه يكون الخاص بالعميل
+                    real_ip = headers[header].split(",")[0].strip()
+                    if real_ip:
+                        return real_ip
+    except Exception:
+        pass
+        
+    # محاولة أخيرة عبر الشبكة المحلية لو لم يكن هناك سيرفر وسيط
+    try:
+        import socket
+        hostname = socket.gethostname()
+        return socket.gethostbyname(hostname)
     except:
         return "غير معروف"
 
