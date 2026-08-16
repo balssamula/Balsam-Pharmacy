@@ -8,7 +8,7 @@ from utils.helpers import (
     normalize_order_number, normalize_sku, normalize_text,
     determine_branch, get_branch_number, is_gift_or_promotion, now_str
 )
-from utils.database import DB_PATH
+from utils.database import DB_PATH, log_action
 
 def find_column(df, possible_names):
     """البحث عن عمود في DataFrame بأسماء محتملة"""
@@ -328,7 +328,6 @@ def process_excel(uploaded_file, username):
         cur.close()
         conn.close()
     return results, upload_batch_id
-        from utils.database import log_action
         log_action(username, "admin", "النظام", "ملف جديد", "متعدد", "رفع ملف", f"تم رفع وتصنيف {len(results)} حالة في الجلسة {upload_batch_id}")
 
 def update_balances(abc_file, salla_file):
