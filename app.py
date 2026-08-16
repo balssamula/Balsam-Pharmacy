@@ -121,24 +121,39 @@ with st.sidebar:
     else:
         st.success(f"مرحباً {st.session_state.username}")
         
-        # طلب اسم الصيدلي للصيادلة
-        if st.session_state.user_role == "pharmacy" and not st.session_state.pharmacist_name:
-            name = st.text_input("👤 اسم الصيدلي")
-            if st.button("💾 حفظ"):
-                if name.strip():
-                    st.session_state.pharmacist_name = name.strip()
-                    update_last_access(st.session_state.username, st.session_state.pharmacist_name)
-                    st.success("✅ تم حفظ الاسم")
-                    st.rerun()
+        # 💡 طلب اسم الصيدلي والفترة بشكل إجباري للصيادلة
         if st.session_state.user_role == "pharmacy":
-            # التحقق من عدم تسجيل الدخول مسبقاً في هذه الجلسة لمنع التكرار
-            if not st.session_state.get('login_recorded'):
-                from utils.database import update_last_access
-                ip = update_last_access(st.session_state.username, st.session_state.pharmacist_name)
-                st.session_state.login_recorded = True
-                st.session_state.current_ip = ip
+            # عرض اسم الصيدلي الحالي وزر لتغييره
+            if st.session_state.get('pharmacist_name'):
+                st.info(f"الصيدلي الحالي: {st.session_state.pharmacist_name}")
+                if st.button("🔄 تسجيل صيدلي مختلف"):
+                    st.session_state.pharmacist_name = ""
+                    st.rerun()
             
-            st.success(f"✅ تم تسجيل الدخول من IP: {st.session_state.get('current_ip', 'غير معروف')}")
+            # إذا لم يكن هناك اسم مسجل، نظهر نموذج الإدخال
+            if not st.session_state.get('pharmacist_name'):
+                with st.form("pharmacist_login_form"):
+                    st.markdown("### 👤 تسجيل بيانات الشيفت")
+                    name = st.text_input("اسم الصيدلي (ثلاثي)")
+                    shift = st.radio("الفترة (الشيفت)", ["صباحاً ☀️", "مساءً 🌙"])
+                    submitted = st.form_submit_button("💾 بدء العمل")
+                    
+                    if submitted:
+                        if name.strip():
+                            full_name = f"{name.strip()} - {shift}"
+                            st.session_state.pharmacist_name = full_name
+                            
+                            from utils.database import update_last_access
+                            ip = update_last_access(st.session_state.username, full_name)
+                            st.session_state.login_recorded = True
+                            st.session_state.current_ip = ip
+                            st.rerun()
+                        else:
+                            st.error("❌ يرجى إدخال اسم الصيدلي")
+            
+            # عرض الـ IP فقط إذا تم التسجيل
+            if st.session_state.get('pharmacist_name') and st.session_state.get('current_ip'):
+                st.success(f"✅ تم تسجيل الدخول من IP: {st.session_state.current_ip}")
         
         # قائمة الأدوات حسب الصلاحيات
         if st.session_state.user_role in ["admin", "manager"]:
