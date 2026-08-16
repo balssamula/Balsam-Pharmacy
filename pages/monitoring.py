@@ -26,16 +26,28 @@ def show():
         logs_df = get_action_logs(limit=1000)
         
         if not logs_df.empty:
-            # إضافة فلاتر بحث سريعة
-            col1, col2 = st.columns(2)
-            search_order = col1.text_input("🔍 بحث برقم الطلب (في السجل)")
-            search_sku = col2.text_input("🏷️ بحث برقم المنتج (SKU)")
+            # 💡 إضافة فلاتر بحث سريعة شاملة
+            col1, col2, col3, col4 = st.columns(4)
+            search_order = col1.text_input("🔍 بحث برقم الطلب")
+            search_sku = col2.text_input("🏷️ بحث بـ SKU")
             
+            # قوائم منسدلة للفلاتر
+            branch_options = ["الكل"] + sorted(logs_df["pharmacy_name"].unique().tolist())
+            search_branch = col3.selectbox("🏥 فلتر الفرع", branch_options)
+            
+            user_options = ["الكل"] + sorted(logs_df["performed_by"].unique().tolist())
+            search_user = col4.selectbox("👤 فلتر بواسطة", user_options)
+            
+            # تطبيق الفلاتر
             filtered_logs = logs_df.copy()
             if search_order:
                 filtered_logs = filtered_logs[filtered_logs["order_number"].astype(str).str.contains(search_order, na=False)]
             if search_sku:
                 filtered_logs = filtered_logs[filtered_logs["sku"].astype(str).str.contains(search_sku, na=False)]
+            if search_branch != "الكل":
+                filtered_logs = filtered_logs[filtered_logs["pharmacy_name"] == search_branch]
+            if search_user != "الكل":
+                filtered_logs = filtered_logs[filtered_logs["performed_by"] == search_user]
                 
             filtered_logs = filtered_logs.rename(columns={
                 "action_date": "التاريخ والوقت",
