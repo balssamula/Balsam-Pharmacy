@@ -328,6 +328,8 @@ def process_excel(uploaded_file, username):
         cur.close()
         conn.close()
     return results, upload_batch_id
+        from utils.database import log_action
+        log_action(username, "admin", "النظام", "ملف جديد", "متعدد", "رفع ملف", f"تم رفع وتصنيف {len(results)} حالة في الجلسة {upload_batch_id}")
 
 def update_balances(abc_file, salla_file):
     try:
