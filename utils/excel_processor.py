@@ -320,6 +320,10 @@ def process_excel(uploaded_file, username):
         
         session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
         cur.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
+        
+        # 💡 تسجيل عملية رفع الملف في سجل العمليات بالشكل الصحيح داخل الـ try
+        log_action(username, "admin", "النظام", "ملف جديد", "متعدد", "رفع ملف", f"تم رفع وتصنيف {len(results)} حالة في الجلسة {upload_batch_id}")
+        
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -328,7 +332,6 @@ def process_excel(uploaded_file, username):
         cur.close()
         conn.close()
     return results, upload_batch_id
-        log_action(username, "admin", "النظام", "ملف جديد", "متعدد", "رفع ملف", f"تم رفع وتصنيف {len(results)} حالة في الجلسة {upload_batch_id}")
 
 def update_balances(abc_file, salla_file):
     try:
