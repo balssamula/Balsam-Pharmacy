@@ -87,13 +87,14 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
 def export_to_excel_brief(dataframes_dict: dict) -> bytes:
     """تصدير ملف إكسيل مختصر"""
     output = BytesIO()
-    allowed_tabs = ["الاضافات والطلبات المفقودة", "الارجاعات والزيادات", "فواتير معلقة بين الفروع", "بانتظار الدفع"]
+    allowed_tabs = ["الاضافات والطلبات المفقودة", "الارجاعات والزيادات", "فواتير معلقة بين الفروع", "بانتظار الدفع", "تم الانتهاء"]
     
     tab_colors = {
         "الاضافات والطلبات المفقودة": "4472C4",
         "الارجاعات والزيادات": "ED7D31",
         "فواتير معلقة بين الفروع": "9B59B6",
         "بانتظار الدفع": "3498DB"
+        "تم الانتهاء": "2ECC71"
     }
     
     target_columns = {
@@ -110,6 +111,7 @@ def export_to_excel_brief(dataframes_dict: dict) -> bytes:
         'order_status': 'حالة الطلب',
         'abc_pharmacist_name': 'اسم الصيدلي',
         'profile_type': 'نوع البروفايل'
+        'status': 'حالة التسوية'
     }
     
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
