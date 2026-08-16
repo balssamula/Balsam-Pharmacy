@@ -110,7 +110,7 @@ def export_to_excel_brief(dataframes_dict: dict) -> bytes:
         'diff_qty': 'الفرق',
         'order_status': 'حالة الطلب',
         'abc_pharmacist_name': 'اسم الصيدلي',
-        'profile_type': 'نوع البروفايل'
+        'profile_type': 'نوع البروفايل',
         'status': 'حالة التسوية'
     }
     
