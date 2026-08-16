@@ -330,7 +330,7 @@ st.markdown("---")
 st.markdown(
     """
     <div style="text-align:center;color:#607783;padding:0.6rem 0 0.8rem;">
-        نظام بلسم العلا لمطابقة الطلبات والفواتير © 2026
+        نظام بلسم العلا لمطابقة الطلبات والفواتير (V1) © 2026
     </div>
     """,
     unsafe_allow_html=True,
