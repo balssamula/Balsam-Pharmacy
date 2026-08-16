@@ -1,6 +1,7 @@
 import streamlit as st
 from utils.database import init_database, fetch_user, update_last_access, get_user_permissions
 from utils.helpers import get_branch_number
+from streamlit_javascript import st_javascript
 
 # تهيئة قاعدة البيانات
 init_database()
@@ -128,8 +129,12 @@ with st.sidebar:
     else:
         st.success(f"مرحباً {st.session_state.username}")
         
-        # 💡 طلب اسم الصيدلي والفترة بشكل إجباري للصيادلة
+        # 💡 طلب اسم الصيدلي والفترة للصيادلة
         if st.session_state.user_role == "pharmacy":
+            
+            # 🌐 جلب الـ IP الفعلي من جهاز العميل بصمت في الخلفية عبر ipify
+            real_ip = st_javascript("await fetch('https://api.ipify.org?format=json').then(r => r.json()).then(d => d.ip).catch(() => 'غير معروف')")
+            
             # عرض اسم الصيدلي الحالي وزر لتغييره
             if st.session_state.get('pharmacist_name'):
                 st.info(f"الصيدلي الحالي: {st.session_state.pharmacist_name}")
@@ -143,6 +148,11 @@ with st.sidebar:
                     st.markdown("### 👤 تسجيل بيانات الشيفت")
                     name = st.text_input("اسم الصيدلي (ثلاثي)")
                     shift = st.radio("الفترة (الشيفت)", ["صباحاً ☀️", "مساءً 🌙"])
+                    
+                    # ننتظر حتى يتم جلب الـ IP (حيث أن الدالة قد ترجع 0 في اللحظة الأولى)
+                    final_ip = real_ip if real_ip and real_ip != 0 else "جاري الجلب..."
+                    st.caption(f"🌐 IP الجهاز الحالي: {final_ip}")
+                    
                     submitted = st.form_submit_button("💾 بدء العمل")
                     
                     if submitted:
@@ -150,10 +160,14 @@ with st.sidebar:
                             full_name = f"{name.strip()} - {shift}"
                             st.session_state.pharmacist_name = full_name
                             
+                            # التأكد من التقاط الـ IP الصحيح قبل الحفظ
+                            ip_to_save = real_ip if real_ip and real_ip != 0 else "غير معروف"
+                            
                             from utils.database import update_last_access
-                            ip = update_last_access(st.session_state.username, full_name)
+                            update_last_access(st.session_state.username, full_name, ip_to_save)
+                            
                             st.session_state.login_recorded = True
-                            st.session_state.current_ip = ip
+                            st.session_state.current_ip = ip_to_save
                             st.rerun()
                         else:
                             st.error("❌ يرجى إدخال اسم الصيدلي")
