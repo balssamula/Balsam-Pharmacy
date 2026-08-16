@@ -321,16 +321,20 @@ def process_excel(uploaded_file, username):
         session_name = datetime.now().strftime("%Y-%m-%d %H:%M")
         cur.execute("UPDATE uploads SET session_name = ? WHERE upload_batch_id = ?", (session_name, upload_batch_id))
         
-        # 💡 تسجيل عملية رفع الملف في سجل العمليات بالشكل الصحيح داخل الـ try
-        log_action(username, "admin", "النظام", "ملف جديد", "متعدد", "رفع ملف", f"تم رفع وتصنيف {len(results)} حالة في الجلسة {upload_batch_id}")
-        
         conn.commit()
     except Exception as e:
         conn.rollback()
         raise e
     finally:
         cur.close()
-        conn.close()
+        conn.close()  # <-- تم إغلاق الاتصال هنا تماماً وبأمان
+
+    # 💡 تسجيل العملية في السجل بعد إغلاق اتصال المعالجة لتجنب قفل القاعدة (Database Locked)
+    try:
+        log_action(username, "admin", "النظام", "ملف جديد", "متعدد", "رفع ملف", f"تم رفع وتصنيف الحالات في الجلسة {upload_batch_id}")
+    except:
+        pass
+
     return results, upload_batch_id
 
 def update_balances(abc_file, salla_file):
