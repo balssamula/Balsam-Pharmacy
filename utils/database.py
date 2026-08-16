@@ -96,6 +96,21 @@ def init_database():
         )
     """)
 
+    # جدول السجل الشامل للعمليات
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS action_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action_date TEXT,
+            performed_by TEXT,
+            role TEXT,
+            pharmacy_name TEXT,
+            order_number TEXT,
+            sku TEXT,
+            action_type TEXT,
+            action_details TEXT
+        )
+    """)
+    
     # جدول سجل الدخول
     cur.execute("""
         CREATE TABLE IF NOT EXISTS login_history (
@@ -620,6 +635,7 @@ def save_case_note(order_number: str, sku: str, pharmacy_name: str, case_type: s
         WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
     """, (note, order_number, sku, pharmacy_name, case_type))
     conn.commit()
+    log_action("الصيدلية/الإدارة", "user", pharmacy_name, order_number, sku, "إضافة ملحوظة", f"الملاحظة: {note}")
     conn.close()
 
 def mark_case_done(order_number: str, sku: str, pharmacy_name: str, case_type: str, performed_by: str):
@@ -630,6 +646,7 @@ def mark_case_done(order_number: str, sku: str, pharmacy_name: str, case_type: s
         WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
     """, (performed_by, now_str(), order_number, sku, pharmacy_name, case_type))
     conn.commit()
+    log_action(performed_by, "pharmacy", pharmacy_name, order_number, sku, "تأكيد وإنجاز", f"تم تأكيد التسوية للحالة: {case_type}")
     conn.close()
 
 def reopen_case(order_number: str, sku: str, pharmacy_name: str, case_type: str):
@@ -640,6 +657,7 @@ def reopen_case(order_number: str, sku: str, pharmacy_name: str, case_type: str)
         WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
     """, (order_number, sku, pharmacy_name, case_type))
     conn.commit()
+    log_action("الإدارة", "admin", pharmacy_name, order_number, sku, "إعادة فتح", "تم إعادة فتح الحالة للمراجعة")
     conn.close()
 
 def reopen_case_by_item_key(item_key: str):
@@ -647,6 +665,7 @@ def reopen_case_by_item_key(item_key: str):
     cur = conn.cursor()
     cur.execute("UPDATE reconciliation_items SET status = 'قيد المتابعة', performed_by = '', performed_at = '' WHERE item_key = ?", (item_key,))
     conn.commit()
+    log_action("الإدارة", "admin", pharmacy_name, order_number, sku, "إعادة فتح", "تم إعادة فتح الحالة للمراجعة")
     conn.close()
 
 def get_tab_completed_counts(pharmacy_name: str = None) -> dict:
@@ -679,6 +698,7 @@ def lock_item(item_key: str, locked_by: str):
         WHERE item_key = ?
     """, (locked_by, now_str(), item_key))
     conn.commit()
+    log_action(locked_by, "admin", "عام", "محدد", "محدد", "قفل/فتح حالة", "تغيير حالة القفل")
     conn.close()
 
 def unlock_item(item_key: str):
@@ -691,6 +711,7 @@ def unlock_item(item_key: str):
         WHERE item_key = ?
     """, (item_key,))
     conn.commit()
+    log_action(locked_by, "admin", "عام", "محدد", "محدد", "قفل/فتح حالة", "تغيير حالة القفل")
     conn.close()
 
 def get_item_lock_status(item_key: str) -> bool:
@@ -904,6 +925,7 @@ def move_item_to_branch(item_key: str, target_branch: str, moved_by: str) -> boo
         print(f"Error moving item: {e}")
         return False
     finally:
+        log_action(moved_by, "admin", old_pharmacy, order_number, sku, "نقل فرع", f"تم النقل من {old_pharmacy} إلى {target_branch}")
         conn.close()
 
 
@@ -993,6 +1015,33 @@ def get_all_duplicate_items(pharmacy_name: str = None) -> pd.DataFrame:
         df = pd.read_sql_query(query, conn)
         # تصفية العناصر التي لها أكثر من نسخة
         df = df[df['duplicate_count'] > 1]
+        return df
+    except Exception as e:
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+def log_action(performed_by: str, role: str, pharmacy_name: str, order_number: str, sku: str, action_type: str, action_details: str):
+    """دالة مركزية لتسجيل أي حركة تتم في النظام"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO action_logs (action_date, performed_by, role, pharmacy_name, order_number, sku, action_type, action_details)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (now_str(), performed_by, role, pharmacy_name, order_number, sku, action_type, action_details))
+    conn.commit()
+    conn.close()
+
+def get_action_logs(limit: int = 500) -> pd.DataFrame:
+    """جلب سجل العمليات الشامل لعرضه في صفحة المراقبة"""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        df = pd.read_sql_query(f"""
+            SELECT action_date, performed_by, role, pharmacy_name, order_number, sku, action_type, action_details
+            FROM action_logs
+            ORDER BY action_date DESC
+            LIMIT {limit}
+        """, conn)
         return df
     except Exception as e:
         return pd.DataFrame()
