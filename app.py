@@ -114,7 +114,14 @@ with st.sidebar:
                 st.session_state.logged_in = True
                 st.session_state.username = user[0]
                 st.session_state.user_role = user[1]
-                st.session_state.pharmacist_name = user[2] or ""
+                
+                # 💡 تفريغ اسم الصيدلي إجبارياً للصيدليات ليطلب إدخال الشيفت من جديد
+                if user[1] == "pharmacy":
+                    st.session_state.pharmacist_name = ""
+                    st.session_state.login_recorded = False
+                else:
+                    st.session_state.pharmacist_name = user[2] or ""
+                    
                 st.rerun()
             else:
                 st.error("❌ بيانات الدخول غير صحيحة.")
@@ -214,8 +221,12 @@ with st.sidebar:
                 
         st.markdown("---")
         if st.button("🚪 تسجيل خروج", use_container_width=True):
-            for key in ["logged_in", "username", "user_role", "pharmacist_name", "page"]:
-                st.session_state[key] = False if key == "logged_in" else "dashboard"
+            st.session_state.logged_in = False
+            st.session_state.username = ""
+            st.session_state.user_role = ""
+            st.session_state.pharmacist_name = ""
+            st.session_state.page = "dashboard"
+            st.session_state.login_recorded = False
             st.rerun()
 
 # Main Content
