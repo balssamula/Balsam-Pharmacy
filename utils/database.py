@@ -568,11 +568,12 @@ def delete_session(upload_batch_id: str):
 
 def get_completed_items(pharmacy_name: str = None) -> pd.DataFrame:
     conn = sqlite3.connect(DB_PATH)
+    # 💡 تم حذف "active = 1" لكي يجلب جميع العمليات المنتهية تاريخياً!
     query = """
         SELECT order_number, invoice_number, sku, product_name, case_type, case_label,
                performed_by, performed_at, status, item_key, pharmacy_name, branch_number,
-               salla_qty, abc_qty, difference, abc_pharmacist_name, order_status
-        FROM reconciliation_items WHERE active = 1 AND status = 'تم'
+               salla_qty, abc_qty, difference, abc_pharmacist_name, order_status, pharmacist_note
+        FROM reconciliation_items WHERE status = 'تم'
     """
     params = []
     if pharmacy_name:
