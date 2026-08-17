@@ -386,6 +386,22 @@ def show():
         """, unsafe_allow_html=True)
     with col2:
         if not login_history.empty:
+            # 💡 دمج اسم الفرع مع اسم الصيدلي (المحفوظ في user_agent)
+            if 'user_agent' in login_history.columns:
+                login_history['username'] = login_history.apply(
+                    lambda x: f"{x['username']} - {x['user_agent']}" if pd.notna(x['user_agent']) and str(x['user_agent']).strip() else x['username'], 
+                    axis=1
+                )
+                login_history = login_history.drop(columns=['user_agent'])
+            
+            # إعادة تسمية الأعمدة لتصبح واضحة
+            login_history = login_history.rename(columns={
+                "username": "الفرع - اسم المستخدم",
+                "role": "الصلاحية",
+                "ip_address": "IP",
+                "login_time": "وقت الدخول"
+            })
+            
             st.markdown("### 📋 آخر محاولات الدخول")
             st.dataframe(login_history, use_container_width=True)
     
