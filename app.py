@@ -1,4 +1,5 @@
 import streamlit as st
+from PIL import Image
 from utils.database import init_database, fetch_user, update_last_access, get_user_permissions
 from utils.helpers import get_branch_number
 from streamlit_javascript import st_javascript
@@ -6,8 +7,12 @@ from streamlit_javascript import st_javascript
 # تهيئة قاعدة البيانات
 init_database()
 
+app_icon = Image.open("لوجو--جديد.png")
+
+# إعدادات الصفحة
 st.set_page_config(
     page_title="نظام بلسم العلا - مطابقة الطلبات والفواتير",
+    page_icon=app_icon,  # 💡 تمرير اللوجو كأيقونة للتطبيق هنا
     layout="wide",
     initial_sidebar_state="expanded",
 )
