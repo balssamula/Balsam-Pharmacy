@@ -277,7 +277,7 @@ def get_login_history(limit: int = 50) -> pd.DataFrame:
     """الحصول على سجل الدخول"""
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query(f"""
-        SELECT username, role, ip_address, login_time
+        SELECT username, role, ip_address, login_time, user_agent
         FROM login_history
         ORDER BY login_time DESC
         LIMIT {limit}
