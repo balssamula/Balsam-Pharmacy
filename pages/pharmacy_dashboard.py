@@ -399,20 +399,42 @@ def show():
     </div>
     """, unsafe_allow_html=True)
     
+    # 1. نجعل أسماء التبويبات ثابتة تماماً لكي لا يقوم Streamlit بعمل Reset
     tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed = st.tabs([
-        f"📥 الإضافات والطلبات ({completed_additions_merged}/{total_additions_merged})",
-        f"📤 الإرجاعات والزيادات ({completed_returns_merged}/{total_returns_merged})",
-        f"📊 فواتير معلقة بين الفروع ({completed_conflicts}/{total_conflicts})", 
-        f"⏰ فواتير بعد آخر طلب ({completed_post_cutoff}/{total_post_cutoff})",
-        f"💰 بانتظار الدفع ({total_payment})",
-        f"⚠️ ملغي/مسترجع ({total_cancelled})",
-        f"✅ تم الانتهاء ({total_completed})"
+        "📥 الإضافات والطلبات",
+        "📤 الإرجاعات والزيادات",
+        "📊 فواتير معلقة بين الفروع", 
+        "⏰ فواتير بعد آخر طلب",
+        "💰 بانتظار الدفع",
+        "⚠️ ملغي/مسترجع",
+        "✅ تم الانتهاء"
     ])
     
-    with tab_additions: render_case_cards_pharmacy(branch_add_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="add")
-    with tab_returns: render_case_cards_pharmacy(branch_ret_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="ret")
-    with tab_conflicts: render_case_cards_pharmacy(conflicts_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="conf")
-    with tab_post_cutoff: render_case_cards_pharmacy(post_cutoff_df, False, pharmacist_name, pharmacy_name, tab_id="cutoff")
-    with tab_payment: render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name, tab_id="pay")
-    with tab_cancelled: render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name, tab_id="cancel")
-    with tab_completed: render_completed_table(completed_df, is_admin=False)
+    # 2. نضع الأرقام المتغيرة كعنوان داخل التبويب نفسه لكي تتحدث بدون مشاكل
+    with tab_additions: 
+        st.markdown(f"#### 📥 الإضافات والطلبات المفقودة ({completed_additions_merged}/{total_additions_merged})")
+        render_case_cards_pharmacy(branch_add_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="add")
+        
+    with tab_returns: 
+        st.markdown(f"#### 📤 الإرجاعات والزيادات المستندة ({completed_returns_merged}/{total_returns_merged})")
+        render_case_cards_pharmacy(branch_ret_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="ret")
+        
+    with tab_conflicts: 
+        st.markdown(f"#### 📊 فواتير متداخلة ومعلقة بين الفروع ({completed_conflicts}/{total_conflicts})")
+        render_case_cards_pharmacy(conflicts_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="conf")
+        
+    with tab_post_cutoff: 
+        st.markdown(f"#### ⏰ فواتير ABC بعد توقيت آخر طلب ({completed_post_cutoff}/{total_post_cutoff})")
+        render_case_cards_pharmacy(post_cutoff_df, False, pharmacist_name, pharmacy_name, tab_id="cutoff")
+        
+    with tab_payment: 
+        st.markdown(f"#### 💰 طلبات سلة معلقة بانتظار إتمام الدفع ({total_payment})")
+        render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name, tab_id="pay")
+        
+    with tab_cancelled: 
+        st.markdown(f"#### ⚠️ فواتير لطلبات ملغية أو مسترجعة ({total_cancelled})")
+        render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name, tab_id="cancel")
+        
+    with tab_completed: 
+        st.markdown(f"#### ✅ التسويات والطلبات المكتملة ({total_completed})")
+        render_completed_table(completed_df, is_admin=False)
