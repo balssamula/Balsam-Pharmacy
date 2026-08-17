@@ -683,12 +683,27 @@ def reopen_case(order_number: str, sku: str, pharmacy_name: str, case_type: str)
     log_action("الإدارة", "admin", pharmacy_name, order_number, sku, "إعادة فتح", "تم إعادة فتح الحالة للمراجعة")
     conn.close()
 
-def reopen_case_by_item_key(item_key: str):
-    conn = sqlite3.connect(DB_PATH)
+def reopen_case_by_item_key(item_key):
+    # افتراضاً أن لديك كود إنشاء الاتصال هنا
+    # conn = get_connection() 
     cur = conn.cursor()
-    cur.execute("UPDATE reconciliation_items SET status = 'قيد المتابعة', performed_by = '', performed_at = '' WHERE item_key = ?", (item_key,))
-    conn.commit()
-    log_action("الإدارة", "admin", pharmacy_name, order_number, sku, "إعادة فتح", "تم إعادة فتح الحالة للمراجعة")
+    
+    # 1. استخراج البيانات المطلوبة من قاعدة البيانات أولاً
+    cur.execute("SELECT pharmacy_name, order_number, sku FROM reconciliation_items WHERE item_key = ?", (item_key,))
+    row = cur.fetchone()
+    
+    if row:
+        pharmacy_name = row[0]
+        order_number = row[1]
+        sku = row[2]
+        
+        # 2. تحديث حالة العنصر
+        cur.execute("UPDATE reconciliation_items SET status = 'قيد المتابعة' WHERE item_key = ?", (item_key,))
+        conn.commit()
+        
+        # 3. تسجيل الإجراء الآن (المتغيرات أصبحت معرفة)
+        log_action("الإدارة", "admin", pharmacy_name, order_number, sku, "إعادة فتح", "تم إعادة فتح الحالة للمراجعة")
+    
     conn.close()
 
 def get_tab_completed_counts(pharmacy_name: str = None) -> dict:
