@@ -193,7 +193,7 @@ def render_table_with_click(df, tab_name, allow_move: bool = True):
                 if pd.isna(item_key) or item_key == '':
                     item_key = f"old_row_{selected_idx}"
                                
-# ========== التحقق من وجود مكررات (النسخة المحمية من المسافات البادئة) ==========
+                # ========== التحقق من وجود مكررات (النسخة المحمية من المسافات البادئة) ==========
                 order_number = str(row.get('order_number', ''))
                 sku = str(row.get('sku', ''))
                 current_pharmacy = row.get('pharmacy_name', '')
@@ -292,17 +292,18 @@ def render_table_with_click(df, tab_name, allow_move: bool = True):
                                 st.error("❌ فشل نقل العنصر")
                     
                     note = col_c.text_input("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=f"note_{tab_name}_{selected_idx}")
-
+                    
                     if col_d.button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
+                        # 💡 تمرير اسم المستخدم والصلاحية
                         save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note, st.session_state.username, st.session_state.user_role)
                         st.rerun()
-                    
                 else:
-                    # إذا كان النقل غير مسموح، نعرض فقط الملحوظة
+                    # إذا كان النقل غير مسموح (أو الحالة مكتملة)، نعرض فقط الملحوظة
                     st.markdown("---")
                     col_a, col_b = st.columns([3, 1])
                     note = col_a.text_input("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=f"note_{tab_name}_{selected_idx}")
-                    if col_d.button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
+                    if col_b.button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
+                        # 💡 تمرير اسم المستخدم والصلاحية
                         save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note, st.session_state.username, st.session_state.user_role)
                         st.rerun()
 
@@ -597,7 +598,7 @@ def show():
     with col6:
         search_sku = st.text_input("🏷️ SKU", placeholder="بحث بـ SKU...")
 
-    # تطبيق الفلاتر ديناميكياً (تم حذق السطر المتكرر المسبب للمشكلة التاريخية)
+# تطبيق الفلاتر ديناميكياً
     filtered_df = df.copy()
     if selected_session_id != "الكل":
         filtered_df = filtered_df[filtered_df["upload_batch_id"] == selected_session_id]
@@ -611,29 +612,45 @@ def show():
             filtered_df = filtered_df[filtered_df["order_status"].str.contains("تم الاستلام من فرع", na=False)]
         else:
             filtered_df = filtered_df[filtered_df["order_status"] == selected_order_status]
+            
+    # 💡 [الإصلاح الجذري]: تطبيق الفلاتر النصية على القائمة النشطة
     if search_order:
-        filtered_df = filtered_df[filtered_df["order_number"].astype(str).str.contains(search_order, na=False)]
+        filtered_df = filtered_df[filtered_df["order_number"].astype(str).str.contains(search_order, na=False, case=False)]
     if search_invoice:
-        filtered_df = filtered_df[filtered_df["invoice_number"].astype(str).str.contains(search_invoice, na=False)]
+        filtered_df = filtered_df[filtered_df["invoice_number"].astype(str).str.contains(search_invoice, na=False, case=False)]
     if search_sku:
-        filtered_df = filtered_df[filtered_df["sku"].astype(str).str.contains(search_sku, na=False)]
+        filtered_df = filtered_df[filtered_df["sku"].astype(str).str.contains(search_sku, na=False, case=False)]
 
     active_mask_filtered = ~filtered_df["order_status"].apply(is_cancelled_or_returned_status)
     payment_mask = filtered_df["order_status"].apply(is_pending_payment_status)
     cancelled_mask = filtered_df["order_status"].apply(is_cancelled_or_returned_status)
     
-    completed_df = get_completed_items()
-    if selected_branch != "الكل":
-        completed_df = completed_df[completed_df["pharmacy_name"] == selected_branch]
+    # 💡 تطبيق الفلاتر النصية والفرع على تبويب (المكتملات)
+    completed_df_admin = get_completed_items()
+    if completed_df_admin is not None and not completed_df_admin.empty:
+        if selected_branch != "الكل":
+            completed_df_admin = completed_df_admin[completed_df_admin["pharmacy_name"] == selected_branch]
+        if search_order:
+            completed_df_admin = completed_df_admin[completed_df_admin["order_number"].astype(str).str.contains(search_order, na=False, case=False)]
+        if search_invoice:
+            completed_df_admin = completed_df_admin[completed_df_admin["invoice_number"].astype(str).str.contains(search_invoice, na=False, case=False)]
+        if search_sku:
+            completed_df_admin = completed_df_admin[completed_df_admin["sku"].astype(str).str.contains(search_sku, na=False, case=False)]
     
-    # ========== العناصر القديمة ==========
+    # ========== العناصر القديمة وتطبيق الفلاتر عليها ==========
     selected_branch_name = None if selected_branch == "الكل" else selected_branch
     
-    old_orders_data = get_old_orders(pharmacy_name=selected_branch_name, months=6)
-    old_invoices_data = get_old_invoices(pharmacy_name=selected_branch_name, months=6)
+    old_orders_df = get_old_orders(pharmacy_name=selected_branch_name, months=6)
+    old_invoices_df = get_old_invoices(pharmacy_name=selected_branch_name, months=6)
     
-    old_order_numbers = set(old_orders_data['order_number'].astype(str).tolist()) if not old_orders_data.empty else set()
-    old_invoice_numbers = set(old_invoices_data['invoice_number'].astype(str).tolist()) if not old_invoices_data.empty else set()
+    for old_df in [old_orders_df, old_invoices_df]:
+        if not old_df.empty:
+            if search_order: old_df.drop(old_df[~old_df["order_number"].astype(str).str.contains(search_order, na=False, case=False)].index, inplace=True)
+            if search_invoice: old_df.drop(old_df[~old_df["invoice_number"].astype(str).str.contains(search_invoice, na=False, case=False)].index, inplace=True)
+            if search_sku: old_df.drop(old_df[~old_df["sku"].astype(str).str.contains(search_sku, na=False, case=False)].index, inplace=True)
+
+    old_order_numbers = set(old_orders_df['order_number'].astype(str).tolist()) if not old_orders_df.empty else set()
+    old_invoice_numbers = set(old_invoices_df['invoice_number'].astype(str).tolist()) if not old_invoices_df.empty else set()
     
     def exclude_old_items(temp_df, exclude_orders=True, exclude_invoices=True):
         if temp_df.empty:
@@ -645,36 +662,27 @@ def show():
             result_temp = result_temp[~result_temp['invoice_number'].astype(str).isin(old_invoice_numbers)]
         return result_temp
     
-    # ========== حساب الإحصائيات الصحيحة للتبويبات بناءً على الشروط الدقيقة والمحدثة ==========
-    active_mask_filtered = filtered_df["active"] == 1 if "active" in filtered_df.columns else True
-    is_cancelled_returned = filtered_df["order_status"].astype(str).str.strip().str.contains("ملغي|مسترجع|cancelled|returned|refunded", na=False, case=False)
-    is_pending_payment = filtered_df["order_status"].astype(str).str.strip().str.contains("بانتظار الدفع|لم يتم الدفع|pending|unpaid", na=False, case=False)
-    
+    # حساب الإحصائيات بعد الفلترة المحدثة
     # 1️⃣ الإضافات والطلبات المفقودة
-    additions_filtered = filtered_df[filtered_df["case_type"].isin(["addition", "orphan_salla"]) & (~is_cancelled_returned) & (~is_pending_payment) & active_mask_filtered].copy()
+    additions_filtered = filtered_df[filtered_df["case_type"].isin(["addition", "orphan_salla"]) & active_mask_filtered & ~payment_mask].copy()
     additions_filtered = exclude_old_items(additions_filtered)
     total_additions_count = len(additions_filtered)
     completed_additions_count = len(additions_filtered[additions_filtered["status"] == "تم"]) if "status" in additions_filtered.columns else 0
-    
+
     # 2️⃣ الإرجاعات والزيادات
-    returns_filtered = filtered_df[filtered_df["case_type"].isin(["return", "orphan_abc"]) & (~is_cancelled_returned) & (~is_pending_payment) & active_mask_filtered].copy()
+    returns_filtered = filtered_df[filtered_df["case_type"].isin(["return", "orphan_abc"]) & active_mask_filtered & ~payment_mask].copy()
     returns_filtered = exclude_old_items(returns_filtered)
     total_returns_count = len(returns_filtered)
     completed_returns_count = len(returns_filtered[returns_filtered["status"] == "تم"]) if "status" in returns_filtered.columns else 0
-    
-    # 3️⃣ فواتير معلقة بين الفروع (الدمج الذكي النشط + الأرشيف المكرر)
+
+    # 3️⃣ فواتير معلقة بين الفروع
     conflicts_filtered = filtered_df[filtered_df["case_type"] == "branch_conflict"].copy()
     conflicts_filtered = exclude_old_items(conflicts_filtered)
     
-    old_orders_df = get_old_orders(months=6)
     if not old_orders_df.empty:
-        old_orders_filtered_for_tab = old_orders_df.copy()
-        if selected_branch != "الكل":
-            old_orders_filtered_for_tab = old_orders_filtered_for_tab[old_orders_filtered_for_tab["pharmacy_name"] == selected_branch]
-        
-        old_conflicts = old_orders_filtered_for_tab[
-            (old_orders_filtered_for_tab["case_type"] == "branch_conflict") | 
-            (old_orders_filtered_for_tab["order_number"].isin(conflicts_filtered["order_number"]))
+        old_conflicts = old_orders_df[
+            (old_orders_df["case_type"] == "branch_conflict") | 
+            (old_orders_df["order_number"].isin(conflicts_filtered["order_number"]))
         ].copy()
         
         if not old_conflicts.empty:
@@ -684,28 +692,26 @@ def show():
                 
     total_conflicts = len(conflicts_filtered)
     completed_conflicts = len(conflicts_filtered[conflicts_filtered["status"] == "تم"]) if "status" in conflicts_filtered.columns else 0
-                
-    # 4️⃣ فواتير بعد آخر طلب
-    post_cutoff_filtered = filtered_df[(filtered_df["case_type"] == "post_cutoff_abc") & (~is_cancelled_returned) & active_mask_filtered].copy()
+
+     # 4️⃣ فواتير بعد آخر طلب
+    post_cutoff_filtered = filtered_df[(filtered_df["case_type"] == "post_cutoff_abc") & active_mask_filtered].copy()
     post_cutoff_filtered = exclude_old_items(post_cutoff_filtered)
     total_post_cutoff = len(post_cutoff_filtered)
     completed_post_cutoff = len(post_cutoff_filtered[post_cutoff_filtered["status"] == "تم"]) if "status" in post_cutoff_filtered.columns else 0
-    
+
     # 5️⃣ بانتظار الدفع
-    payment_filtered = filtered_df[is_pending_payment & (filtered_df["case_type"] != "branch_conflict") & active_mask_filtered].copy()
+    payment_filtered = filtered_df[payment_mask & (filtered_df["case_type"] != "branch_conflict") & active_mask_filtered].copy()
     payment_filtered = exclude_old_items(payment_filtered)
     total_payment = len(payment_filtered)
-    
-    # 6️⃣ ملغي ومسترجع
-    cancelled_filtered = filtered_df[is_cancelled_returned & (filtered_df["case_type"] != "branch_conflict")].copy()
+
+     # 6️⃣ ملغي ومسترجع
+    cancelled_filtered = filtered_df[cancelled_mask & (filtered_df["case_type"] != "branch_conflict")].copy()
     cancelled_filtered = exclude_old_items(cancelled_filtered)
     total_cancelled = len(cancelled_filtered)
-    
-    # 7️⃣ المكتملة والأرشيف
-    old_invoices_df = get_old_invoices(months=6)
-    completed_df_admin = get_completed_items()
-    total_completed = len(completed_df_admin) if completed_df_admin is not None else 0
 
+    # 7️⃣ المكتملة
+    total_completed = len(completed_df_admin) if completed_df_admin is not None else 0
+    
     # =========================================================================
     # 📥 زر تصدير الإكسيل الموحد للإدارة المعرف بشكل قاطع وحصري
     # =========================================================================
@@ -792,7 +798,7 @@ def show():
     ])
 
        
-# =========================================================================
+    # =========================================================================
     # 📺 [تم الإصلاح]: ربط تبويبات العرض بالمتغيرات الفردية المنقاة للأعلى
     # =========================================================================
     
@@ -847,23 +853,24 @@ def show():
     with tab_completed:
         st.markdown("### ✅ التسويات والطلبات التي تم الانتهاء منها وإغلاقها")
         if completed_df_admin is not None and not completed_df_admin.empty:
-            render_completed_table(completed_df_admin, is_admin=True)
+            # 💡 التعديل الأهم: استخدمنا render_table_with_click لتظهر مربعات التحديد وأزرار الإخفاء والفتح
+            render_table_with_click(completed_df_admin, "completed_cases", allow_move=False)
         else:
-            st.info("📭 لم يتم اعتماد أو إكمال أي حالات في هذه الجلسة بعد.")
+            st.info("📭 لم يتم اعتماد أو إكمال أي حالات وفقاً للبحث الحالي.")
 
     with tab_old_orders:
         st.markdown("### 📋 أرشيف الطلبات القديمة التاريخية (أكثر من 6 أشهر)")
         if not old_orders_df.empty:
-            # عرض الأرشيف التاريخي الكامل للطلبات القديمة
-            st.dataframe(old_orders_df, use_container_width=True)
+            # 💡 إتاحة التفاعل مع الطلبات القديمة
+            render_table_with_click(old_orders_df, "old_orders", allow_move=True)
         else:
             st.success("🎉 لا توجد طلبات قديمة مؤرشفة.")
 
     with tab_old_invoices:
         st.markdown("### 🧾 أرشيف الفواتير القديمة التاريخية (أكثر من 6 أشهر)")
         if not old_invoices_df.empty:
-            # عرض الأرشيف التاريخي الكامل للفواتير القديمة
-            st.dataframe(old_invoices_df, use_container_width=True)
+            # 💡 إتاحة التفاعل مع الفواتير القديمة
+            render_table_with_click(old_invoices_df, "old_invoices", allow_move=True)
         else:
             st.success("🎉 لا توجد فواتير قديمة مؤرشفة.")
    
