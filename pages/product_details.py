@@ -159,28 +159,27 @@ def show():
                                     product_name = product_map[single_sku]
                                 
                                 base_main_name = product_name if product_name else combined_sku
-                                main_sku_label = single_sku if single_sku else combined_sku
                                 
                                 if len(item) > 4 and isinstance(item[4], (int, float)):
                                     total = float(item[4])
                                 else:
                                     total = quantity * unit_price
                                     
+                                # 💡 التعديل هنا: تحديد ما إذا كان المنتج مجانياً (مكافأة أو عرض)
                                 is_reward_main = (total == 0) or (unit_price == 0)
-                                
-                                final_main_name = f"مكافأة - {base_main_name}" if is_reward_main else base_main_name
-                                final_main_sku = f"{main_sku_label}@" if is_reward_main and main_sku_label else combined_sku
+                                payment_status = "مجاني" if is_reward_main else "مدفوع"
                                 
                                 if combined_sku:
                                     final_rows.append({
                                         'رقم الطلب': order_id,
-                                        'المنتج': final_main_name,
+                                        'المنتج': base_main_name,
                                         'الكمية': quantity,
-                                        'SKU فردي': final_main_sku,
+                                        'SKU فردي': single_sku if single_sku else combined_sku,
                                         'SKU مجمع (للمراجعة)': combined_sku,
                                         'سعر الوحدة': unit_price,
                                         'الإجمالي': total,
                                         'النوع': 'أساسي',
+                                        'حالة المنتج': payment_status, # 💡 إضافة العمود الجديد
                                         'الخصم': order_info.get('الخصم', 0),
                                         'تكلفة الشحن': order_info.get('تكلفة الشحن', 0),
                                         'طريقة الدفع': order_info.get('طريقة الدفع', 'غير محدد'),
@@ -209,26 +208,23 @@ def show():
                                             sub_name = product_map[sub_single_sku]
                                             
                                         sub_base_name = sub_name if sub_name else sub_combined_sku
-                                        sub_sku_label = sub_single_sku if sub_single_sku else sub_combined_sku
                                         
                                         is_reward_sub = (sub_total == 0) or (sub_unit_price == 0)
+                                        sub_payment_status = "مجاني" if is_reward_sub else "مدفوع"
                                         
-                                        final_sub_name = f"مكافأة - {sub_base_name}" if is_reward_sub else sub_base_name
-                                        final_sub_sku = f"{sub_sku_label}@" if is_reward_sub and sub_sku_label else sub_sku_label
-                                        
-                                        # 💡 التعديل هنا: نأخذ sub_quantity مباشرة لأنها مضروبة وجاهزة من المصدر
                                         actual_sub_qty = sub_quantity
                                         
                                         if sub_combined_sku and actual_sub_qty > 0:
                                             final_rows.append({
                                                 'رقم الطلب': order_id,
-                                                'المنتج': final_sub_name,
+                                                'المنتج': sub_base_name,
                                                 'الكمية': actual_sub_qty,
-                                                'SKU فردي': final_sub_sku,
+                                                'SKU فردي': sub_single_sku if sub_single_sku else sub_combined_sku,
                                                 'SKU مجمع (للمراجعة)': sub_combined_sku,
                                                 'سعر الوحدة': sub_unit_price,
-                                                'الإجمالي': sub_total, # نأخذ الإجمالي مباشرة لأن الكمية محسوبة وجاهزة
+                                                'الإجمالي': sub_total,
                                                 'النوع': 'فرعي',
+                                                'حالة المنتج': sub_payment_status, # 💡 إضافة العمود الجديد للفرعي
                                                 'الخصم': order_info.get('الخصم', 0),
                                                 'تكلفة الشحن': order_info.get('تكلفة الشحن', 0),
                                                 'طريقة الدفع': order_info.get('طريقة الدفع', 'غير محدد'),
@@ -250,8 +246,9 @@ def show():
                     
                     result_df = result_df[result_df['المنتج'].notna() & (result_df['المنتج'] != "") & (result_df['الكمية'] > 0)]
                     
+                    # 💡 إضافة "حالة المنتج" إلى أعمدة التجميع لضمان فصل المجاني عن المدفوع لنفس المنتج!
                     group_cols = [
-                        'رقم الطلب', 'SKU فردي', 'الخصم', 'تكلفة الشحن', 'طريقة الدفع', 
+                        'رقم الطلب', 'SKU فردي', 'حالة المنتج', 'الخصم', 'تكلفة الشحن', 'طريقة الدفع', 
                         'الضريبة', 'تاريخ الطلب', 'قيمة خصم الكوبون', 'قيمة خصم العروض الخاصة'
                     ]
                     
@@ -268,7 +265,7 @@ def show():
                         result_df['تاريخ الطلب'] = pd.to_datetime(result_df['تاريخ الطلب'], errors='coerce')
                         
                     columns_order = [
-                        'رقم الطلب', 'المنتج', 'الكمية', 'SKU فردي', 'SKU مجمع (للمراجعة)', 
+                        'رقم الطلب', 'المنتج', 'حالة المنتج', 'الكمية', 'SKU فردي', 'SKU مجمع (للمراجعة)', 
                         'سعر الوحدة', 'الإجمالي', 'النوع', 'الخصم', 'تكلفة الشحن', 'طريقة الدفع', 
                         'الضريبة', 'تاريخ الطلب', 'قيمة خصم الكوبون', 'قيمة خصم العروض الخاصة'
                     ]
