@@ -645,7 +645,7 @@ def unhide_item_from_pharmacy(item_key: str):
     conn.commit()
     conn.close()
 
-def save_case_note(order_number: str, sku: str, pharmacy_name: str, case_type: str, note: str):
+def save_case_note(order_number: str, sku: str, pharmacy_name: str, case_type: str, note: str, performed_by: str = "غير معروف", role: str = "user"):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""
@@ -655,9 +655,10 @@ def save_case_note(order_number: str, sku: str, pharmacy_name: str, case_type: s
     conn.commit()
     conn.close()
     
-    # 💡 إضافة الشرط هنا: لا تسجل الحركة إلا إذا كانت الملحوظة تحتوي على نص
+    # 💡 لا يتم التسجيل إلا إذا كان هناك نص فعلي في الملحوظة
     if note and str(note).strip():
-        log_action("الصيدلية/الإدارة", "user", pharmacy_name, order_number, sku, "إضافة ملحوظة", f"الملاحظة: {note}")
+        # تسجيل الاسم والصلاحية الحقيقية بدلاً من النصوص الثابتة
+        log_action(performed_by, role, pharmacy_name, order_number, sku, "إضافة ملحوظة", f"الملاحظة: {note}")
 
 def mark_case_done(order_number: str, sku: str, pharmacy_name: str, case_type: str, performed_by: str):
     conn = sqlite3.connect(DB_PATH)
