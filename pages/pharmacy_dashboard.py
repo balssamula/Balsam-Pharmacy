@@ -20,7 +20,6 @@ from utils.helpers import (
 from utils.ui_components import render_metrics, render_completed_table
 
 def to_safe_int(val):
-    """تحويل آمن ومطلق لأي قيمة نصية أو فارغة إلى عدد صحيح لمنع الانهيار الحسابي"""
     if pd.isna(val) or str(val).strip() in ["", "nan", "None"]:
         return 0
     try:
@@ -29,39 +28,22 @@ def to_safe_int(val):
         return 0
         
 def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
-    """تصدير البيانات إلى ملف Excel مع تنسيق واختيار الأعمدة بشكل احترافي"""
     output = BytesIO()
     
     tab_colors = {
-        "الاضافات والطلبات المفقودة": "4472C4",
-        "الارجاعات والزيادات": "ED7D31",
-        "فواتير معلقة بين الفروع": "9B59B6",
-        "فواتير بعد اخر طلب": "9B59B6",
-        "بانتظار الدفع": "3498DB",
-        "الملغيات والمسترجعات": "E74C3C",
-        "تم الانتهاء": "2ECC71"
+        "الاضافات والطلبات المفقودة": "4472C4", "الارجاعات والزيادات": "ED7D31",
+        "فواتير معلقة بين الفروع": "9B59B6", "فواتير بعد اخر طلب": "9B59B6",
+        "بانتظار الدفع": "3498DB", "الملغيات والمسترجعات": "E74C3C", "تم الانتهاء": "2ECC71"
     }
     
     columns_mapping = {
-        'order_date': 'تاريخ الطلب',
-        'order_number': 'رقم الطلب',
-        'invoice_date': 'تاريخ الفاتورة',
-        'invoice_number': 'رقم الفاتورة',
-        'customer_phone': 'رقم جوال العميل',
-        'sku': 'رقم المنتج SKU',
-        'product_name': 'اسم المنتج',
-        'salla_qty': 'كمية سلة',
-        'abc_qty': 'كمية ABC',
-        'difference': 'الفرق',
-        'order_status': 'حالة الطلب',
-        'profile_type': 'نوع البروفايل',
-        'abc_pharmacist_name': 'الصيدلي المسؤول',
-        'pharmacist_note': 'ملاحظات الصيدلية',
-        'status': 'حالة التسوية',
-        'case_type': 'نوع الحالة',
-        'case_reason': 'سبب الحالة',
-        'city': 'المدينة',
-        'item_key': 'المفتاح الشامل للصنف'
+        'order_date': 'تاريخ الطلب', 'order_number': 'رقم الطلب', 'invoice_date': 'تاريخ الفاتورة',
+        'invoice_number': 'رقم الفاتورة', 'customer_phone': 'رقم جوال العميل', 'sku': 'رقم المنتج SKU',
+        'product_name': 'اسم المنتج', 'salla_qty': 'كمية سلة', 'abc_qty': 'كمية ABC',
+        'difference': 'الفرق', 'order_status': 'حالة الطلب', 'profile_type': 'نوع البروفايل',
+        'abc_pharmacist_name': 'الصيدلي المسؤول', 'pharmacist_note': 'ملاحظات الصيدلية',
+        'status': 'حالة التسوية', 'case_type': 'نوع الحالة', 'case_reason': 'سبب الحالة',
+        'city': 'المدينة', 'item_key': 'المفتاح الشامل للصنف'
     }
 
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -85,33 +67,22 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
     return output.getvalue()
 
 def export_to_excel_brief(dataframes_dict: dict) -> bytes:
-    """تصدير ملف إكسيل مختصر"""
     output = BytesIO()
     allowed_tabs = ["الاضافات والطلبات المفقودة", "الارجاعات والزيادات", "فواتير معلقة بين الفروع", "بانتظار الدفع", "تم الانتهاء"]
     
     tab_colors = {
-        "الاضافات والطلبات المفقودة": "4472C4",
-        "الارجاعات والزيادات": "ED7D31",
-        "فواتير معلقة بين الفروع": "9B59B6",
-        "بانتظار الدفع": "3498DB",
-        "تم الانتهاء": "2ECC71"
+        "الاضافات والطلبات المفقودة": "4472C4", "الارجاعات والزيادات": "ED7D31",
+        "فواتير معلقة بين الفروع": "9B59B6", "بانتظار الدفع": "3498DB", "تم الانتهاء": "2ECC71"
     }
     
+    # 💡 إضافة الأعمدة الجديدة المطلوبة للملف المختصر
     target_columns = {
-        'order_date': 'تاريخ الطلب',
-        'invoice_date': 'تاريخ الفاتورة',
-        'order_number': 'رقم الطلب',
-        'invoice_number': 'رقم الفاتورة',
-        'customer_phone': 'رقم جوال العميل',
-        'sku': 'رقم المنتج',
-        'product_name': 'اسم المنتج',
-        'salla_qty': 'كمية سلة',
-        'abc_qty': 'كمية abc',
-        'diff_qty': 'الفرق',
-        'order_status': 'حالة الطلب',
-        'abc_pharmacist_name': 'اسم الصيدلي',
-        'profile_type': 'نوع البروفايل',
-        'status': 'حالة التسوية'
+        'order_date': 'تاريخ الطلب', 'invoice_date': 'تاريخ الفاتورة', 'order_number': 'رقم الطلب',
+        'invoice_number': 'رقم الفاتورة', 'customer_phone': 'رقم جوال العميل', 'sku': 'رقم المنتج',
+        'product_name': 'اسم المنتج', 'salla_qty': 'كمية سلة', 'abc_qty': 'كمية abc',
+        'diff_qty': 'الفرق', 'order_status': 'حالة الطلب', 'abc_pharmacist_name': 'اسم الصيدلي',
+        'profile_type': 'نوع البروفايل', 'status': 'حالة التسوية',
+        'performed_by': 'تم التنفيذ بواسطة', 'performed_at': 'وقت التنفيذ'
     }
     
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -168,13 +139,11 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
     exact_duplicates = []  
     shared_order_duplicates = []  
 
-    # 🔍 الفحص الشامل والمطوّر ليشمل الأصناف (النشطة والمكتملة "تم") في الفروع الأخرى
     try: 
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # 1. جلب الفروع الأخرى التي لديها نفس رقم الطلب ونفس الـ SKU (سواء معلق أو مكتمل "تم")
         cursor.execute("""
             SELECT pharmacy_name, invoice_number, status 
             FROM reconciliation_items 
@@ -190,7 +159,6 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
                 "status": r["status"]
             })
         
-        # 2. جلب الفروع الأخرى التي تمتلك نفس رقم الطلب الإجمالي لأصناف أخرى (سواء نشط أو مكتمل)
         cursor.execute("""
             SELECT DISTINCT pharmacy_name, sku, product_name, status 
             FROM reconciliation_items 
@@ -236,7 +204,6 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
                 profile = row.get('profile_type', 'N/A')
                 if pd.notna(profile) and str(profile).strip() not in ["", "nan", "None"]: st.markdown(f"- **📄 نوع البروفايل:** `{profile}`")
             
-        # 🚨 صندوق أحمر: تكرار نفس الصنف ونفس الطلب في فرع آخر (يظهر الحالات المضافة المعلقة والمكتملة)
         if exact_duplicates:
             dup_exact_html = '<div style="background:#f8d7da; border-right:4px solid #dc3545; padding:0.75rem; margin-top:0.75rem; border-radius:10px; margin-bottom:0.5rem;"><span style="color:#721c24; font-weight:bold;">🚨 تنبيه تكرار الصنف الشامل: هذا الصنف مسجل في الفروع التالية لنفس الطلب:</span>'
             for ed in exact_duplicates:
@@ -244,7 +211,6 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
                 dup_exact_html += f'<div style="font-size:0.85rem; color:#491217; margin-top:4px;">🏥 <strong>{ed.get("pharmacy")}</strong> | فاتورة: {ed.get("invoice_number")} | الإجراء بالفرع الآخر: <span style="font-weight:bold;">{status_lbl}</span></div>'
             st.markdown(dup_exact_html + '</div>', unsafe_allow_html=True)
             
-        # ⚠️ صندوق أصفر: تكرار رقم الطلب بالكامل في فروع أخرى لأصناف مختلفة (يظهر المعلق والمكتمل)
         if shared_order_duplicates:
             dup_warning_html = '<div style="background:#fff3cd; border-right:4px solid #ff9800; padding:0.75rem; margin-top:0.5rem; border-radius:10px; margin-bottom:0.5rem;"><span style="color:#856404; font-weight:bold;">⚠️ تنبيه الطلب المشترك: يوجد فروع أخرى أصدرت فواتير لنفس رقم هذا الطلب لأصناف أخرى:</span>'
             for dup in shared_order_duplicates: 
@@ -252,37 +218,52 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
                 dup_warning_html += f'<div style="font-size:0.85rem; color:#66521a; margin-top:4px;">🏥 <strong>{dup.get("pharmacy")}</strong> | الصنف الآخر: {dup.get("sku")} ({str(dup.get("product_name"))[:35]}...) | الحالة: [{status_lbl}]</div>'
             st.markdown(dup_warning_html + '</div>', unsafe_allow_html=True)
             
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-        note_key = f"note_{tab_id}_{case_type}_{idx}_{row.get('order_number', '')}_{row.get('sku', '')}"
-        note_value = st.text_area("📝 ملحوظة الصيدلي", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
-        
-        btn_col1, btn_col2, btn_col3 = st.columns([1, 1.5, 1.5])
-        with btn_col1:
-            if st.button("💾 حفظ الملحوظة", key=f"save_{note_key}", use_container_width=True):
-                save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value)
-                st.toast("📋 تم حفظ الملاحظة بنجاح!", icon="💾")
+        if row.get("status") == "تم":
+            action_word = "الاضافة" if case_type in ['addition', 'orphan_salla'] else ("الارجاع" if case_type in ['return', 'orphan_abc'] else "التسوية")
+            performed_user = row.get('performed_by', pharmacist_name)
+            if not performed_user: performed_user = pharmacist_name
+            
+            if row.get("pharmacist_note"):
+                st.markdown(f"<div style='margin-top:10px; color:#495057;'><strong>📝 ملحوظة الصيدلي:</strong> {row.get('pharmacist_note')}</div>", unsafe_allow_html=True)
                 
-        if allow_actions and row.get("status") != "تم":
-            if case_type == "branch_conflict":
-                with btn_col2:
-                    if st.button("📥 تأكيد الإضافة (تم البيع من فرعي)", key=f"conf_add_{note_key}", use_container_width=True):
-                        save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, f"[فرع صحيح] | {note_value}")
-                        mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
-                        st.toast("✅ تم الاعتماد!"); st.rerun()
-                with btn_col3:
-                    if st.button("🔄 تأكيد الإرجاع (ليس من فرعي)", key=f"conf_ret_{note_key}", use_container_width=True):
-                        save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, f"[فرع مخطئ] | {note_value}")
-                        mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
-                        st.toast("🔄 تم العكس!"); st.rerun()
-            elif case_type in {"addition", "orphan_salla", "return", "orphan_abc"}:
-                button_label = "✅ تأكيد الإضافة" if case_type in {"addition", "orphan_salla"} else "🔄 تأكيد الإرجاع"
-                with btn_col2:
-                    if st.button(button_label, key=f"done_{note_key}", use_container_width=True):
-                        save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value)
-                        mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
-                        st.toast("🚀 تم التأكيد!"); st.rerun()
-        st.markdown("---")
+            st.markdown(f"""
+            <div style="background-color: #d1e7dd; color: #0f5132; padding: 12px; border-radius: 8px; text-align: center; border: 1px solid #badbcc; font-weight: bold; margin-top: 15px;">
+                تمت {action_word} بنجاح عن طريق {performed_user} ✅
+            </div>
+            """, unsafe_allow_html=True)
+            
+        else:
+            note_key = f"note_{tab_id}_{case_type}_{idx}_{row.get('order_number', '')}_{row.get('sku', '')}"
+            note_value = st.text_area("📝 ملحوظة الصيدلي", value=row.get("pharmacist_note", "") or "", key=note_key, height=60)
+            
+            btn_col1, btn_col2, btn_col3 = st.columns([1, 1.5, 1.5])
+            with btn_col1:
+                if st.button("💾 حفظ الملحوظة", key=f"save_{note_key}", use_container_width=True):
+                    # 💡 تمرير اسم وصلاحية الصيدلي بشكل صريح
+                    save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value, pharmacist_name, st.session_state.user_role)
+                    st.toast("📋 تم حفظ الملاحظة بنجاح!", icon="💾")
+                    st.rerun()
+                    
+            if allow_actions:
+                if case_type == "branch_conflict":
+                    with btn_col2:
+                        if st.button("📥 تأكيد الإضافة (تم البيع من فرعي)", key=f"conf_add_{note_key}", use_container_width=True):
+                            save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, f"[فرع صحيح] | {note_value}", pharmacist_name, st.session_state.user_role)
+                            mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
+                            st.toast("✅ تم الاعتماد!"); st.rerun()
+                    with btn_col3:
+                        if st.button("🔄 تأكيد الإرجاع (ليس من فرعي)", key=f"conf_ret_{note_key}", use_container_width=True):
+                            save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, f"[فرع مخطئ] | {note_value}", pharmacist_name, st.session_state.user_role)
+                            mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
+                            st.toast("🔄 تم العكس!"); st.rerun()
+                elif case_type in {"addition", "orphan_salla", "return", "orphan_abc"}:
+                    button_label = "✅ تأكيد الإضافة" if case_type in {"addition", "orphan_salla"} else "🔄 تأكيد الإرجاع"
+                    with btn_col2:
+                        if st.button(button_label, key=f"done_{note_key}", use_container_width=True):
+                            save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value, pharmacist_name, st.session_state.user_role)
+                            mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
+                            st.toast("🚀 تم التأكيد!"); st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
 
 def render_case_cards_pharmacy(df, allow_actions, pharmacist_name, pharmacy_name, tab_id=""):
     if df is not None and not df.empty:
@@ -305,7 +286,6 @@ def show():
     </div>
     """, unsafe_allow_html=True)
 
-    # جلب وعرض سجل الدخول
     conn = sqlite3.connect(DB_PATH)
     history_df = pd.read_sql_query(
         "SELECT login_time as 'وقت الدخول', user_agent as 'اسم الصيدلي', ip_address as 'IP الجهاز' FROM login_history WHERE username = ? ORDER BY login_time DESC LIMIT 5", 
@@ -332,7 +312,23 @@ def show():
         st.info("📭 لا توجد حالات نشطة لهذا الفرع حاليًا.")
         return
 
-    is_locked = df['is_item_locked'].iloc[0] == 1 if 'is_item_locked' in df.columns else False
+    st.markdown("### 🔍 بحث وتصفية")
+    search_col1, search_col2, search_col3 = st.columns(3)
+    search_order = search_col1.text_input("🔢 بحث برقم الطلب")
+    search_invoice = search_col2.text_input("🧾 بحث برقم الفاتورة")
+    search_sku = search_col3.text_input("🏷️ بحث بـ SKU")
+
+    if search_order:
+        df = df[df["order_number"].astype(str).str.contains(search_order, na=False, case=False)]
+    if search_invoice:
+        df = df[df["invoice_number"].astype(str).str.contains(search_invoice, na=False, case=False)]
+    if search_sku:
+        df = df[df["sku"].astype(str).str.contains(search_sku, na=False, case=False)]
+
+    is_locked = False
+    if not df.empty and 'is_item_locked' in df.columns:
+        is_locked = df['is_item_locked'].iloc[0] == 1
+        
     allow_actions = not is_locked
 
     active_mask = ~df["order_status"].apply(is_cancelled_or_returned_status)
@@ -362,6 +358,13 @@ def show():
     total_cancelled = len(cancelled_df)
     
     completed_df = get_completed_items(pharmacy_name)
+    if search_order:
+        completed_df = completed_df[completed_df["order_number"].astype(str).str.contains(search_order, na=False, case=False)]
+    if search_invoice:
+        completed_df = completed_df[completed_df["invoice_number"].astype(str).str.contains(search_invoice, na=False, case=False)]
+    if search_sku:
+        completed_df = completed_df[completed_df["sku"].astype(str).str.contains(search_sku, na=False, case=False)]
+        
     total_completed = len(completed_df)
 
     if st.session_state.get('show_export_pharmacy', False):
