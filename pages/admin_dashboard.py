@@ -292,17 +292,18 @@ def render_table_with_click(df, tab_name, allow_move: bool = True):
                                 st.error("❌ فشل نقل العنصر")
                     
                     note = col_c.text_input("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=f"note_{tab_name}_{selected_idx}")
-                    
+
                     if col_d.button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
-                        save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note)
+                        save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note, st.session_state.username, st.session_state.user_role)
                         st.rerun()
+                    
                 else:
                     # إذا كان النقل غير مسموح، نعرض فقط الملحوظة
                     st.markdown("---")
                     col_a, col_b = st.columns([3, 1])
                     note = col_a.text_input("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=f"note_{tab_name}_{selected_idx}")
-                    if col_b.button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
-                        save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note)
+                    if col_d.button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
+                        save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note, st.session_state.username, st.session_state.user_role)
                         st.rerun()
 
 def render_old_items_table(df, title, is_orders=True):
