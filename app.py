@@ -136,6 +136,10 @@ with st.sidebar:
                 st.error("❌ بيانات الدخول غير صحيحة.")
     else:
         st.success(f"مرحباً {st.session_state.username}")
+
+        # 💡 التقاط "آخر نشاط" بصمت مع كل ضغطة زر أو تفاعل من المستخدم
+        from utils.database import update_last_seen
+        update_last_seen(st.session_state.username)
         
         # 💡 طلب اسم الصيدلي والفترة للصيادلة
         if st.session_state.user_role == "pharmacy":
