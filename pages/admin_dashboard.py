@@ -622,8 +622,9 @@ def show():
         filtered_df = filtered_df[filtered_df["sku"].astype(str).str.contains(search_sku, na=False, case=False)]
 
     active_mask_filtered = ~filtered_df["order_status"].apply(is_cancelled_or_returned_status)
-    payment_mask = filtered_df["order_status"].apply(is_pending_payment_status)
-    cancelled_mask = filtered_df["order_status"].apply(is_cancelled_or_returned_status)
+    payment_mask = (filtered_df["payment_status"] == "pending")
+
+    active_mask_filtered = (filtered_df["status"] == "active")
     
     # 💡 تطبيق الفلاتر النصية والفرع على تبويب (المكتملات)
     completed_df_admin = get_completed_items()
