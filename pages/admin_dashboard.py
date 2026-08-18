@@ -1004,7 +1004,7 @@ def show():
                     try:
                         last_dt = datetime.strptime(last_login_str, "%Y-%m-%d %H:%M:%S")
                         diff_minutes = (saudi_time - last_dt).total_seconds() / 60
-                        if diff_minutes <= 10: 
+                        if diff_minutes <= 4: 
                             is_online = True
                     except:
                         pass
