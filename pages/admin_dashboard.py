@@ -957,14 +957,73 @@ def show():
     st.markdown('<div class="section-title">👥 آخر دخول للصيدليات</div>', unsafe_allow_html=True)
     last_logins = get_all_last_logins()
     if not last_logins.empty:
+        
+        # 1. إضافة مؤثرات الوميض (CSS) وتصميم نقطة الاتصال
+        st.markdown("""
+        <style>
+        @keyframes blink-green {
+            0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7); }
+            70% { box-shadow: 0 0 0 8px rgba(40, 167, 69, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+        }
+        @keyframes blink-red {
+            0% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7); }
+            70% { box-shadow: 0 0 0 8px rgba(220, 53, 69, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0); }
+        }
+        .status-dot {
+            height: 12px;
+            width: 12px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .online-dot {
+            background-color: #28a745;
+            animation: blink-green 2s infinite;
+        }
+        .offline-dot {
+            background-color: #dc3545;
+            animation: blink-red 2s infinite;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        from datetime import datetime, timedelta
+        # حساب التوقيت الحالي بتوقيت السعودية لمقارنته
+        utc_now = datetime.utcnow()
+        saudi_time = utc_now + timedelta(hours=3)
+
         cols = st.columns(4)
-        for idx, (_, row) in enumerate(last_logins.head(8).iterrows()):
+        for idx, (_, row) in enumerate(last_logins.head(12).iterrows()):
             with cols[idx % 4]:
+                last_login_str = str(row['last_login']).strip()
+                is_online = False
+                
+                # 2. منطق التحقق من الاتصال (متصل إذا كان نشطاً خلال آخر 15 دقيقة)
+                if last_login_str and last_login_str not in ['لم يدخل بعد', 'None', '']:
+                    try:
+                        last_dt = datetime.strptime(last_login_str, "%Y-%m-%d %H:%M:%S")
+                        diff_minutes = (saudi_time - last_dt).total_seconds() / 60
+                        if diff_minutes <= 15: # يمكن تغيير الـ 15 دقيقة لأي مدة تريدها
+                            is_online = True
+                    except:
+                        pass
+                
+                # تحديد الفئة (Class) والنص بناءً على الحالة
+                dot_class = "online-dot" if is_online else "offline-dot"
+                status_text = "متصل الآن" if is_online else "غير متصل"
+                status_color = "#155724" if is_online else "#721c24"
+                
+                # 3. عرض البطاقة بالشكل الجديد
                 st.markdown(f"""
-                <div class="note-card">
+                <div class="note-card" style="position: relative; padding-top: 1.5rem;">
+                    <div style="position: absolute; top: 10px; left: 12px; display: flex; align-items: center; gap: 6px; direction: ltr;">
+                        <span class="status-dot {dot_class}"></span>
+                        <span style="font-size: 0.7rem; font-weight: bold; color: {status_color};">{status_text}</span>
+                    </div>
                     <strong>🏥 {row['pharmacy_name'][-10:]}</strong><br>
                     <span>👤 {row['pharmacist_name'] or 'غير مسجل'}</span><br>
-                    <span>📅 {row['last_login'][:16] if row['last_login'] else 'لم يدخل'}</span><br>
+                    <span>📅 {last_login_str[:16] if last_login_str != 'لم يدخل بعد' else 'لم يدخل'}</span><br>
                     <span>🌐 IP: {row['last_ip'] or 'غير معروف'}</span>
                 </div>
                 """, unsafe_allow_html=True)
