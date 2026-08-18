@@ -9,8 +9,7 @@ from openpyxl.utils import get_column_letter
 from utils.database import (
     fetch_active_items, get_completed_items, get_tab_completed_counts, 
     get_old_orders, get_old_invoices, get_old_invoices_stats,
-    save_case_note, mark_case_done,
-    DB_PATH
+    save_case_note, mark_case_done, get_setting, DB_PATH
 )
 from utils.helpers import (
     is_cancelled_or_returned_status, is_pending_payment_status, 
@@ -399,42 +398,48 @@ def show():
     </div>
     """, unsafe_allow_html=True)
     
-    # 1. نجعل أسماء التبويبات ثابتة تماماً لكي لا يقوم Streamlit بعمل Reset
-    tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed = st.tabs([
-        "📥 الإضافات والطلبات",
-        "📤 الإرجاعات والزيادات",
-        "📊 فواتير معلقة بين الفروع", 
-        "⏰ فواتير بعد آخر طلب",
-        "💰 بانتظار الدفع",
-        "⚠️ ملغي/مسترجع",
-        "✅ تم الانتهاء"
-    ])
+    # 💡 بناء قائمة التبويبات المتاحة بناءً على إعدادات الإدارة
+    available_tabs = []
     
-    # 2. نضع الأرقام المتغيرة كعنوان داخل التبويب نفسه لكي تتحدث بدون مشاكل
-    with tab_additions: 
-        st.markdown(f"#### 📥 الإضافات والطلبات المفقودة ({completed_additions_merged}/{total_additions_merged})")
-        render_case_cards_pharmacy(branch_add_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="add")
+    if get_setting("show_tab_additions", "1") == "1":
+        available_tabs.append(("additions", f"📥 الإضافات والطلبات ({completed_additions_merged}/{total_additions_merged})"))
         
-    with tab_returns: 
-        st.markdown(f"#### 📤 الإرجاعات والزيادات المستندة ({completed_returns_merged}/{total_returns_merged})")
-        render_case_cards_pharmacy(branch_ret_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="ret")
+    if get_setting("show_tab_returns", "1") == "1":
+        available_tabs.append(("returns", f"📤 الإرجاعات والزيادات ({completed_returns_merged}/{total_returns_merged})"))
         
-    with tab_conflicts: 
-        st.markdown(f"#### 📊 فواتير متداخلة ومعلقة بين الفروع ({completed_conflicts}/{total_conflicts})")
-        render_case_cards_pharmacy(conflicts_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="conf")
+    if get_setting("show_tab_conflicts", "1") == "1":
+        available_tabs.append(("conflicts", f"📊 فواتير معلقة بين الفروع ({completed_conflicts}/{total_conflicts})"))
         
-    with tab_post_cutoff: 
-        st.markdown(f"#### ⏰ فواتير ABC بعد توقيت آخر طلب ({completed_post_cutoff}/{total_post_cutoff})")
-        render_case_cards_pharmacy(post_cutoff_df, False, pharmacist_name, pharmacy_name, tab_id="cutoff")
+    if get_setting("show_tab_post_cutoff", "1") == "1":
+        available_tabs.append(("post_cutoff", f"⏰ فواتير بعد آخر طلب ({completed_post_cutoff}/{total_post_cutoff})"))
         
-    with tab_payment: 
-        st.markdown(f"#### 💰 طلبات سلة معلقة بانتظار إتمام الدفع ({total_payment})")
-        render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name, tab_id="pay")
+    if get_setting("show_tab_payment", "1") == "1":
+        available_tabs.append(("payment", f"💰 بانتظار الدفع ({total_payment})"))
         
-    with tab_cancelled: 
-        st.markdown(f"#### ⚠️ فواتير لطلبات ملغية أو مسترجعة ({total_cancelled})")
-        render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name, tab_id="cancel")
+    if get_setting("show_tab_cancelled", "1") == "1":
+        available_tabs.append(("cancelled", f"⚠️ ملغي/مسترجع ({total_cancelled})"))
         
-    with tab_completed: 
-        st.markdown(f"#### ✅ التسويات والطلبات المكتملة ({total_completed})")
-        render_completed_table(completed_df, is_admin=False)
+    if get_setting("show_tab_completed", "1") == "1":
+        available_tabs.append(("completed", f"✅ تم الانتهاء ({total_completed})"))
+
+    # إنشاء وعرض التبويبات المتاحة فقط
+    if available_tabs:
+        tabs = st.tabs([t[1] for t in available_tabs])
+        for idx, (tab_id, tab_title) in enumerate(available_tabs):
+            with tabs[idx]:
+                if tab_id == "additions":
+                    render_case_cards_pharmacy(branch_add_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="add")
+                elif tab_id == "returns":
+                    render_case_cards_pharmacy(branch_ret_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="ret")
+                elif tab_id == "conflicts":
+                    render_case_cards_pharmacy(conflicts_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="conf")
+                elif tab_id == "post_cutoff":
+                    render_case_cards_pharmacy(post_cutoff_df, False, pharmacist_name, pharmacy_name, tab_id="cutoff")
+                elif tab_id == "payment":
+                    render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name, tab_id="pay")
+                elif tab_id == "cancelled":
+                    render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name, tab_id="cancel")
+                elif tab_id == "completed":
+                    render_completed_table(completed_df, is_admin=False)
+    else:
+        st.warning("⚠️ لا توجد تبويبات متاحة حالياً. تم إخفاء جميع التبويبات من قبل الإدارة.")
