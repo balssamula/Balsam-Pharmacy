@@ -114,7 +114,7 @@ with st.sidebar:
     if not st.session_state.logged_in:
         username = st.text_input("👤 اسم المستخدم")
         password = st.text_input("🔒 كلمة المرور", type="password")
-    if st.button("🚪 دخول", use_container_width=True):
+        if st.button("🚪 دخول", use_container_width=True):
             user = fetch_user(username, password)
             if user:
                 st.session_state.logged_in = True
