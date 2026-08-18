@@ -14,7 +14,7 @@ from utils.database import (
     lock_session, unlock_session, activate_session, delete_session,
     fetch_active_items, get_all_last_logins, get_completed_items,
     reopen_case_by_item_key, hide_item_from_pharmacy, unhide_item_from_pharmacy,
-    lock_item, unlock_item, save_case_note,
+    lock_item, unlock_item, save_case_note, get_setting, set_setting,
     get_manager_last_login, get_login_history,
     get_old_orders, get_old_orders_stats,
     get_old_invoices, get_old_invoices_stats,
@@ -784,7 +784,7 @@ def show():
     # =========================================================================
     # 📊 بناء التبويبات (Tabs) بشكل متزن ومستقر عددياً ومطابق 100% لمتغيراتك
     # =========================================================================
-    tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices, tab_old_stats = st.tabs([
+    tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices, tab_old_stats, tab_settings = st.tabs([
         f"📥 الإضافات والطلبات المفقودة ({completed_additions_count}/{total_additions_count})" if total_additions_count > 0 else "📥 الإضافات والطلبات المفقودة (0)",
         f"📤 الإرجاعات والفواتير المعلقة ({completed_returns_count}/{total_returns_count})" if total_returns_count > 0 else "📤 الإرجاعات والفواتير المعلقة (0)",
         f"📊 فواتير معلقة بين الفروع ({completed_conflicts}/{total_conflicts})" if total_conflicts > 0 else f"📊 فواتير معلقة بين الفروع ({total_conflicts})", 
@@ -794,7 +794,8 @@ def show():
         f"✅ تم الانتهاء ({total_completed})",
         f"📅 طلبات قديمة ({total_old_orders_stats})",   # 💡 تم التأمين والحساب بنجاح
         f"🧾 فواتير قديمة ({total_old_invoices_stats})", # 💡 تم التأمين والحساب بنجاح
-        "📊 إحصائيات قديمة"
+        "📊 إحصائيات قديمة",
+        "⚙️ إعدادات الصيدليات",
     ])
 
        
@@ -920,7 +921,39 @@ def show():
             st.info("💡 هذه العناصر تم استبعادها تلقائياً من التبويبات الأخرى (الإضافات، الإرجاعات، إلخ)")
         else:
             st.success("🎉 لا توجد عناصر قديمة (طلبات أو فواتير)")
-    
+
+    with tab_settings:
+        st.markdown("### ⚙️ التحكم في تبويبات صفحة الصيدليات")
+        st.info("قم بتفعيل أو تعطيل الأزرار أدناه للتحكم في التبويبات التي تظهر للصيادلة في فروعهم.")
+        
+        # قائمة التبويبات والمفاتيح الخاصة بها
+        tabs_settings_map = {
+            "show_tab_additions": "📥 الإضافات والطلبات المفقودة",
+            "show_tab_returns": "📤 الإرجاعات والزيادات",
+            "show_tab_conflicts": "📊 فواتير معلقة بين الفروع",
+            "show_tab_post_cutoff": "⏰ فواتير بعد آخر طلب",
+            "show_tab_payment": "💰 بانتظار الدفع",
+            "show_tab_cancelled": "⚠️ ملغي/مسترجع",
+            "show_tab_completed": "✅ تم الانتهاء"
+        }
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        col1, col2 = st.columns(2)
+        
+        for idx, (key, label) in enumerate(tabs_settings_map.items()):
+            # وضع الأزرار في عمودين بشكل جمالي
+            target_col = col1 if idx % 2 == 0 else col2
+            
+            # جلب الحالة الحالية من قاعدة البيانات
+            current_val = get_setting(key, "1") == "1"
+            
+            # إنشاء زر التبديل (Toggle)
+            with target_col:
+                new_val = st.toggle(label, value=current_val, key=f"toggle_{key}")
+                if new_val != current_val:
+                    set_setting(key, "1" if new_val else "0")
+                    st.toast(f"تم تحديث ظهور تبويب: {label} ✅", icon="⚙️")
+                    
     st.markdown('<div class="section-title">👥 آخر دخول للصيدليات</div>', unsafe_allow_html=True)
     last_logins = get_all_last_logins()
     if not last_logins.empty:
