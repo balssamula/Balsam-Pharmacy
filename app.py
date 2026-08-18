@@ -111,9 +111,12 @@ with st.sidebar:
     st.caption("Balsam Alula Pharmacy")
     st.markdown("---")
 
+    # 1. إذا لم يكن مسجلاً للدخول، نعرض حقول الإدخال وزر الدخول فقط
     if not st.session_state.logged_in:
         username = st.text_input("👤 اسم المستخدم")
         password = st.text_input("🔒 كلمة المرور", type="password")
+        
+        # 💡 تم إصلاح المسافة البادئة ليكون الزر داخل شرط عدم تسجيل الدخول
         if st.button("🚪 دخول", use_container_width=True):
             user = fetch_user(username, password)
             if user:
@@ -127,24 +130,26 @@ with st.sidebar:
                     st.session_state.login_recorded = False
                 else:
                     st.session_state.pharmacist_name = user[2] or ""
-                    # 💡 تسجيل دخول الإدارة في سجل العمليات
+                    # تسجيل دخول الإدارة في سجل العمليات
                     from utils.database import log_action
                     log_action(user[0], user[1], "النظام", "عام", "عام", "تسجيل دخول", f"تم تسجيل دخول {user[1]} للنظام")
                     
                 st.rerun()
             else:
                 st.error("❌ بيانات الدخول غير صحيحة.")
+                
+    # 2. في حالة كان المستخدم مسجلاً للدخول بالفعل (هذا الـ else يتبع الـ if الأولى)
     else:
         st.success(f"مرحباً {st.session_state.username}")
 
-        # 💡 التقاط "آخر نشاط" بصمت مع كل ضغطة زر أو تفاعل من المستخدم
+        # التقاط "آخر نشاط" بصمت مع كل ضغطة زر أو تفاعل من المستخدم
         from utils.database import update_last_seen
         update_last_seen(st.session_state.username)
         
-        # 💡 طلب اسم الصيدلي والفترة للصيادلة
+        # طلب اسم الصيدلي والفترة للصيادلة
         if st.session_state.user_role == "pharmacy":
             
-            # 🌐 جلب الـ IP الفعلي من جهاز العميل بصمت في الخلفية عبر ipify
+            # جلب الـ IP الفعلي من جهاز العميل بصمت في الخلفية عبر ipify
             real_ip = st_javascript("await fetch('https://api.ipify.org?format=json').then(r => r.json()).then(d => d.ip).catch(() => 'غير معروف')")
             
             # عرض اسم الصيدلي الحالي وزر لتغييره
@@ -161,7 +166,7 @@ with st.sidebar:
                     name = st.text_input("اسم الصيدلي (ثلاثي)")
                     shift = st.radio("الفترة (الشيفت)", ["صباحاً ☀️", "مساءً 🌙"])
                     
-                    # ننتظر حتى يتم جلب الـ IP (حيث أن الدالة قد ترجع 0 في اللحظة الأولى)
+                    # ننتظر حتى يتم جلب الـ IP 
                     final_ip = real_ip if real_ip and real_ip != 0 else "جاري الجلب..."
                     st.caption(f"🌐 IP الجهاز الحالي: {final_ip}")
                     
@@ -178,7 +183,7 @@ with st.sidebar:
                             from utils.database import update_last_access, log_action
                             update_last_access(st.session_state.username, full_name, ip_to_save)
                             
-                            # 💡 تسجيل دخول الصيدلية وبدء الشيفت في سجل العمليات
+                            # تسجيل دخول الصيدلية وبدء الشيفت في سجل العمليات
                             log_action(full_name, "pharmacy", st.session_state.username, "عام", "عام", "بدء شيفت", f"تم تسجيل الدخول وبدء الشيفت من IP: {ip_to_save}")
                             
                             st.session_state.login_recorded = True
@@ -213,7 +218,6 @@ with st.sidebar:
                     st.session_state.page = "users"
                     st.rerun()
 
-            # ========== القسم الجديد - يظهر لـ admin و manager فقط ==========
             st.markdown("---")
             st.markdown("### 📦 تقارير إضافية")
             if st.button("📦 تفصيلي المنتجات من سلة", use_container_width=True):
@@ -224,18 +228,14 @@ with st.sidebar:
                 st.session_state.page = "balances"
                 st.rerun()
 
-            # 💡 إضافة زر تحليل الصيدليات الشامل
             if st.button("📈 تحليل الصيدليات الشامل", use_container_width=True):
                 st.session_state.page = "comprehensive_analysis"
                 st.rerun()
                 
-            # 💡 إضافة زر تحليل المبيعات
             if st.button("📊 تحليل مبيعات الشهور", use_container_width=True):
                 st.session_state.page = "sales_analysis"
                 st.rerun()
 
-
-                
         st.markdown("---")
         st.markdown("### 🛍️ العروض")
 
@@ -243,13 +243,12 @@ with st.sidebar:
             st.session_state.page = "promotion_viewer"
             st.rerun()
 
-        # ✨ [تعديل 1]: إضافة زر التوجيه لحاسبة العروض الجديدة هنا في السايدبار
         if st.button("🏷️ حاسبة العروض الترويجية", use_container_width=True):
             st.session_state.page = "promotions"
             st.rerun()
                 
         if st.button("🚪 تسجيل خروج", use_container_width=True):
-            # 💡 تسجيل الخروج في السجل الشامل قبل مسح الجلسة
+            # تسجيل الخروج في السجل الشامل قبل مسح الجلسة
             if st.session_state.get('logged_in'):
                 from utils.database import log_action
                 p_name = st.session_state.get('pharmacist_name') or st.session_state.get('username')
