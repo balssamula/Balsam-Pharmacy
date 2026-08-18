@@ -114,19 +114,22 @@ with st.sidebar:
     if not st.session_state.logged_in:
         username = st.text_input("👤 اسم المستخدم")
         password = st.text_input("🔒 كلمة المرور", type="password")
-        if st.button("🚪 دخول", use_container_width=True):
+    if st.button("🚪 دخول", use_container_width=True):
             user = fetch_user(username, password)
             if user:
                 st.session_state.logged_in = True
                 st.session_state.username = user[0]
                 st.session_state.user_role = user[1]
                 
-                # 💡 تفريغ اسم الصيدلي إجبارياً للصيدليات ليطلب إدخال الشيفت من جديد
+                # تفريغ اسم الصيدلي إجبارياً للصيدليات ليطلب إدخال الشيفت من جديد
                 if user[1] == "pharmacy":
                     st.session_state.pharmacist_name = ""
                     st.session_state.login_recorded = False
                 else:
                     st.session_state.pharmacist_name = user[2] or ""
+                    # 💡 تسجيل دخول الإدارة في سجل العمليات
+                    from utils.database import log_action
+                    log_action(user[0], user[1], "النظام", "عام", "عام", "تسجيل دخول", f"تم تسجيل دخول {user[1]} للنظام")
                     
                 st.rerun()
             else:
@@ -168,8 +171,11 @@ with st.sidebar:
                             # التأكد من التقاط الـ IP الصحيح قبل الحفظ
                             ip_to_save = real_ip if real_ip and real_ip != 0 else "غير معروف"
                             
-                            from utils.database import update_last_access
+                            from utils.database import update_last_access, log_action
                             update_last_access(st.session_state.username, full_name, ip_to_save)
+                            
+                            # 💡 تسجيل دخول الصيدلية وبدء الشيفت في سجل العمليات
+                            log_action(full_name, "pharmacy", st.session_state.username, "عام", "عام", "بدء شيفت", f"تم تسجيل الدخول وبدء الشيفت من IP: {ip_to_save}")
                             
                             st.session_state.login_recorded = True
                             st.session_state.current_ip = ip_to_save
@@ -238,8 +244,17 @@ with st.sidebar:
             st.session_state.page = "promotions"
             st.rerun()
                 
-        st.markdown("---")
         if st.button("🚪 تسجيل خروج", use_container_width=True):
+            # 💡 تسجيل الخروج في السجل الشامل قبل مسح الجلسة
+            if st.session_state.get('logged_in'):
+                from utils.database import log_action
+                p_name = st.session_state.get('pharmacist_name') or st.session_state.get('username')
+                role = st.session_state.get('user_role')
+                ph_name = st.session_state.get('username') if role == 'pharmacy' else "النظام"
+                
+                log_action(p_name, role, ph_name, "عام", "عام", "تسجيل خروج", "تم تسجيل الخروج من النظام")
+
+            # تفريغ المتغيرات
             st.session_state.logged_in = False
             st.session_state.username = ""
             st.session_state.user_role = ""
