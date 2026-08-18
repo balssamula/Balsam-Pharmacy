@@ -1110,3 +1110,18 @@ def set_setting(key: str, value: str):
     cur.execute("INSERT OR REPLACE INTO system_settings (setting_key, setting_value) VALUES (?, ?)", (key, value))
     conn.commit()
     conn.close()
+
+def update_last_seen(username: str):
+    """تحديث وقت آخر نشاط (آخر ظهور) مع كل تفاعل للمستخدم في النظام"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    current_time = now_str()
+    
+    # تحديث الوقت في جدول المستخدمين الرئيسي
+    cur.execute("UPDATE users SET last_login = ? WHERE username = ?", (current_time, username))
+    
+    # تحديث الوقت في جدول الوصول الفرعي (الخاص بالصيدليات)
+    cur.execute("UPDATE last_access SET last_login = ? WHERE pharmacy_name = ?", (current_time, username))
+    
+    conn.commit()
+    conn.close()
