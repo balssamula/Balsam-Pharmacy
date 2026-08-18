@@ -106,13 +106,28 @@ def show():
                         cell.alignment = align_center
                         cell.border = border_thin
                         
-                    # 📊 [الصف الثالث فصاعداً]: صب البيانات حياً مع استدعاء الفحص المحمي من NaN
+                    # 📊 [الصف الثالث فصاعداً]: صب البيانات وتحديث العروض (نعم / لا)
+                    # بناء قائمة بأرقام الأعمدة التي تمثل "العرض في فرع" للتحكم בה
+                    offer_columns = [i + 1 for i, val in enumerate(headers_row2) if str(val).startswith("العرض في")]
+                    col_13_offer_idx = headers_row2.index("العرض في فرع تبوك صيدلية بلسم العلا 13 القادسية") + 1
+                    col_7_offer_idx = headers_row2.index("العرض في فرع العلا - صيدلية بلسم العلا 7") + 1
+
                     for r_idx, row_values in enumerate(result_df.values, start=3):
                         for c_idx, val in enumerate(row_values, start=1):
-                            if isinstance(val, (np.integer, np.floating)):
-                                val = val.item()
-                            elif pd.isna(val): # 👈 تم تأمين الاستدعاء بوجود المكتبة في الأعلى
-                                val = ""
+                            
+                            # 💡 التعديل: إذا كان العمود الحالي هو عمود "عرض"، نقوم بتغيير قيمته
+                            if c_idx in offer_columns:
+                                if c_idx == col_13_offer_idx or c_idx == col_7_offer_idx:
+                                    val = "لا"
+                                else:
+                                    val = "نعم"
+                            else:
+                                # بالنسبة للأعمدة العادية
+                                if isinstance(val, (np.integer, np.floating)):
+                                    val = val.item()
+                                elif pd.isna(val):
+                                    val = ""
+                                    
                             cell = ws.cell(row=r_idx, column=c_idx, value=val)
                             cell.font = font_data
                             cell.alignment = align_center
