@@ -222,7 +222,15 @@ def init_database():
             item_locked_at TEXT DEFAULT ''
         )
     """)
- 
+
+    # جدول إعدادات النظام (للتحكم في التبويبات وغيرها)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS system_settings (
+            setting_key TEXT PRIMARY KEY,
+            setting_value TEXT
+        )
+    """)
+    
     # إدراج المسؤول الرئيسي الافتراضي بأمان
     cur.execute("SELECT * FROM users WHERE username = 'admin'")
     if not cur.fetchone():
@@ -1085,3 +1093,20 @@ def get_action_logs(limit: int = 500) -> pd.DataFrame:
         return pd.DataFrame()
     finally:
         conn.close()
+
+def get_setting(key: str, default_value: str = "1") -> str:
+    """جلب إعداد معين من قاعدة البيانات (الافتراضي 1 يعني مفعل)"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT setting_value FROM system_settings WHERE setting_key = ?", (key,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else default_value
+
+def set_setting(key: str, value: str):
+    """حفظ إعداد معين في قاعدة البيانات"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("INSERT OR REPLACE INTO system_settings (setting_key, setting_value) VALUES (?, ?)", (key, value))
+    conn.commit()
+    conn.close()
