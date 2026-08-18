@@ -12,7 +12,7 @@ app_icon = Image.open("لوجو--جديد.png")
 # إعدادات الصفحة
 st.set_page_config(
     page_title="نظام بلسم العلا - مطابقة الطلبات والفواتير",
-    page_icon=app_icon,  # 💡 تمرير اللوجو كأيقونة للتطبيق هنا
+    page_icon=app_icon,
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -66,7 +66,6 @@ st.markdown("""
     .pill-cancel { background: #ffd8d8; color: #8f1f1f; }
     .pill-payment { background: #fff0c2; color: #8a5b00; }
     .pill-completed { background: #28a745; color: white; }
-    .stButton button { width: 100%; border-radius: 10px; }
     .note-card {
         background: linear-gradient(135deg, #f4fbfc 0%, #ffffff 100%);
         border: 1px solid #d7ebef;
@@ -116,7 +115,6 @@ with st.sidebar:
         username = st.text_input("👤 اسم المستخدم")
         password = st.text_input("🔒 كلمة المرور", type="password")
         
-        # 💡 تم إصلاح المسافة البادئة ليكون الزر داخل شرط عدم تسجيل الدخول
         if st.button("🚪 دخول", use_container_width=True):
             user = fetch_user(username, password)
             if user:
@@ -259,14 +257,17 @@ with st.sidebar:
 
             # تفريغ المتغيرات
             st.session_state.logged_in = False
-            st.session_state.username = ""
-            st.session_state.user_role = ""
-            st.session_state.pharmacist_name = ""
+            for key in ['username', 'user_role', 'pharmacist_name']:
+                st.session_state[key] = ""
             st.session_state.page = "dashboard"
             st.session_state.login_recorded = False
             st.rerun()
 
+# =========================================================================
 # Main Content
+# =========================================================================
+
+# 1. حالة لم يسجل الدخول
 if not st.session_state.logged_in:
     st.markdown("""
     <div class="hero">
@@ -297,13 +298,16 @@ if not st.session_state.logged_in:
             <div>⚡ دقة المطابقة</div>
         </div>
         """, unsafe_allow_html=True)
-        
+
+# 2. حالة مسجل الدخول (صيدلية)
 elif st.session_state.user_role == "pharmacy":
     if not st.session_state.pharmacist_name:
         st.info("👈 الرجاء إدخال اسم الصيدلي من القائمة الجانبية")
     else:
         from pages import pharmacy_dashboard
         pharmacy_dashboard.show()
+
+# 3. حالة مسجل الدخول (إدارة)
 else:  # admin or manager
     page = st.session_state.get("page", "dashboard")
     permissions = get_user_permissions(st.session_state.username)
@@ -314,34 +318,24 @@ else:  # admin or manager
     elif page == "monitoring" and permissions and permissions.get("can_view_monitoring"):
         from pages import monitoring
         monitoring.show()
-    # ========== صفحة تفصيلي المنتجات - تظهر لـ admin و manager فقط ==========
     elif page == "product_details" and st.session_state.user_role in ["admin", "manager"]:
         from pages import product_details
         product_details.show()
-
     elif page == "balances" and permissions and st.session_state.user_role in ["admin", "manager"]:
         from pages import balances_updater
         balances_updater.show()
-
     elif page == "comprehensive_analysis" and st.session_state.user_role in ["admin", "manager"]:
         from pages import comprehensive_analysis
         comprehensive_analysis.show()
-
-    # 💡 توجيه صفحة تحليل مبيعات الشهور
     elif page == "sales_analysis" and st.session_state.user_role in ["admin", "manager"]:
         from pages import sales_analysis
         sales_analysis.show()
-
-    # ✨ [تعديل 2]: توجيه واستدعاء صفحة حاسبة العروض الجديدة عند اختيارها
     elif page == "promotions" and st.session_state.user_role in ["admin", "manager"]:
         from pages import promotion_calculator
         promotion_calculator.show()
-        
-    # 🆕 توجيه صفحة العروض الحالية
     elif page == "promotion_viewer" and st.session_state.user_role in ["admin", "manager"]:
         from pages import promotion_viewer
         promotion_viewer.show()
-        
     else:
         if permissions and permissions.get("can_view_dashboard"):
             from pages import admin_dashboard
@@ -349,6 +343,7 @@ else:  # admin or manager
         else:
             st.error("⚠️ ليس لديك صلاحية الوصول إلى لوحة التحكم")
 
+# الفوتر يظهر دائماً في أسفل المحتوى الرئيسي
 st.markdown("---")
 st.markdown(
     """
