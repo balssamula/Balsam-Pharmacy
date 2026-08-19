@@ -2,14 +2,15 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from io import BytesIO
-from datetime import datetime, timedelta
+from datetime import datetime
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from utils.database import (
     fetch_active_items, get_completed_items, get_tab_completed_counts, 
     get_old_orders, get_old_invoices, get_old_invoices_stats,
-    save_case_note, mark_case_done, get_setting, DB_PATH
+    save_case_note, mark_case_done, get_setting, DB_PATH,
+    add_case_reply, mark_reply_read
 )
 from utils.helpers import (
     is_cancelled_or_returned_status, is_pending_payment_status, 
@@ -74,7 +75,6 @@ def export_to_excel_brief(dataframes_dict: dict) -> bytes:
         "فواتير معلقة بين الفروع": "9B59B6", "بانتظار الدفع": "3498DB", "تم الانتهاء": "2ECC71"
     }
     
-    # 💡 إضافة الأعمدة الجديدة المطلوبة للملف المختصر
     target_columns = {
         'order_date': 'تاريخ الطلب', 'invoice_date': 'تاريخ الفاتورة', 'order_number': 'رقم الطلب',
         'invoice_number': 'رقم الفاتورة', 'customer_phone': 'رقم جوال العميل', 'sku': 'رقم المنتج',
@@ -146,33 +146,18 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
         cursor.execute("""
             SELECT pharmacy_name, invoice_number, status 
             FROM reconciliation_items 
-            WHERE TRIM(order_number) = ? 
-              AND TRIM(sku) = ? 
-              AND TRIM(pharmacy_name) != ?
+            WHERE TRIM(order_number) = ? AND TRIM(sku) = ? AND TRIM(pharmacy_name) != ?
         """, (order_number, sku, pharmacy_name.strip()))
-        
         for r in cursor.fetchall():
-            exact_duplicates.append({
-                "pharmacy": r["pharmacy_name"],
-                "invoice_number": r["invoice_number"] or "بدون فاتورة",
-                "status": r["status"]
-            })
+            exact_duplicates.append({"pharmacy": r["pharmacy_name"], "invoice_number": r["invoice_number"] or "بدون فاتورة", "status": r["status"]})
         
         cursor.execute("""
             SELECT DISTINCT pharmacy_name, sku, product_name, status 
             FROM reconciliation_items 
-            WHERE TRIM(order_number) = ? 
-              AND TRIM(pharmacy_name) != ? 
-              AND TRIM(sku) != ?
+            WHERE TRIM(order_number) = ? AND TRIM(pharmacy_name) != ? AND TRIM(sku) != ?
         """, (order_number, pharmacy_name.strip(), sku))
-        
         for r in cursor.fetchall():
-            shared_order_duplicates.append({
-                "pharmacy": r["pharmacy_name"],
-                "sku": r["sku"],
-                "product_name": r["product_name"] or "غير محدد",
-                "status": r["status"]
-            })
+            shared_order_duplicates.append({"pharmacy": r["pharmacy_name"], "sku": r["sku"], "product_name": r["product_name"] or "غير محدد", "status": r["status"]})
         conn.close()
     except Exception as e:
         pass
@@ -217,6 +202,15 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
                 dup_warning_html += f'<div style="font-size:0.85rem; color:#66521a; margin-top:4px;">🏥 <strong>{dup.get("pharmacy")}</strong> | الصنف الآخر: {dup.get("sku")} ({str(dup.get("product_name"))[:35]}...) | الحالة: [{status_lbl}]</div>'
             st.markdown(dup_warning_html + '</div>', unsafe_allow_html=True)
             
+        # ==========================================
+        # 💬 جزء التفاعل (المحادثات والتأكيد) المنظف
+        # ==========================================
+        
+        # إنشاء المفاتيح بطريقة آمنة
+        safe_key = str(row.get('item_key', f'{idx}_{sku}_{order_number}')).replace('||', '_')
+        note_key = f"chat_{tab_id}_{safe_key}"
+        
+        # 1. إذا كانت الحالة مكتملة
         if row.get("status") == "تم":
             action_word = "الاضافة" if case_type in ['addition', 'orphan_salla'] else ("الارجاع" if case_type in ['return', 'orphan_abc'] else "التسوية")
             performed_user = row.get('performed_by', pharmacist_name) or pharmacist_name
@@ -231,8 +225,8 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             </div>
             """, unsafe_allow_html=True)
             
+        # 2. إذا كانت الحالة معلقة
         else:
-            # 💡 جلب الردود السابقة وحالة القراءة
             existing_note = row.get("pharmacist_note", "")
             has_unread = row.get("has_unread_reply", 0) == 1
             
@@ -242,68 +236,45 @@ def render_single_case_card(row, idx, allow_actions, pharmacist_name, pharmacy_n
             if existing_note:
                 st.markdown(f"<div style='background:#f1f8ff; padding:10px; border-radius:5px; margin-bottom:10px; border:1px solid #cce5ff; max-height:100px; overflow-y:auto; white-space: pre-wrap; font-size:0.85rem;'><b>💬 سجل المحادثة:</b><br>{existing_note}</div>", unsafe_allow_html=True)
                 
-            note_key = f"note_{tab_id}_{case_type}_{idx}_{row.get('order_number', '')}_{row.get('sku', '')}"
+            # مربع إدخال الرد
             new_reply = st.text_input("✍️ كتابة رد / ملاحظة للإدارة", key=note_key)
             
             btn_col1, btn_col2, btn_col3 = st.columns([1, 1.5, 1.5])
+            
             with btn_col1:
-                # زر الإرسال أو تحديد كمقروء
-                if st.button("📨 إرسال الرد", key=f"send_{note_key}", use_container_width=True):
+                if st.button("📨 إرسال الرد", key=f"btn_send_{note_key}", use_container_width=True):
                     if new_reply.strip():
-                        from utils.database import add_case_reply
-                        add_case_reply(row['order_number'], row['sku'], pharmacy_name, case_type, new_reply, pharmacist_name, st.session_state.user_role)
+                        add_case_reply(order_number, sku, pharmacy_name, case_type, new_reply, pharmacist_name, st.session_state.user_role)
                         st.toast("📋 تم إرسال الرد للإدارة!", icon="📨")
                         st.rerun()
-                    elif has_unread: # إذا ضغط إرسال وهو فارغ ليخفي التنبيه فقط
-                        from utils.database import mark_reply_read
-                        mark_reply_read(row['order_number'], row['sku'], pharmacy_name, case_type)
+                    elif has_unread: 
+                        mark_reply_read(order_number, sku, pharmacy_name, case_type)
                         st.rerun()
                         
             if allow_actions:
                 if case_type == "branch_conflict":
                     with btn_col2:
-                        if st.button("📥 تأكيد الإضافة (تم البيع من فرعي)", key=f"conf_add_{note_key}", use_container_width=True):
+                        if st.button("📥 تأكيد الإضافة (تم البيع من فرعي)", key=f"btn_conf_add_{note_key}", use_container_width=True):
                             if new_reply.strip(): 
-                                from utils.database import add_case_reply
-                                add_case_reply(row['order_number'], row['sku'], pharmacy_name, case_type, new_reply + " (مع التأكيد)", pharmacist_name, st.session_state.user_role)
-                            mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
+                                add_case_reply(order_number, sku, pharmacy_name, case_type, new_reply + " (مع التأكيد)", pharmacist_name, st.session_state.user_role)
+                            mark_case_done(order_number, sku, pharmacy_name, case_type, pharmacist_name)
                             st.toast("✅ تم الاعتماد!"); st.rerun()
                     with btn_col3:
-                        if st.button("🔄 تأكيد الإرجاع (ليس من فرعي)", key=f"conf_ret_{note_key}", use_container_width=True):
+                        if st.button("🔄 تأكيد الإرجاع (ليس من فرعي)", key=f"btn_conf_ret_{note_key}", use_container_width=True):
                             if new_reply.strip(): 
-                                from utils.database import add_case_reply
-                                add_case_reply(row['order_number'], row['sku'], pharmacy_name, case_type, new_reply + " (مع العكس)", pharmacist_name, st.session_state.user_role)
-                            mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
+                                add_case_reply(order_number, sku, pharmacy_name, case_type, new_reply + " (مع العكس)", pharmacist_name, st.session_state.user_role)
+                            mark_case_done(order_number, sku, pharmacy_name, case_type, pharmacist_name)
                             st.toast("🔄 تم العكس!"); st.rerun()
+                            
                 elif case_type in {"addition", "orphan_salla", "return", "orphan_abc"}:
                     button_label = "✅ تأكيد الإضافة" if case_type in {"addition", "orphan_salla"} else "🔄 تأكيد الإرجاع"
                     with btn_col2:
-                        if st.button(button_label, key=f"done_{note_key}", use_container_width=True):
+                        if st.button(button_label, key=f"btn_done_{note_key}", use_container_width=True):
                             if new_reply.strip(): 
-                                from utils.database import add_case_reply
-                                add_case_reply(row['order_number'], row['sku'], pharmacy_name, case_type, new_reply + " (مع التأكيد)", pharmacist_name, st.session_state.user_role)
-                            mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
+                                add_case_reply(order_number, sku, pharmacy_name, case_type, new_reply + " (مع التأكيد)", pharmacist_name, st.session_state.user_role)
+                            mark_case_done(order_number, sku, pharmacy_name, case_type, pharmacist_name)
                             st.toast("🚀 تم التأكيد!"); st.rerun()
-                    
-            if allow_actions:
-                if case_type == "branch_conflict":
-                    with btn_col2:
-                        if st.button("📥 تأكيد الإضافة (تم البيع من فرعي)", key=f"conf_add_{note_key}", use_container_width=True):
-                            save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, f"[فرع صحيح] | {note_value}", pharmacist_name, st.session_state.user_role)
-                            mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
-                            st.toast("✅ تم الاعتماد!"); st.rerun()
-                    with btn_col3:
-                        if st.button("🔄 تأكيد الإرجاع (ليس من فرعي)", key=f"conf_ret_{note_key}", use_container_width=True):
-                            save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, f"[فرع مخطئ] | {note_value}", pharmacist_name, st.session_state.user_role)
-                            mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
-                            st.toast("🔄 تم العكس!"); st.rerun()
-                elif case_type in {"addition", "orphan_salla", "return", "orphan_abc"}:
-                    button_label = "✅ تأكيد الإضافة" if case_type in {"addition", "orphan_salla"} else "🔄 تأكيد الإرجاع"
-                    with btn_col2:
-                        if st.button(button_label, key=f"done_{note_key}", use_container_width=True):
-                            save_case_note(row['order_number'], row['sku'], pharmacy_name, case_type, note_value, pharmacist_name, st.session_state.user_role)
-                            mark_case_done(row['order_number'], row['sku'], pharmacy_name, case_type, pharmacist_name)
-                            st.toast("🚀 تم التأكيد!"); st.rerun()
+                            
         st.markdown("</div>", unsafe_allow_html=True)
 
 def render_case_cards_pharmacy(df, allow_actions, pharmacist_name, pharmacy_name, tab_id=""):
@@ -327,6 +298,21 @@ def show():
     </div>
     """, unsafe_allow_html=True)
 
+    df = fetch_active_items(pharmacy_name, include_hidden=False)
+    
+    # 💡 التحقق من وجود ردود جديدة وعرض وميض تحذيري
+    if not df.empty and 'has_unread_reply' in df.columns:
+        unread_count = df['has_unread_reply'].sum()
+        if unread_count > 0:
+            st.markdown(f"""
+            <div style="background-color: #f8d7da; color: #842029; padding: 15px; border-radius: 10px; text-align: center; margin-bottom: 20px; border: 2px solid #f5c2c7; animation: blink-red 2s infinite;">
+                <h3 style="margin: 0; font-weight: bold;">🔔 تنبيه: يوجد ردود جديدة من الإدارة بانتظارك على ({int(unread_count)}) حالة، يرجى مراجعتها للضرورة!</h3>
+            </div>
+            <style>
+            @keyframes blink-red {{ 0% {{ opacity: 1; }} 50% {{ opacity: 0.5; }} 100% {{ opacity: 1; }} }}
+            </style>
+            """, unsafe_allow_html=True)
+
     conn = sqlite3.connect(DB_PATH)
     history_df = pd.read_sql_query(
         "SELECT login_time as 'وقت الدخول', user_agent as 'اسم الصيدلي', ip_address as 'IP الجهاز' FROM login_history WHERE username = ? ORDER BY login_time DESC LIMIT 5", 
@@ -344,21 +330,6 @@ def show():
         if st.button("📥 تصدير الملف الكامل Excel", use_container_width=True): st.session_state.show_export_pharmacy = True
     with col3:
         if st.button("📋 تصدير ملف مختصر Excel", use_container_width=True): st.session_state.show_export_brief_pharmacy = True
-
-    df = fetch_active_items(pharmacy_name, include_hidden=False)
-
-    # 💡 التحقق من وجود ردود جديدة وعرض وميض تحذيري
-    if not df.empty and 'has_unread_reply' in df.columns:
-        unread_count = df['has_unread_reply'].sum()
-        if unread_count > 0:
-            st.markdown(f"""
-            <div style="background-color: #f8d7da; color: #842029; padding: 15px; border-radius: 10px; text-align: center; margin-bottom: 20px; border: 2px solid #f5c2c7; animation: blink-red 2s infinite;">
-                <h3 style="margin: 0; font-weight: bold;">🔔 تنبيه: يوجد ردود جديدة من الإدارة بانتظارك على ({int(unread_count)}) حالات، يرجى مراجعتها للضرورة!</h3>
-            </div>
-            """, unsafe_allow_html=True)
-            
-    old_invoices_df = get_old_invoices(pharmacy_name=pharmacy_name, months=6)
-    old_orders_df = get_old_orders(pharmacy_name=pharmacy_name, months=6)
 
     if df.empty:
         st.info("📭 لا توجد حالات نشطة لهذا الفرع حاليًا.")
