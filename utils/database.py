@@ -69,6 +69,7 @@ def upgrade_database():
             'item_locked_at': "TEXT DEFAULT ''",
             'coupon_discount': "REAL DEFAULT 0",
             'offer_discount': "REAL DEFAULT 0"
+            'has_unread_reply': "INTEGER DEFAULT 0"
         }
         
         for col_name, col_type in columns_to_add.items():
@@ -612,7 +613,7 @@ def fetch_active_items(pharmacy_name: str = None, include_hidden: bool = False) 
                order_date, invoice_date, total_amount, profile_type, receipt_classification,
                pharmacist_note, item_key, abc_pharmacy_name, abc_pharmacist_name, hidden_from_pharmacy,
                payment_method, discount, shipping_cost, tax, coupon_discount, offer_discount,
-               is_item_locked,
+               is_item_locked, has_unread_reply,
                (SELECT last_ip FROM users WHERE username = ?) as pharmacy_last_ip,
                (SELECT last_login FROM users WHERE username = ?) as pharmacy_last_login,
                0 as is_locked
@@ -1123,5 +1124,46 @@ def update_last_seen(username: str):
     # تحديث الوقت في جدول الوصول الفرعي (الخاص بالصيدليات)
     cur.execute("UPDATE last_access SET last_login = ? WHERE pharmacy_name = ?", (current_time, username))
     
+    conn.commit()
+    conn.close()
+
+def add_case_reply(order_number: str, sku: str, pharmacy_name: str, case_type: str, reply_text: str, performed_by: str, role: str):
+    """إضافة رد جديد لسجل المحادثة وتفعيل تنبيه الصيدلية"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    # جلب المحادثة الحالية
+    cur.execute("""
+        SELECT pharmacist_note FROM reconciliation_items 
+        WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
+    """, (order_number, sku, pharmacy_name, case_type))
+    row = cur.fetchone()
+    current_note = row[0] if row and row[0] else ""
+    
+    # تنسيق الرد الجديد
+    prefix = f"\n[{'الإدارة' if role in ['admin', 'manager'] else 'الصيدلية'} - {performed_by}]: "
+    new_note = current_note + prefix + reply_text if current_note else prefix.strip() + " " + reply_text
+    
+    # تفعيل الإشعار للصيدلية إذا كان الرد من الإدارة، وإلغاؤه إذا كان الرد من الصيدلية
+    has_unread = 1 if role in ['admin', 'manager'] else 0
+    
+    cur.execute("""
+        UPDATE reconciliation_items 
+        SET pharmacist_note = ?, has_unread_reply = ?
+        WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
+    """, (new_note, has_unread, order_number, sku, pharmacy_name, case_type))
+    conn.commit()
+    conn.close()
+    
+    log_action(performed_by, role, pharmacy_name, order_number, sku, "إضافة رد", f"تم إرسال رد: {reply_text}")
+
+def mark_reply_read(order_number: str, sku: str, pharmacy_name: str, case_type: str):
+    """إزالة علامة التنبيه عند قراءة الصيدلي للرد"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE reconciliation_items SET has_unread_reply = 0
+        WHERE active = 1 AND order_number = ? AND sku = ? AND pharmacy_name = ? AND case_type = ?
+    """, (order_number, sku, pharmacy_name, case_type))
     conn.commit()
     conn.close()
