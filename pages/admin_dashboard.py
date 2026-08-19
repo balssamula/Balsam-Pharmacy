@@ -34,6 +34,7 @@ def export_to_excel(dataframes_dict: dict) -> bytes:
         "الإضافات": "4472C4", "الإرجاعات": "ED7D31",
         "طلبات_بدون_فاتورة": "70AD47", "فواتير_بدون_طلب": "FFC000",
         "فواتير_بعد_آخر_طلب": "9B59B6", "بانتظار_الدفع": "3498DB",
+        "دعاية": "8E44AD",
         "ملغي_ومسترجع": "E74C3C", "تم_الانتهاء": "27AE60",
         "مقارنة_الجلسات": "2A5298"
     }
@@ -623,22 +624,21 @@ def show():
     if search_sku:
         filtered_df = filtered_df[filtered_df["sku"].astype(str).str.contains(search_sku, na=False, case=False)]
 
-    # 💡 بناء الفلاتر المنطقية (True/False) بشكل آمن باستخدام عمود order_status الفعلي
+    # 💡 بناء الفلاتر المنطقية المحدثة لاستخراج "الدعاية"
     cancelled_mask = filtered_df["order_status"].astype(str).str.contains("ملغي|مسترجع|محذوف|cancelled|returned|refunded", na=False, case=False)
     payment_mask = filtered_df["order_status"].astype(str).str.contains("بانتظار الدفع|لم يتم الدفع|pending|unpaid", na=False, case=False)
-    active_mask_filtered = ~cancelled_mask
+    promotion_mask = filtered_df["order_status"].astype(str).str.contains("دعاية", na=False, case=False)
     
-    # 💡 تطبيق الفلاتر النصية والفرع على تبويب (المكتملات)
+    active_mask_filtered = ~cancelled_mask & ~promotion_mask # استبعاد الدعاية من التبويبات العادية
+    
     completed_df_admin = get_completed_items()
     if completed_df_admin is not None and not completed_df_admin.empty:
-        if selected_branch != "الكل":
-            completed_df_admin = completed_df_admin[completed_df_admin["pharmacy_name"] == selected_branch]
-        if search_order:
-            completed_df_admin = completed_df_admin[completed_df_admin["order_number"].astype(str).str.contains(search_order, na=False, case=False)]
-        if search_invoice:
-            completed_df_admin = completed_df_admin[completed_df_admin["invoice_number"].astype(str).str.contains(search_invoice, na=False, case=False)]
-        if search_sku:
-            completed_df_admin = completed_df_admin[completed_df_admin["sku"].astype(str).str.contains(search_sku, na=False, case=False)]
+        # استبعاد الدعاية من المكتملات لتظل في تبويبها الخاص فقط
+        completed_df_admin = completed_df_admin[~completed_df_admin["order_status"].astype(str).str.contains("دعاية", na=False, case=False)]
+        if selected_branch != "الكل": completed_df_admin = completed_df_admin[completed_df_admin["pharmacy_name"] == selected_branch]
+        if search_order: completed_df_admin = completed_df_admin[completed_df_admin["order_number"].astype(str).str.contains(search_order, na=False, case=False)]
+        if search_invoice: completed_df_admin = completed_df_admin[completed_df_admin["invoice_number"].astype(str).str.contains(search_invoice, na=False, case=False)]
+        if search_sku: completed_df_admin = completed_df_admin[completed_df_admin["sku"].astype(str).str.contains(search_sku, na=False, case=False)]
     
     # ========== العناصر القديمة وتطبيق الفلاتر عليها ==========
     selected_branch_name = None if selected_branch == "الكل" else selected_branch
@@ -714,6 +714,11 @@ def show():
 
     # 7️⃣ المكتملة
     total_completed = len(completed_df_admin) if completed_df_admin is not None else 0
+
+    # 💡 استخراج بيانات الدعاية بشكل مستقل
+    promotion_filtered = exclude_old_items(filtered_df[promotion_mask].copy())
+    total_promotion = len(promotion_filtered)
+    completed_promotion = len(promotion_filtered[promotion_filtered["status"] == "تم"]) if "status" in promotion_filtered.columns else 0
     
     # =========================================================================
     # 📥 زر تصدير الإكسيل الموحد للإدارة المعرف بشكل قاطع وحصري
@@ -725,6 +730,7 @@ def show():
             "فواتير معلقة بين الفروع": conflicts_filtered,
             "فواتير بعد آخر طلب": post_cutoff_filtered,
             "بانتظار الدفع": payment_filtered,
+            "دعاية": promotion_filtered,
             "الملغيات والمسترجعات": cancelled_filtered,
             "الطلبات القديمة التاريخية": old_orders_df,
             "الفواتير القديمة التاريخية": old_invoices_df
@@ -746,11 +752,12 @@ def show():
     .stTabs [data-baseweb="tab-list"] button:nth-child(3) { background-color: #9B59B6; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(4) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(5) { background-color: #3498DB; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(6) { background-color: #E74C3C; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(7) { background-color: #27AE60; color: white; border-radius: 10px 10px 0 0; }
-    .stTabs [data-baseweb="tab-list"] button:nth-child(8) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(6) { background-color: #8E44AD; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(7) { background-color: #E74C3C; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(8) { background-color: #27AE60; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(9) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button:nth-child(10) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
+    .stTabs [data-baseweb="tab-list"] button:nth-child(11) { background-color: #6c757d; color: white; border-radius: 10px 10px 0 0; }
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] { transform: translateY(-2px) !important; box-shadow: 0 4px 8px rgba(0,0,0,0.2) !important; }
     .stTabs [data-baseweb="tab-list"] button[aria-selected="false"] { opacity: 0.85 !important; }
     .stTabs [data-baseweb="tab-list"] button:hover { transform: translateY(-2px) !important; opacity: 1 !important; }
@@ -793,6 +800,7 @@ def show():
         f"📊 فواتير معلقة بين الفروع ({completed_conflicts}/{total_conflicts})" if total_conflicts > 0 else f"📊 فواتير معلقة بين الفروع ({total_conflicts})", 
         f"⏰ فواتير بعد آخر طلب ({completed_post_cutoff}/{total_post_cutoff})" if total_post_cutoff > 0 else f"⏰ فواتير بعد آخر طلب ({total_post_cutoff})",
         f"💰 بانتظار الدفع ({total_payment})",
+        f"🎁 دعاية ({completed_promotion}/{total_promotion})" if total_promotion > 0 else "🎁 دعاية (0)",
         f"⚠️ ملغي/مسترجع ({total_cancelled})",
         f"✅ تم الانتهاء ({total_completed})",
         f"📅 طلبات قديمة ({total_old_orders_stats})",   # 💡 تم التأمين والحساب بنجاح
@@ -846,6 +854,11 @@ def show():
         else:
             st.success("🎉 لا توجد طلبات معلقة بانتظار الدفع.")
 
+    with tab_promotion:
+        st.markdown(f"### 🎁 طلبات الدعاية الخاصة بالفروع")
+        if not promotion_filtered.empty: render_table_with_click(promotion_filtered, "promotion", allow_move=True)
+        else: st.success("🎉 لا توجد طلبات دعاية.")
+            
     with tab_cancelled:
         st.markdown(f"### ⚠️ فواتير ABC التابعة لطلبات ملغية أو مسترجعة في سلة")
         # تم تغيير المتغير لـ cancelled_filtered
@@ -936,6 +949,7 @@ def show():
             "show_tab_conflicts": "📊 فواتير معلقة بين الفروع",
             "show_tab_post_cutoff": "⏰ فواتير بعد آخر طلب",
             "show_tab_payment": "💰 بانتظار الدفع",
+            "show_tab_promotion": "🎁 دعاية",
             "show_tab_cancelled": "⚠️ ملغي/مسترجع",
             "show_tab_completed": "✅ تم الانتهاء"
         }
