@@ -5,7 +5,7 @@ pd.set_option("styler.render.max_elements", 5000000)
 from io import BytesIO
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
@@ -991,7 +991,6 @@ def show():
         </style>
         """, unsafe_allow_html=True)
 
-        from datetime import datetime, timedelta
         # حساب التوقيت الحالي بتوقيت السعودية لمقارنته
         utc_now = datetime.utcnow()
         saudi_time = utc_now + timedelta(hours=3)
