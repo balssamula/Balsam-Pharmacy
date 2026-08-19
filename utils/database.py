@@ -68,7 +68,7 @@ def upgrade_database():
             'item_locked_by': "TEXT DEFAULT ''",
             'item_locked_at': "TEXT DEFAULT ''",
             'coupon_discount': "REAL DEFAULT 0",
-            'offer_discount': "REAL DEFAULT 0"
+            'offer_discount': "REAL DEFAULT 0",
             'has_unread_reply': "INTEGER DEFAULT 0"
         }
         
