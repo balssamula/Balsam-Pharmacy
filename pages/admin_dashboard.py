@@ -272,41 +272,43 @@ def render_table_with_click(df, tab_name, allow_move: bool = True):
                 # الصف الثاني من الأزرار (النقل والملحوظة)
                 if allow_move and row['status'] != "تم":
                     st.markdown("---")
+                    # 💡 عرض المحادثة السابقة للإدارة
+                    existing_note = row.get('pharmacist_note', '')
+                    if existing_note:
+                        st.markdown(f"<div style='background:#fff; padding:10px; border-radius:5px; margin-bottom:10px; border:1px solid #ddd; max-height:150px; overflow-y:auto; white-space: pre-wrap; font-size:0.9rem;'><b>💬 سجل المحادثة:</b><br>{existing_note}</div>", unsafe_allow_html=True)
+                        
                     col_a, col_b, col_c, col_d = st.columns([2, 1, 2, 1])
                     
                     current_branch = row.get('pharmacy_name', '')
                     branches = get_available_branches(current_branch)
-                    
                     if branches:
-                        selected_branch = col_a.selectbox(
-                            "🏥 نقل إلى فرع",
-                            branches,
-                            key=f"move_branch_{tab_name}_{selected_idx}"
-                        )
-                        
+                        selected_branch = col_a.selectbox("🏥 نقل إلى فرع", branches, key=f"move_branch_{tab_name}_{selected_idx}")
                         if col_b.button("🚚 نقل", key=f"move_{tab_name}_{selected_idx}", use_container_width=True):
                             if move_item_to_branch(item_key, selected_branch, st.session_state.username):
-                                st.success(f"✅ تم نقل العنصر إلى {selected_branch}")
-                                st.rerun()
+                                st.success(f"✅ تم نقل العنصر إلى {selected_branch}"); st.rerun()
                             else:
                                 st.error("❌ فشل نقل العنصر")
                     
-                    note = col_c.text_input("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=f"note_{tab_name}_{selected_idx}")
-                    
-                    if col_d.button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
-                        # 💡 تمرير اسم المستخدم والصلاحية
-                        save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note, st.session_state.username, st.session_state.user_role)
-                        st.rerun()
+                    # 💡 صندوق رد الإدارة
+                    reply_text = col_c.text_input("✍️ إضافة رد للإدارة", key=f"reply_{tab_name}_{selected_idx}")
+                    if col_d.button("إرسال الرد 📨", key=f"send_reply_{tab_name}_{selected_idx}", use_container_width=True):
+                        if reply_text.strip():
+                            from utils.database import add_case_reply
+                            add_case_reply(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], reply_text, st.session_state.username, st.session_state.user_role)
+                            st.rerun()
                 else:
-                    # إذا كان النقل غير مسموح (أو الحالة مكتملة)، نعرض فقط الملحوظة
                     st.markdown("---")
-                    col_a, col_b = st.columns([3, 1])
-                    note = col_a.text_input("📝 ملحوظة", value=row.get('pharmacist_note', ''), key=f"note_{tab_name}_{selected_idx}")
-                    if col_b.button("💾 حفظ", key=f"save_note_{tab_name}_{selected_idx}", use_container_width=True):
-                        # 💡 تمرير اسم المستخدم والصلاحية
-                        save_case_note(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], note, st.session_state.username, st.session_state.user_role)
-                        st.rerun()
-
+                    existing_note = row.get('pharmacist_note', '')
+                    if existing_note:
+                        st.markdown(f"<div style='background:#fff; padding:10px; border-radius:5px; margin-bottom:10px; border:1px solid #ddd; max-height:150px; overflow-y:auto; white-space: pre-wrap; font-size:0.9rem;'><b>💬 سجل المحادثة:</b><br>{existing_note}</div>", unsafe_allow_html=True)
+                    col_c, col_d = st.columns([3, 1])
+                    reply_text = col_c.text_input("✍️ إضافة رد للإدارة", key=f"reply_disabled_{tab_name}_{selected_idx}")
+                    if col_d.button("إرسال الرد 📨", key=f"send_reply_disabled_{tab_name}_{selected_idx}", use_container_width=True):
+                        if reply_text.strip():
+                            from utils.database import add_case_reply
+                            add_case_reply(row['order_number'], row['sku'], row['pharmacy_name'], row['case_type'], reply_text, st.session_state.username, st.session_state.user_role)
+                            st.rerun()
+                            
 def render_old_items_table(df, title, is_orders=True):
     if df.empty:
         st.success(f"🎉 لا توجد {title} قديمة (أكثر من 6 أشهر)")
