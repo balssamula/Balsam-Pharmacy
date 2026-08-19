@@ -10,7 +10,7 @@ from utils.database import (
     fetch_active_items, get_completed_items, get_tab_completed_counts, 
     get_old_orders, get_old_invoices, get_old_invoices_stats,
     save_case_note, mark_case_done, get_setting, DB_PATH,
-    add_case_reply, mark_reply_read
+    add_case_reply, mark_reply_read, log_action
 )
 from utils.helpers import (
     is_cancelled_or_returned_status, is_pending_payment_status, 
@@ -33,7 +33,7 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
     tab_colors = {
         "الاضافات والطلبات المفقودة": "4472C4", "الارجاعات والزيادات": "ED7D31",
         "فواتير معلقة بين الفروع": "9B59B6", "فواتير بعد اخر طلب": "9B59B6",
-        "بانتظار الدفع": "3498DB", "الملغيات والمسترجعات": "E74C3C", "تم الانتهاء": "2ECC71"
+        "بانتظار الدفع": "3498DB", "دعاية": "8E44AD", "الملغيات والمسترجعات": "E74C3C", "تم الانتهاء": "2ECC71"
     }
     
     columns_mapping = {
@@ -68,11 +68,11 @@ def export_to_excel(dataframes_dict: dict, pharmacy_name: str) -> bytes:
 
 def export_to_excel_brief(dataframes_dict: dict) -> bytes:
     output = BytesIO()
-    allowed_tabs = ["الاضافات والطلبات المفقودة", "الارجاعات والزيادات", "فواتير معلقة بين الفروع", "بانتظار الدفع", "تم الانتهاء"]
+    allowed_tabs = ["الاضافات والطلبات المفقودة", "الارجاعات والزيادات", "فواتير معلقة بين الفروع", "بانتظار الدفع", "دعاية", "تم الانتهاء"]
     
     tab_colors = {
         "الاضافات والطلبات المفقودة": "4472C4", "الارجاعات والزيادات": "ED7D31",
-        "فواتير معلقة بين الفروع": "9B59B6", "بانتظار الدفع": "3498DB", "تم الانتهاء": "2ECC71"
+        "فواتير معلقة بين الفروع": "9B59B6", "بانتظار الدفع": "3498DB", "دعاية": "8E44AD", "تم الانتهاء": "2ECC71"
     }
     
     target_columns = {
@@ -354,9 +354,11 @@ def show():
         
     allow_actions = not is_locked
 
-    active_mask = ~df["order_status"].apply(is_cancelled_or_returned_status)
-    payment_mask = df["order_status"].apply(is_pending_payment_status)
-    active_df = df[active_mask].copy()
+    # 💡 فلتر استخراج الدعاية
+    promotion_mask = df["order_status"].astype(str).str.contains("دعاية", na=False, case=False)
+    cancelled_mask = df["order_status"].astype(str).str.contains("ملغي|مسترجع|محذوف|cancelled|returned|refunded", na=False, case=False)
+    payment_mask = df["order_status"].astype(str).str.contains("بانتظار الدفع|لم يتم الدفع|pending|unpaid", na=False, case=False)
+    active_mask = ~cancelled_mask & ~promotion_mask
 
     branch_add_df = df[df['case_type'].isin(['addition', 'orphan_salla']) & active_mask & ~payment_mask].copy()
     total_additions_merged = len(branch_add_df)
@@ -376,19 +378,24 @@ def show():
     
     payment_df = df[df["order_status"].apply(is_pending_payment_status) & (df["case_type"] != "branch_conflict") & active_mask].copy()
     total_payment = len(payment_df)
+
+    # 💡 تجميع بيانات الدعاية الخاصة بالفرع
+    branch_promotion_df = df[promotion_mask].copy()
+    total_promotion_merged = len(branch_promotion_df)
+    completed_promotion_merged = len(branch_promotion_df[branch_promotion_df["status"] == "تم"]) if "status" in branch_promotion_df.columns else 0
     
     cancelled_df = df[df["order_status"].apply(is_cancelled_or_returned_status) & (df["case_type"] != "branch_conflict")].copy()
     total_cancelled = len(cancelled_df)
     
     completed_df = get_completed_items(pharmacy_name)
-    if search_order:
-        completed_df = completed_df[completed_df["order_number"].astype(str).str.contains(search_order, na=False, case=False)]
-    if search_invoice:
-        completed_df = completed_df[completed_df["invoice_number"].astype(str).str.contains(search_invoice, na=False, case=False)]
-    if search_sku:
-        completed_df = completed_df[completed_df["sku"].astype(str).str.contains(search_sku, na=False, case=False)]
+    if completed_df is not None and not completed_df.empty:
+        # استبعاد الدعاية من تبويب المكتملات العام
+        completed_df = completed_df[~completed_df["order_status"].astype(str).str.contains("دعاية", na=False, case=False)]
+        if search_order: completed_df = completed_df[completed_df["order_number"].astype(str).str.contains(search_order, na=False, case=False)]
+        if search_invoice: completed_df = completed_df[completed_df["invoice_number"].astype(str).str.contains(search_invoice, na=False, case=False)]
+        if search_sku: completed_df = completed_df[completed_df["sku"].astype(str).str.contains(search_sku, na=False, case=False)]
         
-    total_completed = len(completed_df)
+    total_completed = len(completed_df) if completed_df is not None else 0
 
     if st.session_state.get('show_export_pharmacy', False):
         excel_sheets = {
@@ -397,6 +404,7 @@ def show():
             "فواتير معلقة بين الفروع": conflicts_df,
             "فواتير بعد اخر طلب": post_cutoff_df,
             "بانتظار الدفع": payment_df,
+            "دعاية": branch_promotion_df,
             "الملغيات والمسترجعات": cancelled_df,
             "تم الانتهاء": completed_df
         }
@@ -410,6 +418,7 @@ def show():
             "الارجاعات والزيادات": branch_ret_df,
             "فواتير معلقة بين الفروع": conflicts_df,
             "بانتظار الدفع": payment_df,
+            "دعاية": branch_promotion_df,
             "تم الانتهاء": completed_df
         }
         excel_data_brief = export_to_excel_brief(excel_sheets_brief)
@@ -439,6 +448,8 @@ def show():
         
     if get_setting("show_tab_payment", "1") == "1":
         available_tabs.append(("payment", f"💰 بانتظار الدفع ({total_payment})"))
+    if get_setting("show_tab_promotion", "1") == "1": 
+        available_tabs.append(("promotion", f"🎁 دعاية ({completed_promotion_merged}/{total_promotion_merged})"))
         
     if get_setting("show_tab_cancelled", "1") == "1":
         available_tabs.append(("cancelled", f"⚠️ ملغي/مسترجع ({total_cancelled})"))
@@ -461,6 +472,8 @@ def show():
                     render_case_cards_pharmacy(post_cutoff_df, False, pharmacist_name, pharmacy_name, tab_id="cutoff")
                 elif tab_id == "payment":
                     render_case_cards_pharmacy(payment_df, False, pharmacist_name, pharmacy_name, tab_id="pay")
+                elif tab_id == "promotion": 
+                    render_case_cards_pharmacy(branch_promotion_df, allow_actions, pharmacist_name, pharmacy_name, tab_id="promo") 
                 elif tab_id == "cancelled":
                     render_case_cards_pharmacy(cancelled_df, False, pharmacist_name, pharmacy_name, tab_id="cancel")
                 elif tab_id == "completed":
