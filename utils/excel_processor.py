@@ -341,13 +341,16 @@ def update_balances(abc_file, salla_file):
     try:
         df_abc = pd.read_excel(abc_file, skiprows=4)
         
-        # 🧠 [التعديل الذهبي الحاسم]: إجبار بايثون على قراءة الصف الثاني كعناوين حقيقية لتفادي التداخل والنصوص
+        # إجبار بايثون على قراءة الصف الثاني كعناوين حقيقية لتفادي التداخل والنصوص
         df_salla = pd.read_excel(salla_file, header=1)
         
         def get_abc_col(branch_num): return pd.to_numeric(df_abc.iloc[:, branch_num + 1], errors='coerce').fillna(0)
         item_key = df_abc.iloc[:, 0]
-        tabuk_calc = np.floor(((get_abc_col(8) + get_abc_col(10) + get_abc_col(11) + get_abc_col(12) + get_abc_col(14) + get_abc_col(15) + get_abc_col(16) + get_abc_col(17)) / 2) + get_abc_col(13))
-        f9_calc = np.floor(((get_abc_col(1) + get_abc_col(3)) / 2) + get_abc_col(9))
+        
+        # 💡 التعديل هنا: استخدام np.ceil() بدلاً من np.floor() للجبر للأعلى
+        tabuk_calc = np.ceil(((get_abc_col(8) + get_abc_col(10) + get_abc_col(11) + get_abc_col(12) + get_abc_col(14) + get_abc_col(15) + get_abc_col(16) + get_abc_col(17)) / 2) + get_abc_col(13))
+        f9_calc = np.ceil(((get_abc_col(1) + get_abc_col(3)) / 2) + get_abc_col(9))
+        
         def create_map(values): return dict(zip(item_key, values.astype(int)))
         
         maps = {
