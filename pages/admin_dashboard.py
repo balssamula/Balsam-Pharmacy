@@ -794,7 +794,7 @@ def show():
     # =========================================================================
     # 📊 بناء التبويبات (Tabs) بشكل متزن ومستقر عددياً ومطابق 100% لمتغيراتك
     # =========================================================================
-    tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices, tab_old_stats, tab_settings = st.tabs([
+    tab_additions, tab_returns, tab_conflicts, tab_post_cutoff, tab_payment, tab_promotion, tab_cancelled, tab_completed, tab_old_orders, tab_old_invoices, tab_old_stats, tab_settings = st.tabs([
         f"📥 الإضافات والطلبات المفقودة ({completed_additions_count}/{total_additions_count})" if total_additions_count > 0 else "📥 الإضافات والطلبات المفقودة (0)",
         f"📤 الإرجاعات والفواتير المعلقة ({completed_returns_count}/{total_returns_count})" if total_returns_count > 0 else "📤 الإرجاعات والفواتير المعلقة (0)",
         f"📊 فواتير معلقة بين الفروع ({completed_conflicts}/{total_conflicts})" if total_conflicts > 0 else f"📊 فواتير معلقة بين الفروع ({total_conflicts})", 
