@@ -176,8 +176,9 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
             salla_order_numbers = set(salla_grouped["order_number"].astype(str).str.strip().unique())
     
     # -------------------------------------------------------------------------
-    # 🧠 حلقة الفرز الصارمة والمحدثة لاصطياد مكررات الفروع الموزعة
+    # 🧠 حلقة الفرز الصارمة والمحدثة لاصطياد مكررات الفروع والطلبات الملغية
     # -------------------------------------------------------------------------
+    import re
     for idx, row in merged.iterrows():
         salla_q = row['salla_qty']
         abc_q = row['abc_qty']
@@ -185,9 +186,15 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         order_num = row['order_number']
         item_sku = row['sku']
         current_pharmacy = row['abc_pharmacy_name']
-        diff_calc = salla_q - abc_q
         
-        # 💡 [تحديث احترافي]: التحقق الفوري من وجود فواتير موازية في فروع أخرى وعزلها كفواتير معلقة
+        # 💡 [التعديل المحاسبي الجذري]: تصفير استحقاق سلة إذا كان الطلب ملغياً أو مسترجعاً
+        order_status_str = str(row.get('order_status', '')).strip()
+        is_cancelled = bool(re.search(r'ملغي|مسترجع|محذوف|cancelled|returned|refunded', order_status_str, re.IGNORECASE))
+        
+        effective_salla_q = 0 if is_cancelled else salla_q
+        diff_calc = effective_salla_q - abc_q
+        
+        # 1. التحقق الفوري من وجود فواتير موازية في فروع أخرى وعزلها كفواتير معلقة
         other_branches_df = abc_grouped[
             (abc_grouped['order_number'] == order_num) & 
             (abc_grouped['sku'] == item_sku) & 
@@ -197,50 +204,49 @@ def classify_cases(df_salla: pd.DataFrame, df_abc: pd.DataFrame) -> pd.DataFrame
         
         if not other_branches_df.empty and abc_q > 0:
             other_branch_names = ", ".join(other_branches_df['abc_pharmacy_name'].unique())
-            
-            # تغيير تصنيف الحالة إلى نوع مخصص معزول ومحمي من فلاتر الفروقات الصفرية بالواجهات
             merged.at[idx, "case_type"] = "branch_conflict"
             merged.at[idx, "is_duplicate_warning"] = 1
             merged.at[idx, "case_reason"] = (
-                f"⚠️ فواتير معلقة (تداخل ضرب الفواتير بين الفروع): هذا الصنف تم عمل فاتورة له في فرعك بكمية {int(abc_q)}، "
-                f"وتم تكرار ضربه في فروع أخرى وهي ({other_branch_names}). إجمالي المضروب بكافة الفروع ({int(abc_total)}) "
-                f"مقارنة بكمية سلة الأصلية المدفوعة ({int(salla_q)})."
+                f"⚠️ فواتير معلقة (تداخل بين الفروع): تم عمل فاتورة بفرعك بكمية {int(abc_q)}، "
+                f"وتم تكرار ضربه في فروع أخرى ({other_branch_names}). إجمالي الفروع ({int(abc_total)})."
             )
             continue
 
-        # ب. استبعاد وحجب الفروع الصفرية المتطابقة إجمالياً
+        # 2. استبعاد الفروع الصفرية المتطابقة إجمالياً (وتجاهل المطابقة إذا كان الطلب ملغياً)
         if row['total_matched'] and abc_q == 0: continue
-        if row['total_matched'] and salla_q == abc_q: continue
+        if not is_cancelled and row['total_matched'] and salla_q == abc_q: continue
 
-        # ج. الشرط الأول للإضافات: كمية الصنف في سلة أعلى من كمية نفس الصنف بالفرع الحالي
-        if diff_calc > 0 and salla_q > 0 and abc_q > 0:
+        # 3. الشرط الأول للإضافات
+        if diff_calc > 0 and effective_salla_q > 0 and abc_q > 0:
             merged.at[idx, "case_type"] = "addition"
-            merged.at[idx, "case_reason"] = f"كمية طلب سلة المدفوعة ({int(salla_q)}) أعلى من كمية الفاتورة بالفرع ({int(abc_q)}). العجز يتطلب إضافة مخزنية حقيقية."
+            merged.at[idx, "case_reason"] = f"كمية طلب سلة المدفوعة ({int(effective_salla_q)}) أعلى من كمية الفاتورة بالفرع ({int(abc_q)}). تتطلب إضافة مخزنية."
             continue
 
-        # د. الشرط الثاني للإضافات الحتمية: الصنف موجود في سلة وليس له فاتورة نهائياً على ABC
-        if (row['_merge'] == "left_only" or abc_total == 0) and salla_q > 0:
+        # 4. الشرط الثاني للإضافات الحتمية (مفقود في ABC)
+        if (row['_merge'] == "left_only" or abc_total == 0) and effective_salla_q > 0:
             merged.at[idx, "case_type"] = "orphan_salla"
-            merged.at[idx, "case_reason"] = f"🛒 نقص مستندي كامل: صنف الطلب موجود في سلة بكمية {int(salla_q)} ولكن مستند الفاتورة مفقود بالكامل من نظام ABC."
+            merged.at[idx, "case_reason"] = f"🛒 نقص مستندي: صنف الطلب موجود في سلة بكمية {int(effective_salla_q)} ولكن مستند الفاتورة مفقود من ABC."
             continue
 
-        # هـ. حالات الإرجاع الصافية المستقرة (الكمية في ABC أكبر من سلة لطلب مطابق قائم بالفعل)
-        if diff_calc < 0 and salla_q > 0 and abc_q > 0:
-            merged.at[idx, "case_type"] = "return"
-            merged.at[idx, "case_reason"] = f"كمية الفاتورة الموردة بالفرع ({int(abc_q)}) أكبر من كمية طلب سلة ({int(salla_q)}). الزيادة تتطلب إرجاع مخزني."
-            continue
-
-        # و. التوجيه الذكي والصارم للفواتير المجهولة
+        # 5. التوجيه الذكي للفواتير المجهولة (بدون طلب في سلة إطلاقاً)
         if row['_merge'] == "right_only" and abc_q > 0:
             inv_date = pd.to_datetime(row['invoice_date'], errors='coerce')
-            order_num_str = str(order_num).strip()
-            
-            if order_num_str not in salla_order_numbers and max_salla_date is not None and pd.notna(inv_date) and inv_date > max_salla_date:
+            order_num_str_clean = str(order_num).strip()
+            if order_num_str_clean not in salla_order_numbers and max_salla_date is not None and pd.notna(inv_date) and inv_date > max_salla_date:
                 merged.at[idx, "case_type"] = "post_cutoff_abc"
-                merged.at[idx, "case_reason"] = f"⏰ فاتورة بعد آخر طلب: رقم الطلب ({order_num}) غير موجود في شيت سلة، وتاريخ الفاتورة جاء متأخراً."
+                merged.at[idx, "case_reason"] = f"⏰ فاتورة بعد آخر طلب: رقم الطلب غير موجود في سلة، وتاريخ الفاتورة متأخر."
             else:
                 merged.at[idx, "case_type"] = "orphan_abc"
-                merged.at[idx, "case_reason"] = f"🔄 إرجاع حتمي (زيادة صنف): رقم الطلب ({order_num}) موجود في سلة ولكن هذا الصنف مضاف بزيادة في فواتير ABC بكمية {int(abc_q)}."
+                merged.at[idx, "case_reason"] = f"🔄 إرجاع حتمي (فاتورة بدون طلب): مضاف في فواتير ABC بكمية {int(abc_q)} ولا يقابله طلب في سلة."
+            continue
+
+        # 6. حالات الإرجاع الصافية المستقرة (الكمية في ABC أكبر، أو الطلب ملغي)
+        if diff_calc < 0 and abc_q > 0:
+            merged.at[idx, "case_type"] = "return"
+            if is_cancelled:
+                merged.at[idx, "case_reason"] = f"الطلب (ملغي) في سلة! ومع ذلك تم إصدار فاتورة بالفرع بكمية ({int(abc_q)}). يجب إرجاعها للمخزون فوراً."
+            else:
+                merged.at[idx, "case_reason"] = f"كمية الفاتورة الموردة بالفرع ({int(abc_q)}) أكبر من طلب سلة ({int(effective_salla_q)}). الزيادة تتطلب إرجاع."
             continue
 
     result = merged[merged["case_type"] != ""].copy()
