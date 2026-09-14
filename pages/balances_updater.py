@@ -22,7 +22,6 @@ def show():
         unsafe_allow_html=True,
     )
     
-    # 💡 التعديل هنا: جعلناها 3 أعمدة بدلاً من عمودين لإضافة ملف الاستبعاد
     col1, col2, col3 = st.columns(3)
     with col1:
         abc_file = st.file_uploader("📊 رفع ملف ABC (يبدأ من الصف 5)", type=["xlsx"], key="abc_balances")
@@ -33,37 +32,41 @@ def show():
     
     if abc_file and salla_file:
         if st.button("🔄 تنفيذ تحديث الأرصدة", use_container_width=True):
-            with st.spinner("جاري تحديث الأرصدة ..."):
+            with st.spinner("جاري تحديث الأرصدة وبناء الترويسات الثنائية..."):
                 result_df, result = update_balances(abc_file, salla_file)
                 if result_df is not None:
                     
-                    # 💡 التعديل هنا: استبعاد الأصناف إذا تم رفع ملف الاستبعادات
                     excluded_count = 0
+                    excluded_df = pd.DataFrame()
+                    
                     if exclude_file is not None:
                         try:
-                            exclude_df = pd.read_excel(exclude_file)
-                            # افتراض أن عمود SKU هو الأول، أو البحث عن عمود يحتوي على "SKU"
-                            sku_col = exclude_df.columns[0]
-                            for col in exclude_df.columns:
+                            exclude_df_upload = pd.read_excel(exclude_file)
+                            sku_col = exclude_df_upload.columns[0]
+                            for col in exclude_df_upload.columns:
                                 if 'sku' in str(col).lower() or 'رمز' in str(col) or 'رقم' in str(col):
                                     sku_col = col
                                     break
                             
-                            # تنظيف أرقام الـ SKU من الملف المرفوع
-                            excluded_skus = exclude_df[sku_col].astype(str).str.replace('.0', '', regex=False).str.strip().tolist()
+                            excluded_skus = exclude_df_upload[sku_col].astype(str).str.replace('.0', '', regex=False).str.strip().tolist()
                             
-                            # استخراج الـ SKU من النتيجة (العمود الرابع index 3 في سلة)
-                            original_len = len(result_df)
                             temp_skus = result_df.iloc[:, 3].astype(str).str.replace('.0', '', regex=False).str.strip()
-                            result_df = result_df[~temp_skus.isin(excluded_skus)]
-                            excluded_count = original_len - len(result_df)
+                            
+                            # 💡 فصل الأصناف المستبعدة في جدول خاص لعرضها
+                            mask = temp_skus.isin(excluded_skus)
+                            excluded_df = result_df[mask].copy()
+                            result_df = result_df[~mask]
+                            
+                            excluded_count = len(excluded_df)
                             
                         except Exception as e:
                             st.warning(f"⚠️ لم يتم استبعاد الأصناف. تأكد من صحة ملف الاستبعادات: {e}")
 
-                    # عرض رسالة النجاح مع توضيح عدد المستبعدات
+                    # 💡 عرض رسالة النجاح وجدول المستبعدات إذا وجدت
                     if excluded_count > 0:
                         st.success(f"✅ تم التحديث بنجاح! تم تجهيز {len(result_df):,} صنف وتم استبعاد {excluded_count:,} صنف.")
+                        with st.expander(f"🚫 عرض قائمة الأصناف المستبعدة ({excluded_count} صنف)"):
+                            st.dataframe(excluded_df, use_container_width=True)
                     else:
                         st.success(f"✅ تم التحديث بنجاح! عدد الأصناف المحدثة والمعدلة: {len(result_df):,}")
                         
@@ -74,7 +77,6 @@ def show():
                     ws = wb.active
                     ws.title = "Salla Product Quantities Sheet"
                     
-                    # إعدادات التنسيقات والخطوط الاحترافية
                     font_title = Font(name="Tajawal", size=11, bold=True, color="FFFFFF")
                     font_headers = Font(name="Tajawal", size=10, bold=True, color="FFFFFF")
                     font_data = Font(name="Tajawal", size=10)
@@ -89,7 +91,6 @@ def show():
                         top=Side(style='thin', color='CBD5E1'), bottom=Side(style='thin', color='CBD5E1')
                     )
                     
-                    # 🏢 [الصف الأول]: دمج الترويسات الكبرى
                     ws.merge_cells("A1:E1")
                     ws["A1"] = "بيانات المنتج"
                     ws.merge_cells("F1:AO1")
@@ -109,7 +110,6 @@ def show():
                         cell.alignment = align_center
                         cell.border = border_thin
                         
-                    # 📋 [الصف الثاني]: حقن فروع صيدليات بلسم العلا الـ 17 والمؤشرات بالترتيب
                     headers_row2 = [
                         "No.", "النوع", "أسم المنتج", "رمز المنتج sku", "غير محدود الكمية", 
                         "الكمية في فرع تبوك القادسية وباقي المدن", "العرض في فرع تبوك القادسية وباقي المدن", 
@@ -139,15 +139,12 @@ def show():
                         cell.alignment = align_center
                         cell.border = border_thin
                         
-                    # 📊 [الصف الثالث فصاعداً]: صب البيانات وتحديث العروض (نعم / لا)
                     offer_columns = [i + 1 for i, val in enumerate(headers_row2) if str(val).startswith("العرض في")]
                     col_13_offer_idx = headers_row2.index("العرض في فرع تبوك صيدلية بلسم العلا 13 القادسية") + 1
                     col_7_offer_idx = headers_row2.index("العرض في فرع العلا - صيدلية بلسم العلا 7") + 1
 
                     for r_idx, row_values in enumerate(result_df.values, start=3):
                         for c_idx, val in enumerate(row_values, start=1):
-                            
-                            # التعامل مع أعمدة العرض (نعم/لا)
                             if c_idx in offer_columns:
                                 if c_idx == col_13_offer_idx or c_idx == col_7_offer_idx:
                                     val = "لا"
