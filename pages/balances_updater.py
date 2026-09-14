@@ -22,18 +22,51 @@ def show():
         unsafe_allow_html=True,
     )
     
-    col1, col2 = st.columns(2)
+    # 💡 التعديل هنا: جعلناها 3 أعمدة بدلاً من عمودين لإضافة ملف الاستبعاد
+    col1, col2, col3 = st.columns(3)
     with col1:
         abc_file = st.file_uploader("📊 رفع ملف ABC (يبدأ من الصف 5)", type=["xlsx"], key="abc_balances")
     with col2:
         salla_file = st.file_uploader("📋 رفع ملف Salla", type=["xlsx"], key="salla_balances")
+    with col3:
+        exclude_file = st.file_uploader("🚫 رفع ملف الاستبعادات (اختياري)", type=["xlsx"], key="exclude_balances", help="ملف يحتوي على أرقام SKU المطلوب استبعادها من التحديث")
     
     if abc_file and salla_file:
         if st.button("🔄 تنفيذ تحديث الأرصدة", use_container_width=True):
-            with st.spinner("جاري تحديث الأرصدة وبناء الترويسات الثنائية..."):
+            with st.spinner("جاري تحديث الأرصدة ..."):
                 result_df, result = update_balances(abc_file, salla_file)
                 if result_df is not None:
-                    st.success(f"✅ تم التحديث بنجاح! عدد الأصناف المحدثة والمعدلة: {result:,}")
+                    
+                    # 💡 التعديل هنا: استبعاد الأصناف إذا تم رفع ملف الاستبعادات
+                    excluded_count = 0
+                    if exclude_file is not None:
+                        try:
+                            exclude_df = pd.read_excel(exclude_file)
+                            # افتراض أن عمود SKU هو الأول، أو البحث عن عمود يحتوي على "SKU"
+                            sku_col = exclude_df.columns[0]
+                            for col in exclude_df.columns:
+                                if 'sku' in str(col).lower() or 'رمز' in str(col) or 'رقم' in str(col):
+                                    sku_col = col
+                                    break
+                            
+                            # تنظيف أرقام الـ SKU من الملف المرفوع
+                            excluded_skus = exclude_df[sku_col].astype(str).str.replace('.0', '', regex=False).str.strip().tolist()
+                            
+                            # استخراج الـ SKU من النتيجة (العمود الرابع index 3 في سلة)
+                            original_len = len(result_df)
+                            temp_skus = result_df.iloc[:, 3].astype(str).str.replace('.0', '', regex=False).str.strip()
+                            result_df = result_df[~temp_skus.isin(excluded_skus)]
+                            excluded_count = original_len - len(result_df)
+                            
+                        except Exception as e:
+                            st.warning(f"⚠️ لم يتم استبعاد الأصناف. تأكد من صحة ملف الاستبعادات: {e}")
+
+                    # عرض رسالة النجاح مع توضيح عدد المستبعدات
+                    if excluded_count > 0:
+                        st.success(f"✅ تم التحديث بنجاح! تم تجهيز {len(result_df):,} صنف وتم استبعاد {excluded_count:,} صنف.")
+                    else:
+                        st.success(f"✅ تم التحديث بنجاح! عدد الأصناف المحدثة والمعدلة: {len(result_df):,}")
+                        
                     st.dataframe(result_df.head(20), use_container_width=True)
                     
                     # 🧠 بناء المصنف سحابياً ببنية الصفين المتطابقة مع منصة سلة
@@ -107,7 +140,6 @@ def show():
                         cell.border = border_thin
                         
                     # 📊 [الصف الثالث فصاعداً]: صب البيانات وتحديث العروض (نعم / لا)
-                    # بناء قائمة بأرقام الأعمدة التي تمثل "العرض في فرع" للتحكم בה
                     offer_columns = [i + 1 for i, val in enumerate(headers_row2) if str(val).startswith("العرض في")]
                     col_13_offer_idx = headers_row2.index("العرض في فرع تبوك صيدلية بلسم العلا 13 القادسية") + 1
                     col_7_offer_idx = headers_row2.index("العرض في فرع العلا - صيدلية بلسم العلا 7") + 1
@@ -115,14 +147,13 @@ def show():
                     for r_idx, row_values in enumerate(result_df.values, start=3):
                         for c_idx, val in enumerate(row_values, start=1):
                             
-                            # 💡 التعديل: إذا كان العمود الحالي هو عمود "عرض"، نقوم بتغيير قيمته
+                            # التعامل مع أعمدة العرض (نعم/لا)
                             if c_idx in offer_columns:
                                 if c_idx == col_13_offer_idx or c_idx == col_7_offer_idx:
                                     val = "لا"
                                 else:
                                     val = "نعم"
                             else:
-                                # بالنسبة للأعمدة العادية
                                 if isinstance(val, (np.integer, np.floating)):
                                     val = val.item()
                                 elif pd.isna(val):
