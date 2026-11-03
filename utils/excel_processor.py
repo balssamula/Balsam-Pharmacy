@@ -351,9 +351,11 @@ def update_balances(abc_file, salla_file):
         df_salla = pd.read_excel(salla_file, header=1)
         
         def get_abc_col(branch_num): return pd.to_numeric(df_abc.iloc[:, branch_num + 1], errors='coerce').fillna(0)
-        item_key = df_abc.iloc[:, 0]
         
-        # 💡 التعديل هنا: استخدام np.ceil() بدلاً من np.floor() للجبر للأعلى
+        # 💡 التعديل الأول: توحيد نوع بيانات SKU في ملف ABC (تحويل إلى نص صريح وإزالة أي فواصل عشرية)
+        item_key = df_abc.iloc[:, 0].astype(str).str.replace('.0', '', regex=False).str.strip()
+        
+        # استخدام np.ceil() للجبر للأعلى
         tabuk_calc = np.ceil(((get_abc_col(8) + get_abc_col(10) + get_abc_col(11) + get_abc_col(12) + get_abc_col(14) + get_abc_col(15) + get_abc_col(16) + get_abc_col(17)) / 2) + get_abc_col(13))
         f9_calc = np.ceil(((get_abc_col(1) + get_abc_col(3)) / 2) + get_abc_col(9))
         
@@ -367,8 +369,12 @@ def update_balances(abc_file, salla_file):
         salla_id_col = 3
         col_mapping = {5: 'tabuk', 7: 'f8', 9: 'f9', 11: 'f11', 13: 'f15', 15: 'f16', 17: 'f10', 21: 'f12', 23: 'f14', 25: 'f1', 27: 'f2', 29: 'f3', 31: 'f4', 33: 'f5', 35: 'f6', 37: 'f7', 39: 'f17'}
         
+        # 💡 التعديل الثاني: توحيد نوع بيانات SKU في ملف سلة (تحويل إلى نص صريح) قبل المطابقة
+        salla_skus = df_updated.iloc[:, salla_id_col].astype(str).str.replace('.0', '', regex=False).str.strip()
+        
         for col_idx, map_name in col_mapping.items(): 
-            df_updated.iloc[:, col_idx] = df_updated.iloc[:, salla_id_col].map(maps[map_name]).fillna(0).astype(int)
+            # استخدام salla_skus بدلاً من استدعاء العمود الأصلي مباشرة
+            df_updated.iloc[:, col_idx] = salla_skus.map(maps[map_name]).fillna(0).astype(int)
             
         cols_to_check = list(col_mapping.keys())
         old_data = df_salla.iloc[:, cols_to_check].apply(pd.to_numeric, errors='coerce').fillna(0).astype(int)
