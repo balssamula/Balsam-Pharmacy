@@ -343,9 +343,19 @@ def process_excel(uploaded_file, username):
 
     return results, upload_batch_id
 
-def update_balances(abc_file, salla_file):
+def update_balances(abc_file, salla_file, warehouse_bonus_rate=0.0, require_warehouse=False):
     try:
         df_abc = pd.read_excel(abc_file, skiprows=4)
+        
+        if require_warehouse:
+            if len(df_abc.columns) <= 19 or str(df_abc.columns[19]).strip().casefold() != "balsam alula warehouse":
+                return None, "ملف المستودع غير مطابق: يجب أن يكون العمود T بعنوان Balsam Alula Warehouse."
+        try:
+            warehouse_bonus_rate = float(warehouse_bonus_rate or 0.0)
+        except (TypeError, ValueError):
+            return None, "نسبة إضافة المستودع غير صالحة."
+        if warehouse_bonus_rate < 0:
+            return None, "نسبة إضافة المستودع لا يمكن أن تكون سالبة."
         
         # إجبار بايثون على قراءة الصف الثاني كعناوين حقيقية لتفادي التداخل والنصوص
         df_salla = pd.read_excel(salla_file, header=1)
@@ -356,7 +366,9 @@ def update_balances(abc_file, salla_file):
         item_key = df_abc.iloc[:, 0].astype(str).str.replace('.0', '', regex=False).str.strip()
         
         # استخدام np.ceil() للجبر للأعلى
-        tabuk_calc = np.ceil(((get_abc_col(8) + get_abc_col(10) + get_abc_col(11) + get_abc_col(12) + get_abc_col(14) + get_abc_col(15) + get_abc_col(16) + get_abc_col(17)) / 2) + get_abc_col(13))
+        tabuk_base = ((get_abc_col(8) + get_abc_col(10) + get_abc_col(11) + get_abc_col(12) + get_abc_col(14) + get_abc_col(15) + get_abc_col(16) + get_abc_col(17)) / 2) + get_abc_col(13)
+        warehouse_qty = get_abc_col(18) if warehouse_bonus_rate else 0
+        tabuk_calc = np.ceil(tabuk_base + (warehouse_qty * warehouse_bonus_rate))
         f9_calc = np.ceil(((get_abc_col(1) + get_abc_col(3)) / 2) + get_abc_col(9))
         
         def create_map(values): return dict(zip(item_key, values.astype(int)))
