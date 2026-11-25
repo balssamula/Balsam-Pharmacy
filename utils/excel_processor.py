@@ -372,7 +372,7 @@ def update_balances(abc_file, salla_file, warehouse_bonus_rate=0.0, require_ware
         if require_warehouse and not normalized_warehouse_skus:
             return None, "ارفع ملف SKU للمنتجات المستهدفة لتحديد الأصناف التي تشمل كمية المستودع."
 
-        # معادلة العمود F الأساسية، مع حصة المستودع للـSKU المحددة فقط.
+        # معادلة F السابقة للـSKU غير المحددة، وPharmacy 13 + حصة المستودع للـSKU المحددة.
         tabuk_base = ((get_abc_col(8) + get_abc_col(10) + get_abc_col(11) + get_abc_col(12) + get_abc_col(14) + get_abc_col(15) + get_abc_col(16) + get_abc_col(17)) / 2) + get_abc_col(13)
         selected_warehouse_products = item_key.isin(normalized_warehouse_skus)
         if require_warehouse and not selected_warehouse_products.any():
@@ -380,7 +380,13 @@ def update_balances(abc_file, salla_file, warehouse_bonus_rate=0.0, require_ware
         warehouse_bonus = get_abc_col(18) * warehouse_bonus_rate if warehouse_bonus_rate else pd.Series(0, index=df_abc.index)
         if require_warehouse:
             warehouse_bonus = warehouse_bonus.where(selected_warehouse_products, 0)
-        tabuk_calc = np.ceil(tabuk_base + warehouse_bonus)
+            tabuk_calc = np.ceil(np.where(
+                selected_warehouse_products,
+                get_abc_col(13) + warehouse_bonus,
+                tabuk_base,
+            ))
+        else:
+            tabuk_calc = np.ceil(tabuk_base)
         f9_calc = np.ceil(((get_abc_col(1) + get_abc_col(3)) / 2) + get_abc_col(9))
         
         def create_map(values): return dict(zip(item_key, values.astype(int)))
