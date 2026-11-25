@@ -37,12 +37,18 @@ def show():
 
     with balance_tabs[1]:
         st.info(
-            "ارفع ملف ABC الذي يحتوي على عمود المستودع في T. "
-            "للكمية في العمود F (تبوك القادسية وباقي المدن) تُطبّق المعادلة الأساسية "
-            "مع إضافة 25% من رصيد المستودع، ثم يُقرّب الناتج للأعلى. "
-            "تبقى معادلات بقية الفروع كما هي."
+            "ارفع ملف ABC الذي يحتوي على عمود المستودع في T، وارفع ملف SKU للمنتجات المستهدفة. "
+            "تُضاف 25% من رصيد T إلى المعادلة الأساسية في العمود F (تبوك القادسية وباقي المدن) "
+            "لهذه المنتجات فقط، ثم يُقرّب الناتج للأعلى. جميع المنتجات الأخرى وبقية الفروع تبقى على المعادلات الأساسية."
         )
-        col1, col2, col3 = st.columns(3)
+        st.download_button(
+            "📥 تنزيل نموذج قائمة المنتجات المستهدفة",
+            data=_warehouse_sku_template(),
+            file_name="Warehouse_Bonus_Products.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="warehouse_sku_template",
+        )
+        col1, col2, col3, col4 = st.columns([1.1, 1.1, 1, 1])
         with col1:
             abc_file_wh = st.file_uploader(
                 "🏬 رفع ملف ABC شامل رصيد المستودع (العمود T)",
@@ -50,20 +56,104 @@ def show():
                 help="يتحقق النظام من أن عنوان العمود T هو Balsam Alula Warehouse."
             )
         with col2:
-            salla_file_wh = st.file_uploader("📋 رفع ملف Salla", type=["xlsx"], key="salla_balances_warehouse")
+            warehouse_products_file = st.file_uploader(
+                "📦 رفع منتجات تشمل كمية المستودع",
+                type=["xlsx", "csv"], key="warehouse_bonus_products",
+                help="ملف Excel أو CSV يحتوي على SKU المنتجات المستهدفة في العمود الأول. ستُطبق زيادة المستودع على هذه المنتجات فقط."
+            )
         with col3:
+            salla_file_wh = st.file_uploader("📋 رفع ملف Salla", type=["xlsx"], key="salla_balances_warehouse")
+        with col4:
             exclude_file_wh = st.file_uploader(
                 "🚫 رفع ملف الاستبعادات (اختياري)", type=["xlsx"], key="exclude_balances_warehouse",
                 help="ملف يحتوي على أرقام SKU المطلوب استبعادها من التحديث."
             )
-        _render_balance_update(abc_file_wh, salla_file_wh, exclude_file_wh, mode_key="warehouse", include_warehouse=True)
+        _render_balance_update(
+            abc_file_wh, salla_file_wh, exclude_file_wh, mode_key="warehouse",
+            include_warehouse=True, warehouse_products_file=warehouse_products_file
+        )
 
 
-def _render_balance_update(abc_file, salla_file, exclude_file, mode_key, include_warehouse=False):
-    if abc_file and salla_file:
-        if st.button("🔄 تنفيذ تحديث الأرصدة", use_container_width=True, key=f"update_balances_{mode_key}"):
-            with st.spinner("جاري تحديث الأرصدة وبناء الترويسات الثنائية..."):
-                result_df, result = update_balances(abc_file, salla_file, warehouse_bonus_rate=0.25 if include_warehouse else 0.0, require_warehouse=include_warehouse)
+def _warehouse_sku_template():
+    frame = pd.DataFrame(columns=["SKU"])
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        frame.to_excel(writer, index=False, sheet_name="Warehouse Products")
+    return output.getvalue()
+
+
+def _normalize_balance_sku(value):
+    if value is None or pd.isna(value):
+        return ""
+    text = str(value).strip()
+    return text[:-2] if text.endswith(".0") else text
+
+
+def _render_balance_update(
+    abc_file, salla_file, exclude_file, mode_key,
+    include_warehouse=False, warehouse_products_file=None,
+):
+    if include_warehouse and not warehouse_products_file:
+        st.info("ارفع ملف «منتجات تشمل كمية المستودع» لتحديد المنتجات التي ستضاف لها 25% في العمود F.")
+        return
+    if not abc_file or not salla_file:
+        return
+
+    warehouse_skus = None
+    if include_warehouse:
+        try:
+            product_frame = (
+                pd.read_csv(BytesIO(warehouse_products_file.getvalue()))
+                if warehouse_products_file.name.lower().endswith(".csv")
+                else pd.read_excel(BytesIO(warehouse_products_file.getvalue()))
+            )
+            sku_column = product_frame.columns[0]
+            for column in product_frame.columns:
+                label = str(column).strip().lower()
+                if "sku" in label or "رمز" in label or "رقم" in label:
+                    sku_column = column
+                    break
+            warehouse_skus = {
+                _normalize_balance_sku(value)
+                for value in product_frame[sku_column].dropna().tolist()
+                if _normalize_balance_sku(value)
+            }
+            if not warehouse_skus:
+                st.error("لم أجد أرقام SKU في ملف المنتجات. ضع SKU في العمود الأول ثم أعد رفع الملف.")
+                return
+
+            abc_skus_frame = pd.read_excel(
+                BytesIO(abc_file.getvalue()), skiprows=4, usecols=[0]
+            )
+            abc_skus = {
+                _normalize_balance_sku(value)
+                for value in abc_skus_frame.iloc[:, 0].dropna().tolist()
+                if _normalize_balance_sku(value)
+            }
+            matched_skus = warehouse_skus & abc_skus
+            unmatched_skus = warehouse_skus - abc_skus
+            if not matched_skus:
+                st.error("لا يوجد SKU من ملف المنتجات مطابق لملف ABC.")
+                return
+            st.caption(
+                f"منتجات مستهدفة: {len(warehouse_skus):,} · "
+                f"مطابقة في ABC: {len(matched_skus):,} · غير موجودة في ABC: {len(unmatched_skus):,}"
+            )
+            if unmatched_skus:
+                st.warning("لن تُضاف زيادة المستودع للـSKU غير الموجودة في ABC: " + ", ".join(sorted(unmatched_skus)[:8]))
+            warehouse_skus = matched_skus
+        except (ValueError, TypeError, KeyError, OSError, pd.errors.ParserError) as exc:
+            st.error(f"تعذر قراءة ملف المنتجات المستهدفة: {type(exc).__name__}")
+            return
+
+    if st.button("🔄 تنفيذ تحديث الأرصدة", use_container_width=True, key=f"update_balances_{mode_key}"):
+        with st.spinner("جاري تحديث الأرصدة وبناء الترويسات الثنائية..."):
+            result_df, result = update_balances(
+                abc_file, salla_file,
+                warehouse_bonus_rate=0.25 if include_warehouse else 0.0,
+                require_warehouse=include_warehouse,
+                warehouse_skus=warehouse_skus,
+            )
                 if result_df is not None:
                     
                     excluded_count = 0
