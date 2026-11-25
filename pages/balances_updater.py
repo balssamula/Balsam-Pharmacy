@@ -22,18 +22,48 @@ def show():
         unsafe_allow_html=True,
     )
     
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        abc_file = st.file_uploader("📊 رفع ملف ABC (يبدأ من الصف 5)", type=["xlsx"], key="abc_balances")
-    with col2:
-        salla_file = st.file_uploader("📋 رفع ملف Salla", type=["xlsx"], key="salla_balances")
-    with col3:
-        exclude_file = st.file_uploader("🚫 رفع ملف الاستبعادات (اختياري)", type=["xlsx"], key="exclude_balances", help="ملف يحتوي على أرقام SKU المطلوب استبعادها من التحديث")
-    
+    balance_tabs = st.tabs(["📦 كميات الفروع", "🏬 كميات الفروع مع المستودع"])
+
+    with balance_tabs[0]:
+        st.info("تُحسب الكميات بالمعادلات الأساسية الحالية دون إضافة رصيد المستودع.")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            abc_file = st.file_uploader("📊 رفع ملف ABC (يبدأ من الصف 5)", type=["xlsx"], key="abc_balances_base")
+        with col2:
+            salla_file = st.file_uploader("📋 رفع ملف Salla", type=["xlsx"], key="salla_balances_base")
+        with col3:
+            exclude_file = st.file_uploader("🚫 رفع ملف الاستبعادات (اختياري)", type=["xlsx"], key="exclude_balances_base", help="ملف يحتوي على أرقام SKU المطلوب استبعادها من التحديث")
+        _render_balance_update(abc_file, salla_file, exclude_file, mode_key="base")
+
+    with balance_tabs[1]:
+        st.info(
+            "ارفع ملف ABC الذي يحتوي على عمود المستودع في T. "
+            "للكمية في العمود F (تبوك القادسية وباقي المدن) تُطبّق المعادلة الأساسية "
+            "مع إضافة 25% من رصيد المستودع، ثم يُقرّب الناتج للأعلى. "
+            "تبقى معادلات بقية الفروع كما هي."
+        )
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            abc_file_wh = st.file_uploader(
+                "🏬 رفع ملف ABC شامل رصيد المستودع (العمود T)",
+                type=["xlsx"], key="abc_balances_warehouse",
+                help="يتحقق النظام من أن عنوان العمود T هو Balsam Alula Warehouse."
+            )
+        with col2:
+            salla_file_wh = st.file_uploader("📋 رفع ملف Salla", type=["xlsx"], key="salla_balances_warehouse")
+        with col3:
+            exclude_file_wh = st.file_uploader(
+                "🚫 رفع ملف الاستبعادات (اختياري)", type=["xlsx"], key="exclude_balances_warehouse",
+                help="ملف يحتوي على أرقام SKU المطلوب استبعادها من التحديث."
+            )
+        _render_balance_update(abc_file_wh, salla_file_wh, exclude_file_wh, mode_key="warehouse", include_warehouse=True)
+
+
+def _render_balance_update(abc_file, salla_file, exclude_file, mode_key, include_warehouse=False):
     if abc_file and salla_file:
-        if st.button("🔄 تنفيذ تحديث الأرصدة", use_container_width=True):
+        if st.button("🔄 تنفيذ تحديث الأرصدة", use_container_width=True, key=f"update_balances_{mode_key}"):
             with st.spinner("جاري تحديث الأرصدة وبناء الترويسات الثنائية..."):
-                result_df, result = update_balances(abc_file, salla_file)
+                result_df, result = update_balances(abc_file, salla_file, warehouse_bonus_rate=0.25 if include_warehouse else 0.0, require_warehouse=include_warehouse)
                 if result_df is not None:
                     
                     excluded_count = 0
