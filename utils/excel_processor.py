@@ -343,7 +343,7 @@ def process_excel(uploaded_file, username):
 
     return results, upload_batch_id
 
-def update_balances(abc_file, salla_file, warehouse_bonus_rate=0.0, require_warehouse=False):
+def update_balances(abc_file, salla_file, warehouse_bonus_rate=0.0, require_warehouse=False, warehouse_skus=None):
     try:
         df_abc = pd.read_excel(abc_file, skiprows=4)
         
@@ -364,11 +364,23 @@ def update_balances(abc_file, salla_file, warehouse_bonus_rate=0.0, require_ware
         
         # 💡 التعديل الأول: توحيد نوع بيانات SKU في ملف ABC (تحويل إلى نص صريح وإزالة أي فواصل عشرية)
         item_key = df_abc.iloc[:, 0].astype(str).str.replace('.0', '', regex=False).str.strip()
-        
-        # استخدام np.ceil() للجبر للأعلى
+        normalized_warehouse_skus = {
+            re.sub(r"\.0+$", "", str(value).strip())
+            for value in (warehouse_skus or [])
+            if value is not None and pd.notna(value) and str(value).strip()
+        }
+        if require_warehouse and not normalized_warehouse_skus:
+            return None, "ارفع ملف SKU للمنتجات المستهدفة لتحديد الأصناف التي تشمل كمية المستودع."
+
+        # معادلة العمود F الأساسية، مع حصة المستودع للـSKU المحددة فقط.
         tabuk_base = ((get_abc_col(8) + get_abc_col(10) + get_abc_col(11) + get_abc_col(12) + get_abc_col(14) + get_abc_col(15) + get_abc_col(16) + get_abc_col(17)) / 2) + get_abc_col(13)
-        warehouse_qty = get_abc_col(18) if warehouse_bonus_rate else 0
-        tabuk_calc = np.ceil(tabuk_base + (warehouse_qty * warehouse_bonus_rate))
+        selected_warehouse_products = item_key.isin(normalized_warehouse_skus)
+        if require_warehouse and not selected_warehouse_products.any():
+            return None, "لم تتطابق أرقام SKU المرفوعة مع المنتجات في ملف ABC."
+        warehouse_bonus = get_abc_col(18) * warehouse_bonus_rate if warehouse_bonus_rate else pd.Series(0, index=df_abc.index)
+        if require_warehouse:
+            warehouse_bonus = warehouse_bonus.where(selected_warehouse_products, 0)
+        tabuk_calc = np.ceil(tabuk_base + warehouse_bonus)
         f9_calc = np.ceil(((get_abc_col(1) + get_abc_col(3)) / 2) + get_abc_col(9))
         
         def create_map(values): return dict(zip(item_key, values.astype(int)))
